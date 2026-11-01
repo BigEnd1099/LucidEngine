@@ -1,9 +1,49 @@
+# Dependencies
 node_modules/
-build/
+
+# Production and distribution builds
 dist/
-coverage/
-.DS_Store
+build/
+Build/
+out/
+bin/
+
+# C / C++ / MSVC / CMake artifacts
+engine/build/
+*.obj
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.VC.db
+.vs/
+*.vcxproj.user
+CMakeSettings.json
+CMakeUserPresets.json
+
+# Local compiled executables
+engine.exe
+
+# Logs and runtime dumps
 *.log
+crash.log
+err.log
+out.log
+electron.log
+
+# Environment and OS files
 .env*
 !.env.example
-test_*
+.DS_Store
+Thumbs.db
+coverage/
+
+# Test media artifacts (keep test automation scripts .mjs tracked!)
+test_*.jpg
+test_*.png
+test_*.mp4
+
+# Generated AI assets
+public/assets/aistudio/*
+!public/assets/aistudio/.gitignore
