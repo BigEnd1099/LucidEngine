@@ -1,0 +1,41 @@
+{
+  "name": "ai-native-engine-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron-main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "app": "electron .",
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "engine": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue; .\\engine\\build\\Release\\engine.exe\"",
+    "engine:kill": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue\"",
+    "engine:headless": "engine\\build\\Release\\engine.exe --headless",
+    "orchestrator": "node agent_orchestrator.mjs",
+    "test": "node test_all.mjs",
+    "test:engine": "node test_client.mjs && node test_gltf.mjs",
+    "test:mcp": "node test_mcp.mjs"
+  },
+  "dependencies": {
+    "@types/three": "^0.187.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "three": "^0.187.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^45.2.1",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
+  }
+}

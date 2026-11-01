@@ -1,0 +1,6 @@
+{
+  "name": "Lucid Engine",
+  "description": "High-performance C++ Vulkan Native Engine with Jolt Physics and Generative AI Integrations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
