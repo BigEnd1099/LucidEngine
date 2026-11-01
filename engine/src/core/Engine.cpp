@@ -109,6 +109,14 @@ namespace engine::core {
         m_physicsContext = std::make_unique<physics::PhysicsContext>();
         m_physicsContext->init();
         m_physicsSystem = std::make_unique<physics::PhysicsSystem>(m_physicsContext.get());
+        m_chemistrySystem = std::make_unique<physics::ChemistrySystem>();
+        m_destructionSystem = std::make_unique<physics::DestructionSystem>();
+        m_navigationSystem = std::make_unique<ai::NavigationSystem>();
+        m_motionMatching = std::make_unique<anim::MotionMatching>();
+        m_worldPartition = std::make_unique<world::WorldPartition>();
+        m_pcgSystem = std::make_unique<world::PcgSystem>();
+        m_replicationGraph = std::make_unique<network::ReplicationGraph>();
+        m_audioEngine = std::make_unique<audio::SpatialAudioEngine>();
 
         initTestScene();
 
@@ -300,21 +308,64 @@ namespace engine::core {
     }
 
     void Engine::update(float dt) {
+        LUCID_PROFILE_SCOPE("FrameUpdate");
         float clampedDt = std::min(dt, 0.1f);
         m_physicsAccumulator += clampedDt;
 
-        if (m_physicsSystem && m_registry) {
-            while (m_physicsAccumulator >= FIXED_TIMESTEP) {
-                m_physicsSystem->update(m_registry.get(), FIXED_TIMESTEP);
-                m_physicsAccumulator -= FIXED_TIMESTEP;
+        {
+            LUCID_PROFILE_SCOPE("Physics");
+            if (m_physicsSystem && m_registry) {
+                while (m_physicsAccumulator >= FIXED_TIMESTEP) {
+                    m_physicsSystem->update(m_registry.get(), FIXED_TIMESTEP);
+                    m_physicsAccumulator -= FIXED_TIMESTEP;
+                }
             }
         }
 
         auto contacts = m_physicsContext ? m_physicsContext->getAndClearContacts() : std::vector<physics::ContactPoint>{};
         m_lastContacts = contacts;
 
-        if (m_scriptContext && m_registry) {
-            m_scriptContext->tickDirect(m_registry.get(), m_physicsContext.get(), dt, m_inputState, contacts);
+        {
+            LUCID_PROFILE_SCOPE("Chemistry");
+            if (m_chemistrySystem && m_registry) {
+                m_chemistrySystem->update(m_registry.get(), dt, contacts);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("Destruction");
+            if (m_destructionSystem && m_registry && m_physicsContext) {
+                m_destructionSystem->update(m_registry.get(), m_physicsContext.get(), this, dt, contacts);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("NavigationAI");
+            if (m_navigationSystem && m_registry) {
+                m_navigationSystem->update(m_registry.get(), dt);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("MotionIK");
+            if (m_motionMatching && m_registry) {
+                m_motionMatching->update(*m_registry, m_physicsContext.get(), dt);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("WorldStreaming");
+            if (m_worldPartition && m_registry) {
+                m_worldPartition->update(m_registry.get(), m_physicsContext.get(), m_camPos, dt);
+                m_worldPartition->checkAndRebaseOrigin(m_registry.get(), m_physicsContext.get(), m_camPos, 2000.0f);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("Scripts");
+            if (m_scriptContext && m_registry) {
+                m_scriptContext->tickDirect(m_registry.get(), m_physicsContext.get(), dt, m_inputState, contacts);
+            }
         }
 
         // Autonomous Camera Director (Spring Arm / Follow Cam for non-editor modes)
@@ -364,6 +415,24 @@ namespace engine::core {
                 m_camPos = glm::mix(m_camPos, targetCamPos, lag);
                 m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
                 m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("SpatialAudio");
+            if (m_audioEngine && m_registry) {
+                glm::vec3 front;
+                front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
+                front.y = sin(glm::radians(m_camPitch));
+                front.z = sin(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
+                m_audioEngine->update(m_registry.get(), m_camPos, glm::normalize(front), glm::vec3(0.0f), dt);
+            }
+        }
+
+        {
+            LUCID_PROFILE_SCOPE("Netcode");
+            if (m_replicationGraph && m_registry) {
+                m_replicationGraph->recordSnapshot(++m_currentTick, m_registry.get());
             }
         }
     }
@@ -550,6 +619,7 @@ namespace engine::core {
         core::Logger::info("Engine started. Headless: " + std::string(m_headless ? "true" : "false"));
         auto lastTime = std::chrono::high_resolution_clock::now();
         while (m_running) {
+            Profiler::get().beginFrame();
             try {
 #ifdef USE_GLFW
                 if (!m_headless && m_vulkanContext && m_vulkanContext->getWindow()) {
@@ -620,10 +690,12 @@ namespace engine::core {
             } catch (...) {
                 core::Logger::error("Unknown loop exception in Engine::run");
             }
+            Profiler::get().endFrame();
         }
     }
 
     void Engine::render() {
+        LUCID_PROFILE_SCOPE("Render");
         glm::vec3 front;
         front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
         front.y = sin(glm::radians(m_camPitch));
@@ -1933,5 +2005,106 @@ function update(entities, dt, input, contacts) {
             core::Logger::error(std::string("Package Game failed: ") + e.what());
             return false;
         }
+    }
+
+    void Engine::detonateExplosion(const glm::vec3& center, float radius, float force, float damage) {
+        if (m_destructionSystem && m_registry && m_physicsContext) {
+            m_destructionSystem->detonateExplosion(m_registry.get(), m_physicsContext.get(), this, center, radius, force, damage);
+        }
+    }
+
+    void Engine::fractureEntity(uint32_t entityId) {
+        if (m_destructionSystem && m_registry && m_physicsContext) {
+            auto e = static_cast<entt::entity>(entityId);
+            if (m_registry->get().valid(e) && m_registry->get().all_of<ecs::TransformComponent>(e)) {
+                auto& t = m_registry->get().get<ecs::TransformComponent>(e);
+                m_destructionSystem->fractureEntity(m_registry.get(), m_physicsContext.get(), this, entityId, t.position, glm::vec3(0.0f, 6.0f, 0.0f));
+            }
+        }
+    }
+
+    void Engine::igniteEntity(uint32_t entityId, float temp) {
+        if (m_chemistrySystem && m_registry) {
+            m_chemistrySystem->ignite(m_registry.get(), entityId, temp);
+        }
+    }
+
+    void Engine::extinguishEntity(uint32_t entityId) {
+        if (m_chemistrySystem && m_registry) {
+            m_chemistrySystem->extinguish(m_registry.get(), entityId);
+        }
+    }
+
+    void Engine::electrifyEntity(uint32_t entityId, float voltage) {
+        if (m_chemistrySystem && m_registry) {
+            m_chemistrySystem->electrify(m_registry.get(), entityId, voltage);
+        }
+    }
+
+    void Engine::freezeEntity(uint32_t entityId) {
+        if (m_chemistrySystem && m_registry) {
+            m_chemistrySystem->freeze(m_registry.get(), entityId);
+        }
+    }
+
+    std::vector<glm::vec3> Engine::findPath(const glm::vec3& start, const glm::vec3& target) {
+        if (m_navigationSystem) {
+            return m_navigationSystem->findPath(start, target);
+        }
+        return { target };
+    }
+
+    void Engine::generateProceduralWorld(float areaSize, float resolution) {
+        if (m_pcgSystem && m_registry) {
+            m_pcgSystem->generateBiomeTerrain(m_registry.get(), areaSize, resolution);
+            m_pcgSystem->scatterFoliage(m_registry.get(), areaSize, 40);
+            if (m_navigationSystem) {
+                m_navigationSystem->buildFromScene(m_registry.get());
+            }
+        }
+    }
+
+    nlohmann::json Engine::getProfilerStats() {
+        auto stats = Profiler::get().getStatsJson();
+        if (m_registry) {
+            stats["activeEntities"] = m_registry->get().storage<entt::entity>().size();
+        }
+        if (m_worldPartition) {
+            stats["loadedCells"] = m_worldPartition->getLoadedCellCount();
+            stats["totalCells"] = m_worldPartition->getTotalCellCount();
+            auto origin = m_worldPartition->getWorldOriginDouble();
+            stats["worldOrigin64"] = { origin.x, origin.y, origin.z };
+        }
+        return stats;
+    }
+
+    bool Engine::liveReloadScript(const std::string& scriptCode) {
+        core::Logger::info("Live Coding: Hot-reloading script...");
+        m_currentScriptCode = scriptCode;
+        if (m_scriptContext) {
+            return m_scriptContext->evaluate(scriptCode, "live_reload.js");
+        }
+        return false;
+    }
+
+    void Engine::queueSubTickInput(uint32_t buttonMask, float yaw, float pitch) {
+        if (m_replicationGraph) {
+            network::SubTickInput in;
+            in.tick = m_currentTick;
+            in.microsecondTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()
+            ).count();
+            in.buttonMask = buttonMask;
+            in.lookYaw = yaw;
+            in.lookPitch = pitch;
+            m_replicationGraph->queueSubTickInput(in);
+        }
+    }
+
+    nlohmann::json Engine::getReplicationDelta(uint32_t baselineTick) {
+        if (m_replicationGraph) {
+            return m_replicationGraph->generateDeltaJson(m_currentTick, baselineTick);
+        }
+        return nlohmann::json::object();
     }
 }

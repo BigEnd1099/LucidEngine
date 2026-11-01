@@ -4,6 +4,8 @@
 #include <string>
 #include <future>
 #include <chrono>
+#include <memory>
+#include <vector>
 #include "core/ThreadQueue.hpp"
 #include "ecs/Registry.hpp"
 
@@ -19,6 +21,18 @@
 #include "animation/SkeletonStream.hpp"
 #include "physics/PhysicsContext.hpp"
 #include "physics/PhysicsSystem.hpp"
+
+// AAA Subsystems
+#include "core/Profiler.hpp"
+#include "physics/ChemistrySystem.hpp"
+#include "physics/DestructionSystem.hpp"
+#include "ai/NavigationSystem.hpp"
+#include "ai/BehaviorTree.hpp"
+#include "animation/System/MotionMatching.hpp"
+#include "world/WorldPartition.hpp"
+#include "world/PcgSystem.hpp"
+#include "network/Netcode/ReplicationGraph.hpp"
+#include "audio/SpatialAudioEngine.hpp"
 
 namespace engine::core {
     struct EnvironmentSettings {
@@ -100,6 +114,16 @@ namespace engine::core {
         physics::PhysicsContext* getPhysicsContext() { return m_physicsContext.get(); }
         AssetManager* getAssetManager() { return m_assetManager.get(); }
 
+        // AAA Subsystems Accessors
+        physics::ChemistrySystem* getChemistrySystem() { return m_chemistrySystem.get(); }
+        physics::DestructionSystem* getDestructionSystem() { return m_destructionSystem.get(); }
+        ai::NavigationSystem* getNavigationSystem() { return m_navigationSystem.get(); }
+        anim::MotionMatching* getMotionMatching() { return m_motionMatching.get(); }
+        world::WorldPartition* getWorldPartition() { return m_worldPartition.get(); }
+        world::PcgSystem* getPcgSystem() { return m_pcgSystem.get(); }
+        network::ReplicationGraph* getReplicationGraph() { return m_replicationGraph.get(); }
+        audio::SpatialAudioEngine* getAudioEngine() { return m_audioEngine.get(); }
+
         // Camera API (Synchronized between native application & Web studio)
         glm::vec3 getCameraPosition() const { return m_camPos; }
         float getCameraYaw() const { return m_camYaw; }
@@ -162,6 +186,20 @@ namespace engine::core {
         void applyPbrMaterial(uint32_t entityId, const nlohmann::json& args);
         void updateEntityBones(uint32_t entityId, const std::vector<anim::BoneTransformRaw>& bones);
 
+        // AAA High-Level Gameplay & Physics APIs
+        void detonateExplosion(const glm::vec3& center, float radius, float force, float damage);
+        void fractureEntity(uint32_t entityId);
+        void igniteEntity(uint32_t entityId, float temp = 400.0f);
+        void extinguishEntity(uint32_t entityId);
+        void electrifyEntity(uint32_t entityId, float voltage = 100.0f);
+        void freezeEntity(uint32_t entityId);
+        std::vector<glm::vec3> findPath(const glm::vec3& start, const glm::vec3& target);
+        void generateProceduralWorld(float areaSize = 120.0f, float resolution = 4.0f);
+        nlohmann::json getProfilerStats();
+        bool liveReloadScript(const std::string& scriptCode);
+        void queueSubTickInput(uint32_t buttonMask, float yaw, float pitch);
+        nlohmann::json getReplicationDelta(uint32_t baselineTick);
+
     private:
         void update(float dt);
         void render();
@@ -174,6 +212,7 @@ namespace engine::core {
         bool m_hasPreSimulationSnapshot{false};
         float m_physicsAccumulator{0.0f};
         static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
+        uint32_t m_currentTick{0};
 
         std::atomic<int> m_score{0};
         std::atomic<int> m_health{100};
@@ -203,6 +242,16 @@ namespace engine::core {
         
         std::unique_ptr<physics::PhysicsContext> m_physicsContext;
         std::unique_ptr<physics::PhysicsSystem> m_physicsSystem;
+
+        // AAA Subsystems
+        std::unique_ptr<physics::ChemistrySystem> m_chemistrySystem;
+        std::unique_ptr<physics::DestructionSystem> m_destructionSystem;
+        std::unique_ptr<ai::NavigationSystem> m_navigationSystem;
+        std::unique_ptr<anim::MotionMatching> m_motionMatching;
+        std::unique_ptr<world::WorldPartition> m_worldPartition;
+        std::unique_ptr<world::PcgSystem> m_pcgSystem;
+        std::unique_ptr<network::ReplicationGraph> m_replicationGraph;
+        std::unique_ptr<audio::SpatialAudioEngine> m_audioEngine;
 
         std::unique_ptr<renderer::VulkanContext> m_vulkanContext;
         std::unique_ptr<renderer::VulkanRenderer> m_renderer;

@@ -259,6 +259,130 @@ namespace engine::script {
         return JS_NewString(ctx, st.c_str());
     }
 
+    static JSValue js_detonateExplosion(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 4) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            double x = 0, y = 0, z = 0, radius = 5.0, force = 50.0, damage = 100.0;
+            JS_ToFloat64(ctx, &x, argv[0]);
+            JS_ToFloat64(ctx, &y, argv[1]);
+            JS_ToFloat64(ctx, &z, argv[2]);
+            if (argc >= 4) JS_ToFloat64(ctx, &radius, argv[3]);
+            if (argc >= 5) JS_ToFloat64(ctx, &force, argv[4]);
+            if (argc >= 6) JS_ToFloat64(ctx, &damage, argv[5]);
+            engine->detonateExplosion(glm::vec3(x, y, z), static_cast<float>(radius), static_cast<float>(force), static_cast<float>(damage));
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_fractureEntity(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            uint32_t id = 0;
+            if (JS_ToUint32(ctx, &id, argv[0]) == 0) {
+                engine->fractureEntity(id);
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_ignite(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            uint32_t id = 0;
+            double temp = 400.0;
+            if (JS_ToUint32(ctx, &id, argv[0]) == 0) {
+                if (argc >= 2) JS_ToFloat64(ctx, &temp, argv[1]);
+                engine->igniteEntity(id, static_cast<float>(temp));
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_extinguish(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            uint32_t id = 0;
+            if (JS_ToUint32(ctx, &id, argv[0]) == 0) {
+                engine->extinguishEntity(id);
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_electrify(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            uint32_t id = 0;
+            double v = 100.0;
+            if (JS_ToUint32(ctx, &id, argv[0]) == 0) {
+                if (argc >= 2) JS_ToFloat64(ctx, &v, argv[1]);
+                engine->electrifyEntity(id, static_cast<float>(v));
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_freeze(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            uint32_t id = 0;
+            if (JS_ToUint32(ctx, &id, argv[0]) == 0) {
+                engine->freezeEntity(id);
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_findPath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 6) return JS_NewArray(ctx);
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (!engine) return JS_NewArray(ctx);
+
+        double sx = 0, sy = 0, sz = 0, tx = 0, ty = 0, tz = 0;
+        JS_ToFloat64(ctx, &sx, argv[0]);
+        JS_ToFloat64(ctx, &sy, argv[1]);
+        JS_ToFloat64(ctx, &sz, argv[2]);
+        JS_ToFloat64(ctx, &tx, argv[3]);
+        JS_ToFloat64(ctx, &ty, argv[4]);
+        JS_ToFloat64(ctx, &tz, argv[5]);
+
+        auto waypoints = engine->findPath(glm::vec3(sx, sy, sz), glm::vec3(tx, ty, tz));
+        JSValue arr = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < waypoints.size(); ++i) {
+            JSValue p = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, p, "x", JS_NewFloat64(ctx, waypoints[i].x));
+            JS_SetPropertyStr(ctx, p, "y", JS_NewFloat64(ctx, waypoints[i].y));
+            JS_SetPropertyStr(ctx, p, "z", JS_NewFloat64(ctx, waypoints[i].z));
+            JS_SetPropertyUint32(ctx, arr, i, p);
+        }
+        return arr;
+    }
+
+    static JSValue js_generateProceduralWorld(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            double areaSize = 120.0, resolution = 4.0;
+            if (argc >= 1) JS_ToFloat64(ctx, &areaSize, argv[0]);
+            if (argc >= 2) JS_ToFloat64(ctx, &resolution, argv[1]);
+            engine->generateProceduralWorld(static_cast<float>(areaSize), static_cast<float>(resolution));
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_getProfilerStats(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (!engine) return JS_NewObject(ctx);
+        std::string s = engine->getProfilerStats().dump();
+        JSValue val = JS_ParseJSON(ctx, s.c_str(), s.length(), "<profilerStats>");
+        return JS_IsException(val) ? JS_NewObject(ctx) : val;
+    }
+
     void QuickJSContext::bindEngineAPI(JSContext* ctx, core::Engine* engineInstance) {
         JS_SetContextOpaque(ctx, engineInstance);
         JSValue global_obj = JS_GetGlobalObject(ctx);
@@ -280,6 +404,15 @@ namespace engine::script {
         JS_SetPropertyStr(ctx, engine_obj, "shakeCamera", JS_NewCFunction(ctx, js_shakeCamera, "shakeCamera", 2));
         JS_SetPropertyStr(ctx, engine_obj, "setGameState", JS_NewCFunction(ctx, js_setGameState, "setGameState", 1));
         JS_SetPropertyStr(ctx, engine_obj, "getGameState", JS_NewCFunction(ctx, js_getGameState, "getGameState", 0));
+        JS_SetPropertyStr(ctx, engine_obj, "detonateExplosion", JS_NewCFunction(ctx, js_detonateExplosion, "detonateExplosion", 6));
+        JS_SetPropertyStr(ctx, engine_obj, "fractureEntity", JS_NewCFunction(ctx, js_fractureEntity, "fractureEntity", 1));
+        JS_SetPropertyStr(ctx, engine_obj, "ignite", JS_NewCFunction(ctx, js_ignite, "ignite", 2));
+        JS_SetPropertyStr(ctx, engine_obj, "extinguish", JS_NewCFunction(ctx, js_extinguish, "extinguish", 1));
+        JS_SetPropertyStr(ctx, engine_obj, "electrify", JS_NewCFunction(ctx, js_electrify, "electrify", 2));
+        JS_SetPropertyStr(ctx, engine_obj, "freeze", JS_NewCFunction(ctx, js_freeze, "freeze", 1));
+        JS_SetPropertyStr(ctx, engine_obj, "findPath", JS_NewCFunction(ctx, js_findPath, "findPath", 6));
+        JS_SetPropertyStr(ctx, engine_obj, "generateProceduralWorld", JS_NewCFunction(ctx, js_generateProceduralWorld, "generateProceduralWorld", 2));
+        JS_SetPropertyStr(ctx, engine_obj, "getProfilerStats", JS_NewCFunction(ctx, js_getProfilerStats, "getProfilerStats", 0));
 
         JS_SetPropertyStr(ctx, global_obj, "engine", engine_obj);
         JS_FreeValue(ctx, global_obj);

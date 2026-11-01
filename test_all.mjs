@@ -93,12 +93,16 @@ console.log('\n[10/11] Testowanie skalowania UI oraz dynamicznej rozdzielczości
 const { runResolutionScalingTest } = await import('./test_resolution_scaling.mjs');
 await runResolutionScalingTest();
 
-console.log('\n[11/11] Testowanie przywracania obiektów na miejsce po zmianie sceny (Stop & Re-spawn)...');
+console.log('\n[11/12] Testowanie przywracania obiektów na miejsce po zmianie sceny (Stop & Re-spawn)...');
 import('./test_scene_change_stop.mjs');
 await new Promise(r => setTimeout(r, 3000));
 
+console.log('\n[12/12] Testowanie korony technologii AAA (Profiler, Zelda TotK Chemia, Voronoi Destrukcja, A* NavMesh, PCG, 64-bit World Partition, Sub-Tick Netcode, Hot-Reload)...');
+const { runAaaFeaturesTest } = await import('./test_aaa_features.mjs');
+await runAaaFeaturesTest(engine);
+
 console.log('\n========================================================');
-console.log('🎉 WSZYSTKIE TESTY ZAKOŃCZONE SUKCESEM (0 BŁĘDÓW)');
+console.log('🎉 WSZYSTKIE 12 PAKIETÓW TESTÓW ZAKOŃCZONE SUKCESEM (0 BŁĘDÓW)');
 console.log('========================================================');
 
 engine.kill();

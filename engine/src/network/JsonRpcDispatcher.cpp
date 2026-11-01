@@ -551,6 +551,165 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.getProfilerStats") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json stats = eng->getProfilerStats();
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", stats}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.detonateExplosion") {
+                float x = 0, y = 0, z = 0, radius = 5.0f, force = 50.0f, damage = 100.0f;
+                if (json.contains("params") && json["params"].is_object()) {
+                    auto& p = json["params"];
+                    if (p.contains("x")) x = p["x"].get<float>();
+                    if (p.contains("y")) y = p["y"].get<float>();
+                    if (p.contains("z")) z = p["z"].get<float>();
+                    if (p.contains("radius")) radius = p["radius"].get<float>();
+                    if (p.contains("force")) force = p["force"].get<float>();
+                    if (p.contains("damage")) damage = p["damage"].get<float>();
+                }
+                queue.push([x, y, z, radius, force, damage, client, id](core::Engine* eng) {
+                    eng->detonateExplosion(glm::vec3(x, y, z), radius, force, damage);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.fractureEntity") {
+                uint32_t entId = 0;
+                if (json.contains("params")) {
+                    if (json["params"].is_number()) entId = json["params"].get<uint32_t>();
+                    else if (json["params"].is_object() && json["params"].contains("id")) entId = json["params"]["id"].get<uint32_t>();
+                }
+                queue.push([entId, client, id](core::Engine* eng) {
+                    eng->fractureEntity(entId);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.igniteEntity") {
+                uint32_t entId = 0;
+                float temp = 400.0f;
+                if (json.contains("params") && json["params"].is_object()) {
+                    if (json["params"].contains("id")) entId = json["params"]["id"].get<uint32_t>();
+                    if (json["params"].contains("temperature")) temp = json["params"]["temperature"].get<float>();
+                }
+                queue.push([entId, temp, client, id](core::Engine* eng) {
+                    eng->igniteEntity(entId, temp);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.extinguishEntity") {
+                uint32_t entId = 0;
+                if (json.contains("params") && json["params"].is_object() && json["params"].contains("id")) {
+                    entId = json["params"]["id"].get<uint32_t>();
+                }
+                queue.push([entId, client, id](core::Engine* eng) {
+                    eng->extinguishEntity(entId);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.electrifyEntity") {
+                uint32_t entId = 0;
+                float voltage = 100.0f;
+                if (json.contains("params") && json["params"].is_object()) {
+                    if (json["params"].contains("id")) entId = json["params"]["id"].get<uint32_t>();
+                    if (json["params"].contains("voltage")) voltage = json["params"]["voltage"].get<float>();
+                }
+                queue.push([entId, voltage, client, id](core::Engine* eng) {
+                    eng->electrifyEntity(entId, voltage);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.freezeEntity") {
+                uint32_t entId = 0;
+                if (json.contains("params") && json["params"].is_object() && json["params"].contains("id")) {
+                    entId = json["params"]["id"].get<uint32_t>();
+                }
+                queue.push([entId, client, id](core::Engine* eng) {
+                    eng->freezeEntity(entId);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.findPath") {
+                glm::vec3 start(0.0f), target(0.0f);
+                if (json.contains("params") && json["params"].is_object()) {
+                    auto& p = json["params"];
+                    if (p.contains("start") && p["start"].is_array() && p["start"].size() >= 3) {
+                        start = glm::vec3(p["start"][0], p["start"][1], p["start"][2]);
+                    }
+                    if (p.contains("target") && p["target"].is_array() && p["target"].size() >= 3) {
+                        target = glm::vec3(p["target"][0], p["target"][1], p["target"][2]);
+                    }
+                }
+                queue.push([start, target, client, id](core::Engine* eng) {
+                    auto waypoints = eng->findPath(start, target);
+                    nlohmann::json wpArr = nlohmann::json::array();
+                    for (const auto& w : waypoints) {
+                        wpArr.push_back({w.x, w.y, w.z});
+                    }
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", wpArr}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.generateProceduralWorld") {
+                float areaSize = 120.0f;
+                float resolution = 4.0f;
+                if (json.contains("params") && json["params"].is_object()) {
+                    if (json["params"].contains("areaSize")) areaSize = json["params"]["areaSize"].get<float>();
+                    if (json["params"].contains("resolution")) resolution = json["params"]["resolution"].get<float>();
+                }
+                queue.push([areaSize, resolution, client, id](core::Engine* eng) {
+                    eng->generateProceduralWorld(areaSize, resolution);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.liveReloadScript") {
+                std::string code;
+                if (json.contains("params")) {
+                    if (json["params"].is_string()) code = json["params"].get<std::string>();
+                    else if (json["params"].is_object() && json["params"].contains("code")) code = json["params"]["code"].get<std::string>();
+                }
+                queue.push([code, client, id](core::Engine* eng) {
+                    bool ok = eng->liveReloadScript(code);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", ok} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.queueSubTickInput") {
+                uint32_t mask = 0;
+                float yaw = 0.0f, pitch = 0.0f;
+                if (json.contains("params") && json["params"].is_object()) {
+                    if (json["params"].contains("buttonMask")) mask = json["params"]["buttonMask"].get<uint32_t>();
+                    if (json["params"].contains("yaw")) yaw = json["params"]["yaw"].get<float>();
+                    if (json["params"].contains("pitch")) pitch = json["params"]["pitch"].get<float>();
+                }
+                queue.push([mask, yaw, pitch, client, id](core::Engine* eng) {
+                    eng->queueSubTickInput(mask, yaw, pitch);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", true} };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getReplicationDelta") {
+                uint32_t baseTick = 0;
+                if (json.contains("params") && json["params"].is_object() && json["params"].contains("baseTick")) {
+                    baseTick = json["params"]["baseTick"].get<uint32_t>();
+                }
+                queue.push([baseTick, client, id](core::Engine* eng) {
+                    nlohmann::json delta = eng->getReplicationDelta(baseTick);
+                    nlohmann::json res = { {"jsonrpc", "2.0"}, {"id", id}, {"result", delta} };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.shakeCamera") {
                 float intensity = 0.5f;
                 float duration = 0.3f;
