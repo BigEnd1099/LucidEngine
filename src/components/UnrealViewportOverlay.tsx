@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Move, RotateCw, Scaling, Globe, Magnet,
-  Camera, ChevronDown, Check
+  Camera, ChevronDown, Check, Monitor, Sliders
 } from 'lucide-react';
 
 interface UnrealViewportOverlayProps {
@@ -15,6 +15,12 @@ interface UnrealViewportOverlayProps {
   setSnapStep: (v: number) => void;
   viewMode: 'three' | 'vulkan';
   setViewMode: (v: 'three' | 'vulkan') => void;
+  resolutionScale?: number;
+  setResolutionScale?: (scale: number) => void;
+  renderResolution?: { width: number; height: number };
+  setRenderResolution?: (res: { width: number; height: number }) => void;
+  uiScale?: number;
+  setUiScale?: (scale: number) => void;
 }
 
 export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
@@ -28,9 +34,17 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
   setSnapStep,
   viewMode,
   setViewMode,
+  resolutionScale = 1.0,
+  setResolutionScale,
+  renderResolution = { width: 1920, height: 1080 },
+  setRenderResolution,
+  uiScale = 1.0,
+  setUiScale,
 }) => {
   const [showSnapMenu, setShowSnapMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
+  const [showResMenu, setShowResMenu] = useState(false);
+  const [showUiScaleMenu, setShowUiScaleMenu] = useState(false);
   const [cameraSpeed, setCameraSpeed] = useState(4);
   const [showCameraSpeedMenu, setShowCameraSpeedMenu] = useState(false);
 
@@ -210,6 +224,129 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
                 <span>Vulkan (GPU)</span>
                 {viewMode === 'vulkan' && <Check className="w-3 h-3 text-emerald-400" />}
               </button>
+            </div>
+          )}
+        </div>
+
+        <div className="h-4 w-px bg-white/10" />
+
+        {/* Resolution Scaling Dropdown (Screen Percentage) */}
+        <div className="relative">
+          <button
+            onClick={() => setShowResMenu(!showResMenu)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-emerald-400 hover:bg-white/5 text-[10px] font-medium"
+            title="Screen Percentage / Render Resolution Scaling"
+          >
+            <Monitor className="w-3 h-3 text-emerald-400" />
+            <span>{Math.round(resolutionScale * 100)}% ({renderResolution.width}x{renderResolution.height})</span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
+          </button>
+
+          {showResMenu && (
+            <div
+              className="absolute top-full right-0 mt-1 w-56 bg-[#14141e] border border-white/15 rounded-md shadow-2xl p-2 z-50 text-[10px] font-sans"
+              onMouseLeave={() => setShowResMenu(false)}
+            >
+              <div className="text-[10px] font-mono uppercase text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>Screen Percentage</span>
+                <span className="text-emerald-400 font-bold">{Math.round(resolutionScale * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="2.0"
+                step="0.05"
+                value={resolutionScale}
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  setResolutionScale?.(val);
+                }}
+                className="w-full accent-emerald-400 mb-2 cursor-pointer"
+              />
+              <div className="h-px bg-white/10 my-1" />
+              <div className="text-[9px] uppercase font-mono text-slate-500 mb-1">Resolution Presets</div>
+              {[
+                { label: '50% (Performance - 960x540)', scale: 0.5, w: 960, h: 540 },
+                { label: '67% (FSR Balanced - 1280x720)', scale: 0.67, w: 1280, h: 720 },
+                { label: '75% (FSR Quality - 1440x810)', scale: 0.75, w: 1440, h: 810 },
+                { label: '100% (Native Full HD - 1920x1080)', scale: 1.0, w: 1920, h: 1080 },
+                { label: '133% (2K QHD - 2560x1440)', scale: 1.33, w: 2560, h: 1440 },
+                { label: '200% (4K Ultra HD - 3840x2160)', scale: 2.0, w: 3840, h: 2160 },
+              ].map(item => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    setResolutionScale?.(item.scale);
+                    setRenderResolution?.({ width: item.w, height: item.h });
+                    setShowResMenu(false);
+                  }}
+                  className="w-full px-2 py-1 text-left hover:bg-emerald-500/20 text-slate-300 hover:text-white rounded flex items-center justify-between"
+                >
+                  <span>{item.label}</span>
+                  {Math.abs(resolutionScale - item.scale) < 0.03 && <Check className="w-3 h-3 text-emerald-400" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="h-4 w-px bg-white/10" />
+
+        {/* UI Scale Dropdown */}
+        <div className="relative">
+          <button
+            onClick={() => setShowUiScaleMenu(!showUiScaleMenu)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-cyan-300 hover:bg-white/5 text-[10px] font-medium"
+            title="User Interface Scaling"
+          >
+            <Sliders className="w-3 h-3 text-cyan-400" />
+            <span>UI: {Math.round(uiScale * 100)}%</span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
+          </button>
+
+          {showUiScaleMenu && (
+            <div
+              className="absolute top-full right-0 mt-1 w-44 bg-[#14141e] border border-white/15 rounded-md shadow-2xl p-2 z-50 text-[10px] font-sans"
+              onMouseLeave={() => setShowUiScaleMenu(false)}
+            >
+              <div className="text-[10px] font-mono uppercase text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>UI Scale</span>
+                <span className="text-cyan-400 font-bold">{Math.round(uiScale * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.75"
+                max="1.75"
+                step="0.05"
+                value={uiScale}
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  setUiScale?.(val);
+                }}
+                className="w-full accent-cyan-400 mb-2 cursor-pointer"
+              />
+              <div className="h-px bg-white/10 my-1" />
+              <div className="text-[9px] uppercase font-mono text-slate-500 mb-1">DPI Presets</div>
+              {[
+                { label: '80% (Compact)', scale: 0.8 },
+                { label: '90% (Dense)', scale: 0.9 },
+                { label: '100% (Standard)', scale: 1.0 },
+                { label: '110% (Comfortable)', scale: 1.1 },
+                { label: '125% (1440p Medium)', scale: 1.25 },
+                { label: '150% (4K Large)', scale: 1.5 },
+              ].map(item => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    setUiScale?.(item.scale);
+                    setShowUiScaleMenu(false);
+                  }}
+                  className="w-full px-2 py-1 text-left hover:bg-cyan-500/20 text-slate-300 hover:text-white rounded flex items-center justify-between"
+                >
+                  <span>{item.label}</span>
+                  {Math.abs(uiScale - item.scale) < 0.03 && <Check className="w-3 h-3 text-cyan-400" />}
+                </button>
+              ))}
             </div>
           )}
         </div>

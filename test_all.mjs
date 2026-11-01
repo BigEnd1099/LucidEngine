@@ -85,9 +85,17 @@ console.log('\n[8/9] Testowanie przycisku STOP (przywracanie migawki edycyjnej b
 import('./test_stop_restore.mjs');
 await new Promise(r => setTimeout(r, 2000));
 
-console.log('\n[9/9] Testowanie kompilacji i pakowania pełnej gry PC (.exe + Vulkan 1.3 + Jolt)...');
+console.log('\n[9/10] Testowanie kompilacji i pakowania pełnej gry PC (.exe + Vulkan 1.3 + Jolt)...');
 import('./test_package_game.mjs');
 await new Promise(r => setTimeout(r, 2000));
+
+console.log('\n[10/11] Testowanie skalowania UI oraz dynamicznej rozdzielczości renderowania (Vulkan 1.3)...');
+const { runResolutionScalingTest } = await import('./test_resolution_scaling.mjs');
+await runResolutionScalingTest();
+
+console.log('\n[11/11] Testowanie przywracania obiektów na miejsce po zmianie sceny (Stop & Re-spawn)...');
+import('./test_scene_change_stop.mjs');
+await new Promise(r => setTimeout(r, 3000));
 
 console.log('\n========================================================');
 console.log('🎉 WSZYSTKIE TESTY ZAKOŃCZONE SUKCESEM (0 BŁĘDÓW)');

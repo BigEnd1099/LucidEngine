@@ -33,23 +33,26 @@ async function runTest() {
     // 1. Reset to empty scene
     await rpc('engine.resetScene', { preset: 'empty' });
     
-    // 2. Spawn a custom user entity at Y = 15.0
+    // 2. Spawn a custom user entity at Y = 15.0 with initial rotation (rx: 30, ry: 45, rz: 60)
     const spawnRes = await rpc('engine.spawnEntity', {
         tag: 'UserCustomActor',
-        transform: { x: 2.5, y: 15.0, z: -1.0, sx: 1, sy: 1, sz: 1 },
+        transform: { x: 2.5, y: 15.0, z: -1.0, rx: 30.0, ry: 45.0, rz: 60.0, sx: 1, sy: 1, sz: 1 },
         velocity: { vx: 0, vy: 0, vz: 0 },
         mesh: { meshId: 2 },
         rigidBody: { mass: 1.0, shapeType: 0 }
     });
     const entId = spawnRes.entityId;
-    console.log(`1. Spawned UserCustomActor with ID ${entId} at Y = 15.0`);
+    console.log(`1. Spawned UserCustomActor with ID ${entId} at Y = 15.0, Rotation = [30, 45, 60]`);
 
-    // Verify initial pos
+    // Verify initial pos & rot
     let snap = await rpc('engine.getSnapshot');
     let actor = snap.find(e => e.id === entId);
-    console.log(`Initial Y: ${actor.transform.y}`);
+    console.log(`Initial Y: ${actor.transform.y}, Rot: [${actor.transform.rx}, ${actor.transform.ry}, ${actor.transform.rz}]`);
     if (Math.abs(actor.transform.y - 15.0) > 0.01) {
         throw new Error('Initial position did not match 15.0!');
+    }
+    if (Math.abs(actor.transform.rx - 30.0) > 0.1 || Math.abs(actor.transform.ry - 45.0) > 0.1 || Math.abs(actor.transform.rz - 60.0) > 0.1) {
+        throw new Error('Initial rotation did not match [30, 45, 60]!');
     }
 
     // 3. Start simulation (Play)
@@ -71,11 +74,14 @@ async function runTest() {
     await rpc('engine.stopSimulation');
     snap = await rpc('engine.getSnapshot');
     actor = snap.find(e => e.id === entId);
-    console.log(`Restored edit pose Y: ${actor.transform.y} (Linear Velocity Y: ${actor.velocity.vy})`);
+    console.log(`Restored edit pose Y: ${actor.transform.y}, Rot: [${actor.transform.rx.toFixed(2)}, ${actor.transform.ry.toFixed(2)}, ${actor.transform.rz.toFixed(2)}] (Velocity Y: ${actor.velocity.vy})`);
 
-    // Verify it restored to 15.0 and did NOT reset to breakout or wipe the actor!
+    // Verify it restored to 15.0 AND rotation restored to [30, 45, 60]!
     if (Math.abs(actor.transform.y - 15.0) > 0.01) {
         throw new Error(`Stop failed to restore original Y=15.0! Got: ${actor.transform.y}`);
+    }
+    if (Math.abs(actor.transform.rx - 30.0) > 0.5 || Math.abs(actor.transform.ry - 45.0) > 0.5 || Math.abs(actor.transform.rz - 60.0) > 0.5) {
+        throw new Error(`Stop failed to restore original rotation [30, 45, 60]! Got: [${actor.transform.rx}, ${actor.transform.ry}, ${actor.transform.rz}]`);
     }
     if (Math.abs(actor.velocity.vy) > 0.001) {
         throw new Error(`Stop failed to zero velocity! Got: ${actor.velocity.vy}`);
@@ -84,7 +90,7 @@ async function runTest() {
         throw new Error('Stop wiped level and reset to breakout!');
     }
 
-    console.log('✅ TEST PASSED: STOP restored pre-simulation snapshot cleanly without resetting scene!');
+    console.log('✅ TEST PASSED: STOP restored pre-simulation snapshot (Position & Rotation) cleanly without resetting scene!');
     ws.close();
 }
 

@@ -25,6 +25,7 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Math/Quat.h>
+#include <unordered_set>
 
 namespace engine::core {
 
@@ -57,6 +58,39 @@ namespace engine::core {
             }
         }
         return out;
+    }
+
+    static glm::vec4 parseColorJson(const nlohmann::json& j, const glm::vec4& fallback = glm::vec4(1.0f)) {
+        if (j.is_string()) {
+            std::string s = j.get<std::string>();
+            if (!s.empty() && s[0] == '#') s = s.substr(1);
+            if (s.length() == 6 || s.length() == 8) {
+                try {
+                    uint32_t val = std::stoul(s, nullptr, 16);
+                    if (s.length() == 6) {
+                        float r = ((val >> 16) & 0xFF) / 255.0f;
+                        float g = ((val >> 8) & 0xFF) / 255.0f;
+                        float b = (val & 0xFF) / 255.0f;
+                        return glm::vec4(r, g, b, 1.0f);
+                    } else {
+                        float r = ((val >> 24) & 0xFF) / 255.0f;
+                        float g = ((val >> 16) & 0xFF) / 255.0f;
+                        float b = ((val >> 8) & 0xFF) / 255.0f;
+                        float a = (val & 0xFF) / 255.0f;
+                        return glm::vec4(r, g, b, a);
+                    }
+                } catch (...) {}
+            }
+        } else if (j.is_array() && j.size() >= 3) {
+            float r = j[0].get<float>();
+            float g = j[1].get<float>();
+            float b = j[2].get<float>();
+            float a = j.size() >= 4 ? j[3].get<float>() : 1.0f;
+            return glm::vec4(r, g, b, a);
+        } else if (j.is_object() && j.contains("r") && j.contains("g") && j.contains("b")) {
+            return glm::vec4(j.value("r", 1.0f), j.value("g", 1.0f), j.value("b", 1.0f), j.value("a", 1.0f));
+        }
+        return fallback;
     }
 
     Engine::Engine(int wsPort, bool headless) : m_headless(headless) {
@@ -143,6 +177,17 @@ namespace engine::core {
 
     void Engine::playSimulation() {
         if (m_paused) {
+            // Ensure orientation is synchronized from rotation before capturing snapshot
+            if (m_registry) {
+                auto view = m_registry->get().view<ecs::TransformComponent>();
+                for (auto entity : view) {
+                    auto& t = view.get<ecs::TransformComponent>(entity);
+                    if (glm::dot(t.orientation, t.orientation) < 0.001f) {
+                        t.orientation = glm::quat(glm::radians(t.rotation));
+                    }
+                }
+            }
+
             // 1. Capture full scene snapshot for non-destructive restore on STOP
             m_preSimulationSnapshot = getSnapshotJson();
             m_hasPreSimulationSnapshot = true;
@@ -204,13 +249,7 @@ namespace engine::core {
                     if (!bid.IsInvalid()) {
                         bi.SetLinearVelocity(bid, JPH::Vec3::sZero());
                         bi.SetAngularVelocity(bid, JPH::Vec3::sZero());
-                        JPH::Quat joltRot = (glm::dot(t.orientation, t.orientation) > 0.001f)
-                            ? JPH::Quat(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w)
-                            : JPH::Quat::sEulerAngles(JPH::Vec3(
-                                glm::radians(t.rotation.x),
-                                glm::radians(t.rotation.y),
-                                glm::radians(t.rotation.z)
-                            ));
+                        JPH::Quat joltRot(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w);
                         bi.SetPositionAndRotation(
                             bid,
                             JPH::RVec3(t.position.x, t.position.y, t.position.z),
@@ -226,7 +265,7 @@ namespace engine::core {
         m_health.store(100);
         m_gameStatus = "PLAYING";
         broadcastSimulationState();
-        core::Logger::info("Simulation STOPPED: Scene restored to pre-simulation edit pose (no reset).");
+        core::Logger::info("Simulation STOPPED: Scene restored to pre-simulation edit pose (position & rotation).");
     }
 
     void Engine::setPaused(bool paused) {
@@ -240,6 +279,24 @@ namespace engine::core {
 
     void Engine::togglePause() {
         setPaused(!m_paused);
+    }
+
+    void Engine::syncEntityTransformPhysics(entt::entity entity) {
+        if (m_physicsContext && m_registry && m_registry->get().valid(entity) &&
+            m_registry->get().all_of<ecs::TransformComponent, ecs::RigidBodyComponent>(entity)) {
+            auto& t = m_registry->get().get<ecs::TransformComponent>(entity);
+            auto& rb = m_registry->get().get<ecs::RigidBodyComponent>(entity);
+            if (rb.bodyId != 0xFFFFFFFF) {
+                JPH::BodyID bId(rb.bodyId);
+                JPH::RVec3 jPos(t.position.x, t.position.y, t.position.z);
+                JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
+                    glm::radians(t.rotation.x),
+                    glm::radians(t.rotation.y),
+                    glm::radians(t.rotation.z)
+                ));
+                m_physicsContext->getBodyInterface().SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::Activate);
+            }
+        }
     }
 
     void Engine::update(float dt) {
@@ -259,6 +316,56 @@ namespace engine::core {
         if (m_scriptContext && m_registry) {
             m_scriptContext->tickDirect(m_registry.get(), m_physicsContext.get(), dt, m_inputState, contacts);
         }
+
+        // Autonomous Camera Director (Spring Arm / Follow Cam for non-editor modes)
+        if (m_cameraMode != "editor" && m_registry) {
+            glm::vec3 playerPos(0.0f);
+            bool foundPlayer = false;
+            float armLength = 12.0f;
+            float socketY = 3.5f;
+
+            auto tagView = m_registry->get().view<ecs::TagComponent, ecs::TransformComponent>();
+            for (auto entity : tagView) {
+                const auto& tag = tagView.get<ecs::TagComponent>(entity);
+                if (tag.name == "Player" || tag.name == "Paddle" || tag.name == "PlayerShip" || tag.name == "PlayerCar") {
+                    playerPos = tagView.get<ecs::TransformComponent>(entity).position;
+                    foundPlayer = true;
+                    if (m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                        const auto& boom = m_registry->get().get<ecs::CameraBoomComponent>(entity);
+                        armLength = boom.targetArmLength;
+                        socketY = boom.socketOffsetY;
+                    }
+                    break;
+                }
+            }
+
+            if (foundPlayer) {
+                glm::vec3 targetCamPos = m_camPos;
+                float targetYaw = m_camYaw;
+                float targetPitch = m_camPitch;
+
+                if (m_cameraMode == "thirdPerson") {
+                    targetCamPos = playerPos + glm::vec3(0.0f, socketY, armLength);
+                    targetYaw = -90.0f;
+                    targetPitch = -18.0f;
+                } else if (m_cameraMode == "topDown") {
+                    targetCamPos = playerPos + glm::vec3(0.0f, 24.0f, 6.0f);
+                    targetYaw = -90.0f;
+                    targetPitch = -72.0f;
+                } else if (m_cameraMode == "sideScroller") {
+                    targetCamPos = playerPos + glm::vec3(0.0f, 2.0f, 18.0f);
+                    targetYaw = -90.0f;
+                    targetPitch = 0.0f;
+                } else if (m_cameraMode == "firstPerson") {
+                    targetCamPos = playerPos + glm::vec3(0.0f, 1.7f, 0.0f);
+                }
+
+                float lag = glm::clamp(dt * 8.0f, 0.0f, 1.0f);
+                m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
+                m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
+            }
+        }
     }
 
     void Engine::applySnapshotJson(const std::string& jsonStr) {
@@ -271,10 +378,17 @@ namespace engine::core {
             }
             if (!ents.is_array()) return;
 
+            std::unordered_set<uint32_t> validRestoredIds;
+
             for (const auto& entJson : ents) {
                 if (!entJson.contains("id")) continue;
                 auto entity = static_cast<entt::entity>(entJson["id"].get<uint32_t>());
-                if (!m_registry->get().valid(entity)) continue;
+                if (!m_registry->get().valid(entity)) {
+                    uint32_t newId = spawnEntityFromJson(entJson);
+                    validRestoredIds.insert(newId);
+                    continue;
+                }
+                validRestoredIds.insert(static_cast<uint32_t>(entity));
 
                 if (entJson.contains("tag") && entJson["tag"].is_string()) {
                     m_registry->get().get_or_emplace<ecs::TagComponent>(entity).name = entJson["tag"].get<std::string>();
@@ -295,17 +409,28 @@ namespace engine::core {
                     if (transJson.contains("sy")) t.scale.y = transJson["sy"];
                     if (transJson.contains("sz")) t.scale.z = transJson["sz"];
 
+                    // Restore exact quaternion orientation
+                    if (transJson.contains("qw") && transJson.contains("qx") && transJson.contains("qy") && transJson.contains("qz")) {
+                        t.orientation = glm::quat(
+                            transJson["qw"].get<float>(),
+                            transJson["qx"].get<float>(),
+                            transJson["qy"].get<float>(),
+                            transJson["qz"].get<float>()
+                        );
+                        rotChanged = true;
+                    } else if (rotChanged) {
+                        t.orientation = glm::quat(glm::radians(t.rotation));
+                    }
+
                     if ((posChanged || rotChanged) && m_physicsContext && m_registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
                         auto& rb = m_registry->get().get<ecs::RigidBodyComponent>(entity);
                         if (rb.bodyId != 0xFFFFFFFF) {
                             JPH::BodyID bId(rb.bodyId);
                             JPH::RVec3 jPos(t.position.x, t.position.y, t.position.z);
-                            JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
-                                glm::radians(t.rotation.x),
-                                glm::radians(t.rotation.y),
-                                glm::radians(t.rotation.z)
-                            ));
-                            m_physicsContext->getBodyInterface().SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::Activate);
+                            JPH::Quat jRot(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w);
+                            m_physicsContext->getBodyInterface().SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::DontActivate);
+                            m_physicsContext->getBodyInterface().SetLinearVelocity(bId, JPH::Vec3::sZero());
+                            m_physicsContext->getBodyInterface().SetAngularVelocity(bId, JPH::Vec3::sZero());
                         }
                     }
                 }
@@ -343,6 +468,80 @@ namespace engine::core {
                         m_physicsContext->getBodyInterface().AddImpulse(bId, JPH::Vec3(ix, iy, iz));
                     }
                 }
+
+                if (entJson.contains("material")) {
+                    auto& mat = m_registry->get().get_or_emplace<ecs::MaterialComponent>(entity);
+                    const auto& mJson = entJson["material"];
+                    if (mJson.contains("color")) mat.baseColor = parseColorJson(mJson["color"], mat.baseColor);
+                    if (mJson.contains("metallic")) mat.metallic = mJson["metallic"].get<float>();
+                    if (mJson.contains("roughness")) mat.roughness = mJson["roughness"].get<float>();
+                    if (mJson.contains("emissive")) mat.emissive = glm::vec3(parseColorJson(mJson["emissive"], glm::vec4(0.0f)));
+                    if (mJson.contains("emissiveIntensity")) mat.emissiveIntensity = mJson["emissiveIntensity"].get<float>();
+                } else if (entJson.contains("color")) {
+                    auto& mat = m_registry->get().get_or_emplace<ecs::MaterialComponent>(entity);
+                    mat.baseColor = parseColorJson(entJson["color"], mat.baseColor);
+                }
+
+                if (entJson.contains("light")) {
+                    auto& lc = m_registry->get().get_or_emplace<ecs::LightComponent>(entity);
+                    const auto& lJson = entJson["light"];
+                    if (lJson.contains("type")) lc.type = lJson["type"].get<std::string>();
+                    if (lJson.contains("color")) lc.color = glm::vec3(parseColorJson(lJson["color"], glm::vec4(lc.color, 1.0f)));
+                    if (lJson.contains("intensity")) lc.intensity = lJson["intensity"].get<float>();
+                    if (lJson.contains("range")) lc.range = lJson["range"].get<float>();
+                }
+
+                if (entJson.contains("audio")) {
+                    auto& ac = m_registry->get().get_or_emplace<ecs::AudioComponent>(entity);
+                    const auto& aJson = entJson["audio"];
+                    if (aJson.contains("soundAssetId")) ac.soundAssetId = aJson["soundAssetId"].get<std::string>();
+                    if (aJson.contains("volume")) ac.volume = aJson["volume"].get<float>();
+                    if (aJson.contains("pitch")) ac.pitch = aJson["pitch"].get<float>();
+                    if (aJson.contains("is3D")) ac.is3D = aJson["is3D"].get<bool>();
+                    if (aJson.contains("loop")) ac.loop = aJson["loop"].get<bool>();
+                    if (aJson.contains("autoPlay")) ac.autoPlay = aJson["autoPlay"].get<bool>();
+                }
+
+                if (entJson.contains("movement")) {
+                    auto& mc = m_registry->get().get_or_emplace<ecs::CharacterMovementComponent>(entity);
+                    const auto& mvJson = entJson["movement"];
+                    if (mvJson.contains("maxWalkSpeed")) mc.maxWalkSpeed = mvJson["maxWalkSpeed"].get<float>();
+                    if (mvJson.contains("jumpZVelocity")) mc.jumpZVelocity = mvJson["jumpZVelocity"].get<float>();
+                    if (mvJson.contains("gravityScale")) mc.gravityScale = mvJson["gravityScale"].get<float>();
+                    if (mvJson.contains("airControl")) mc.airControl = mvJson["airControl"].get<float>();
+                }
+
+                if (entJson.contains("cameraBoom")) {
+                    auto& bc = m_registry->get().get_or_emplace<ecs::CameraBoomComponent>(entity);
+                    const auto& bJson = entJson["cameraBoom"];
+                    if (bJson.contains("targetArmLength")) bc.targetArmLength = bJson["targetArmLength"].get<float>();
+                    if (bJson.contains("socketOffsetY")) bc.socketOffsetY = bJson["socketOffsetY"].get<float>();
+                    if (bJson.contains("cameraLag")) bc.cameraLag = bJson["cameraLag"].get<bool>();
+                    if (bJson.contains("lagSpeed")) bc.lagSpeed = bJson["lagSpeed"].get<float>();
+                }
+
+                if (entJson.contains("particles") || entJson.contains("particleEmitter")) {
+                    auto& pc = m_registry->get().get_or_emplace<ecs::ParticleEmitterComponent>(entity);
+                    const auto& pJson = entJson.contains("particles") ? entJson["particles"] : entJson["particleEmitter"];
+                    if (pJson.contains("type")) pc.type = pJson["type"].get<std::string>();
+                    if (pJson.contains("color")) pc.color = glm::vec3(parseColorJson(pJson["color"], glm::vec4(pc.color, 1.0f)));
+                    if (pJson.contains("count")) pc.count = pJson["count"].get<uint32_t>();
+                    if (pJson.contains("speed")) pc.speed = pJson["speed"].get<float>();
+                    if (pJson.contains("size")) pc.size = pJson["size"].get<float>();
+                }
+            }
+
+            // Clean up any dynamic entities spawned during simulation that weren't in the snapshot
+            auto allEntsView = m_registry->get().view<ecs::TransformComponent>();
+            std::vector<entt::entity> extraEntities;
+            for (auto entity : allEntsView) {
+                uint32_t id = static_cast<uint32_t>(entity);
+                if (validRestoredIds.find(id) == validRestoredIds.end()) {
+                    extraEntities.push_back(entity);
+                }
+            }
+            for (auto e : extraEntities) {
+                destroyEntity(static_cast<uint32_t>(e));
             }
         } catch (...) {}
     }
@@ -362,55 +561,11 @@ namespace engine::core {
                     }
                     auto now = std::chrono::high_resolution_clock::now();
                     float dt = std::chrono::duration<float>(now - lastTime).count();
-                    bool imguiWantsInput = (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard);
-                    if (m_paused) {
-                        if (!imguiWantsInput) {
-                            float speed = 20.0f * dt;
-                            glm::vec3 front;
-                            front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
-                            front.y = sin(glm::radians(m_camPitch));
-                            front.z = sin(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
-                            front = glm::normalize(front);
-                            glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0,1,0)));
-                            glm::vec3 up = glm::normalize(glm::cross(right, front));
-
-                            static double s_lastMouseX = 0.0;
-                            static double s_lastMouseY = 0.0;
-                            static bool s_firstMouse = true;
-                            double curMouseX, curMouseY;
-                            glfwGetCursorPos(win, &curMouseX, &curMouseY);
-                            if (s_firstMouse) {
-                                s_lastMouseX = curMouseX;
-                                s_lastMouseY = curMouseY;
-                                s_firstMouse = false;
-                            }
-                            if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-                                float dx = static_cast<float>(curMouseX - s_lastMouseX);
-                                float dy = static_cast<float>(curMouseY - s_lastMouseY);
-                                m_camYaw += dx * 0.15f;
-                                m_camPitch -= dy * 0.15f;
-                            }
-                            s_lastMouseX = curMouseX;
-                            s_lastMouseY = curMouseY;
-
-                            if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) m_camPos += front * speed;
-                            if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) m_camPos -= front * speed;
-                            if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) m_camPos -= right * speed;
-                            if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) m_camPos += right * speed;
-                            if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) m_camPos += up * speed;
-                            if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) m_camPos -= up * speed;
-                            
-                            if (glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS) m_camYaw -= 90.0f * dt;
-                            if (glfwGetKey(win, GLFW_KEY_RIGHT) == GLFW_PRESS) m_camYaw += 90.0f * dt;
-                            if (glfwGetKey(win, GLFW_KEY_UP) == GLFW_PRESS) m_camPitch += 90.0f * dt;
-                            if (glfwGetKey(win, GLFW_KEY_DOWN) == GLFW_PRESS) m_camPitch -= 90.0f * dt;
-                            if (m_camPitch > 89.0f) m_camPitch = 89.0f;
-                            if (m_camPitch < -89.0f) m_camPitch = -89.0f;
-                        }
-                    } else {
+                    bool imguiWantsTextInput = (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantTextInput);
+                    if (!m_paused) {
                         // Native Gameplay Controls in GLFW Desktop Window
                         nlohmann::json keys = nlohmann::json::object();
-                        if (!imguiWantsInput) {
+                        if (!imguiWantsTextInput) {
                             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS) {
                                 keys["KeyA"] = true;
                                 keys["ArrowLeft"] = true;
@@ -555,31 +710,77 @@ namespace engine::core {
         if (components.contains("material")) {
             ecs::MaterialComponent mat;
             const auto& matJson = components["material"];
-            if (matJson.contains("color") && matJson["color"].is_array() && matJson["color"].size() >= 3) {
-                mat.baseColor.r = matJson["color"][0].get<float>();
-                mat.baseColor.g = matJson["color"][1].get<float>();
-                mat.baseColor.b = matJson["color"][2].get<float>();
-                mat.baseColor.a = matJson["color"].size() >= 4 ? matJson["color"][3].get<float>() : 1.0f;
-            } else if (matJson.contains("r")) {
-                mat.baseColor.r = matJson.value("r", 1.0f);
-                mat.baseColor.g = matJson.value("g", 1.0f);
-                mat.baseColor.b = matJson.value("b", 1.0f);
-                mat.baseColor.a = matJson.value("a", 1.0f);
+            if (matJson.contains("color")) {
+                mat.baseColor = parseColorJson(matJson["color"], glm::vec4(1.0f));
             }
             mat.metallic = matJson.value("metallic", 0.1f);
             mat.roughness = matJson.value("roughness", 0.5f);
+            if (matJson.contains("emissive")) {
+                mat.emissive = glm::vec3(parseColorJson(matJson["emissive"], glm::vec4(0.0f)));
+            }
+            mat.emissiveIntensity = matJson.value("emissiveIntensity", 0.0f);
             m_registry->get().emplace<ecs::MaterialComponent>(entity, mat);
         } else if (components.contains("color")) {
             ecs::MaterialComponent mat;
-            const auto& col = components["color"];
-            if (col.is_array() && col.size() >= 3) {
-                float r = col[0].get<float>();
-                float g = col[1].get<float>();
-                float b = col[2].get<float>();
-                float a = col.size() >= 4 ? col[3].get<float>() : 1.0f;
-                mat.baseColor = glm::vec4(r, g, b, a);
-            }
+            mat.baseColor = parseColorJson(components["color"], glm::vec4(1.0f));
             m_registry->get().emplace<ecs::MaterialComponent>(entity, mat);
+        }
+
+        if (components.contains("light")) {
+            ecs::LightComponent light;
+            const auto& lJson = components["light"];
+            light.type = lJson.value("type", "point");
+            if (lJson.contains("color")) {
+                light.color = glm::vec3(parseColorJson(lJson["color"], glm::vec4(1.0f)));
+            }
+            light.intensity = lJson.value("intensity", 1.0f);
+            light.range = lJson.value("range", 15.0f);
+            m_registry->get().emplace<ecs::LightComponent>(entity, light);
+        }
+
+        if (components.contains("audio")) {
+            ecs::AudioComponent audio;
+            const auto& aJson = components["audio"];
+            audio.soundAssetId = aJson.value("soundAssetId", "");
+            audio.volume = aJson.value("volume", 1.0f);
+            audio.pitch = aJson.value("pitch", 1.0f);
+            audio.is3D = aJson.value("is3D", true);
+            audio.loop = aJson.value("loop", false);
+            audio.autoPlay = aJson.value("autoPlay", false);
+            m_registry->get().emplace<ecs::AudioComponent>(entity, audio);
+        }
+
+        if (components.contains("movement")) {
+            ecs::CharacterMovementComponent mv;
+            const auto& mJson = components["movement"];
+            mv.maxWalkSpeed = mJson.value("maxWalkSpeed", 8.0f);
+            mv.jumpZVelocity = mJson.value("jumpZVelocity", 12.0f);
+            mv.gravityScale = mJson.value("gravityScale", 1.0f);
+            mv.airControl = mJson.value("airControl", 0.3f);
+            m_registry->get().emplace<ecs::CharacterMovementComponent>(entity, mv);
+        }
+
+        if (components.contains("cameraBoom")) {
+            ecs::CameraBoomComponent boom;
+            const auto& bJson = components["cameraBoom"];
+            boom.targetArmLength = bJson.value("targetArmLength", 10.0f);
+            boom.socketOffsetY = bJson.value("socketOffsetY", 3.0f);
+            boom.cameraLag = bJson.value("cameraLag", true);
+            boom.lagSpeed = bJson.value("lagSpeed", 10.0f);
+            m_registry->get().emplace<ecs::CameraBoomComponent>(entity, boom);
+        }
+
+        if (components.contains("particles") || components.contains("particleEmitter")) {
+            ecs::ParticleEmitterComponent pe;
+            const auto& pJson = components.contains("particles") ? components["particles"] : components["particleEmitter"];
+            pe.type = pJson.value("type", "fire");
+            if (pJson.contains("color")) {
+                pe.color = glm::vec3(parseColorJson(pJson["color"], glm::vec4(1.0f, 0.4f, 0.0f, 1.0f)));
+            }
+            pe.count = pJson.value("count", 200);
+            pe.speed = pJson.value("speed", 3.0f);
+            pe.size = pJson.value("size", 0.4f);
+            m_registry->get().emplace<ecs::ParticleEmitterComponent>(entity, pe);
         }
 
         return static_cast<uint32_t>(entity);
@@ -609,6 +810,12 @@ namespace engine::core {
     }
 
     void Engine::resetScene(const std::string& preset) {
+        // Force simulation into paused edit mode and clear accumulator
+        m_paused = true;
+        m_physicsAccumulator = 0.0f;
+        setSelectedEntity(entt::null);
+        broadcastSimulationState();
+
         auto view = m_registry->get().view<ecs::TransformComponent>();
         std::vector<entt::entity> toDelete;
         for (auto entity : view) {
@@ -816,6 +1023,21 @@ namespace engine::core {
         m_health.store(100);
         m_gameStatus = "PLAYING";
         loadScript(getDefaultScript(preset));
+
+        // Ensure orientations are normalized and synchronized for all newly spawned actors
+        if (m_registry) {
+            auto tView = m_registry->get().view<ecs::TransformComponent>();
+            for (auto entity : tView) {
+                auto& t = tView.get<ecs::TransformComponent>(entity);
+                if (glm::dot(t.orientation, t.orientation) < 0.001f) {
+                    t.orientation = glm::quat(glm::radians(t.rotation));
+                }
+            }
+        }
+
+        // Secure initial baseline edit snapshot for newly changed scene
+        m_preSimulationSnapshot = getSnapshotJson();
+        m_hasPreSimulationSnapshot = true;
     }
 
     std::string Engine::getDefaultScript(const std::string& preset) {
@@ -1028,8 +1250,60 @@ function update(entities, dt, input, contacts) {
                 entJson["material"] = {
                     {"color", { mat.baseColor.r, mat.baseColor.g, mat.baseColor.b, mat.baseColor.a }},
                     {"metallic", mat.metallic},
-                    {"roughness", mat.roughness}
+                    {"roughness", mat.roughness},
+                    {"emissive", { mat.emissive.r, mat.emissive.g, mat.emissive.b }},
+                    {"emissiveIntensity", mat.emissiveIntensity}
                 };
+            }
+            if (m_registry->get().all_of<ecs::LightComponent>(entity)) {
+                const auto& lc = m_registry->get().get<ecs::LightComponent>(entity);
+                entJson["light"] = {
+                    {"type", lc.type},
+                    {"color", {lc.color.r, lc.color.g, lc.color.b}},
+                    {"intensity", lc.intensity},
+                    {"range", lc.range}
+                };
+            }
+            if (m_registry->get().all_of<ecs::AudioComponent>(entity)) {
+                const auto& ac = m_registry->get().get<ecs::AudioComponent>(entity);
+                entJson["audio"] = {
+                    {"soundAssetId", ac.soundAssetId},
+                    {"volume", ac.volume},
+                    {"pitch", ac.pitch},
+                    {"is3D", ac.is3D},
+                    {"loop", ac.loop},
+                    {"autoPlay", ac.autoPlay}
+                };
+            }
+            if (m_registry->get().all_of<ecs::CharacterMovementComponent>(entity)) {
+                const auto& mc = m_registry->get().get<ecs::CharacterMovementComponent>(entity);
+                entJson["movement"] = {
+                    {"maxWalkSpeed", mc.maxWalkSpeed},
+                    {"jumpZVelocity", mc.jumpZVelocity},
+                    {"gravityScale", mc.gravityScale},
+                    {"airControl", mc.airControl}
+                };
+            }
+            if (m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                const auto& bc = m_registry->get().get<ecs::CameraBoomComponent>(entity);
+                entJson["cameraBoom"] = {
+                    {"targetArmLength", bc.targetArmLength},
+                    {"socketOffsetY", bc.socketOffsetY},
+                    {"cameraLag", bc.cameraLag},
+                    {"lagSpeed", bc.lagSpeed}
+                };
+            }
+            if (m_registry->get().all_of<ecs::ParticleEmitterComponent>(entity)) {
+                const auto& pc = m_registry->get().get<ecs::ParticleEmitterComponent>(entity);
+                nlohmann::json pObj = {
+                    {"type", pc.type},
+                    {"color", {pc.color.r, pc.color.g, pc.color.b}},
+                    {"count", pc.count},
+                    {"speed", pc.speed},
+                    {"size", pc.size}
+                };
+                entJson["particles"] = pObj;
+                entJson["particleEmitter"] = pObj;
             }
             snap.push_back(entJson);
         }
@@ -1038,6 +1312,107 @@ function update(entities, dt, input, contacts) {
 
     std::string Engine::getTypeDefinitions() {
         return ecs::TypeExporter::generateTypeScriptDefinitions();
+    }
+
+    void Engine::setEnvironmentFromJson(const nlohmann::json& json) {
+        if (json.contains("gravity")) {
+            m_envSettings.gravity = json["gravity"].get<float>();
+            if (m_physicsContext) {
+                m_physicsContext->getSystem().SetGravity(JPH::Vec3(0.0f, m_envSettings.gravity, 0.0f));
+            }
+        }
+        if (json.contains("ambientColor")) {
+            m_envSettings.ambientColor = glm::vec3(parseColorJson(json["ambientColor"], glm::vec4(0.15f, 0.22f, 0.35f, 1.0f)));
+        }
+        if (json.contains("ambientIntensity")) {
+            m_envSettings.ambientIntensity = json["ambientIntensity"].get<float>();
+        }
+        if (json.contains("sunColor")) {
+            m_envSettings.sunColor = glm::vec3(parseColorJson(json["sunColor"], glm::vec4(1.0f, 0.97f, 0.92f, 1.0f)));
+        }
+        if (json.contains("sunIntensity")) {
+            m_envSettings.sunIntensity = json["sunIntensity"].get<float>();
+        }
+        if (json.contains("sunDirection") && json["sunDirection"].is_array() && json["sunDirection"].size() >= 3) {
+            m_envSettings.sunDirection = glm::vec3(json["sunDirection"][0], json["sunDirection"][1], json["sunDirection"][2]);
+        }
+        if (json.contains("fogEnabled")) {
+            m_envSettings.fogEnabled = json["fogEnabled"].get<bool>();
+        } else if (json.contains("fog")) {
+            m_envSettings.fogEnabled = json["fog"].get<bool>();
+        }
+        if (json.contains("fogColor")) {
+            m_envSettings.fogColor = glm::vec3(parseColorJson(json["fogColor"], glm::vec4(0.06f, 0.07f, 0.09f, 1.0f)));
+        }
+        if (json.contains("fogNear")) {
+            m_envSettings.fogNear = json["fogNear"].get<float>();
+        }
+        if (json.contains("fogFar")) {
+            m_envSettings.fogFar = json["fogFar"].get<float>();
+        }
+        if (json.contains("uiScale")) {
+            setUiScale(json["uiScale"].get<float>());
+        }
+        if (json.contains("resolutionScale")) {
+            setResolutionScale(json["resolutionScale"].get<float>());
+        }
+        if (json.contains("renderResolution") && json["renderResolution"].is_object()) {
+            const auto& rr = json["renderResolution"];
+            if (rr.contains("width") && rr.contains("height")) {
+                setRenderResolution(rr["width"].get<uint32_t>(), rr["height"].get<uint32_t>());
+            }
+        }
+        core::Logger::info("Environment settings updated from Studio.");
+    }
+
+    nlohmann::json Engine::getEnvironmentJson() const {
+        uint32_t rw = 1920, rh = 1080;
+        getRenderResolution(rw, rh);
+        return {
+            {"gravity", m_envSettings.gravity},
+            {"ambientColor", {m_envSettings.ambientColor.r, m_envSettings.ambientColor.g, m_envSettings.ambientColor.b}},
+            {"ambientIntensity", m_envSettings.ambientIntensity},
+            {"sunColor", {m_envSettings.sunColor.r, m_envSettings.sunColor.g, m_envSettings.sunColor.b}},
+            {"sunIntensity", m_envSettings.sunIntensity},
+            {"sunDirection", {m_envSettings.sunDirection.x, m_envSettings.sunDirection.y, m_envSettings.sunDirection.z}},
+            {"fog", m_envSettings.fogEnabled},
+            {"fogEnabled", m_envSettings.fogEnabled},
+            {"fogColor", {m_envSettings.fogColor.r, m_envSettings.fogColor.g, m_envSettings.fogColor.b}},
+            {"fogNear", m_envSettings.fogNear},
+            {"fogFar", m_envSettings.fogFar},
+            {"uiScale", getUiScale()},
+            {"resolutionScale", getResolutionScale()},
+            {"renderResolution", {{"width", rw}, {"height", rh}}}
+        };
+    }
+
+    void Engine::setRenderResolution(uint32_t width, uint32_t height) {
+        if (m_renderer) m_renderer->setRenderResolution(width, height);
+    }
+
+    void Engine::getRenderResolution(uint32_t& width, uint32_t& height) const {
+        if (m_renderer) {
+            width = m_renderer->getWidth();
+            height = m_renderer->getHeight();
+        } else {
+            width = 1920; height = 1080;
+        }
+    }
+
+    void Engine::setResolutionScale(float scale) {
+        if (m_renderer) m_renderer->setResolutionScale(scale);
+    }
+
+    float Engine::getResolutionScale() const {
+        return m_renderer ? m_renderer->getResolutionScale() : 1.0f;
+    }
+
+    void Engine::setUiScale(float scale) {
+        if (m_renderer) m_renderer->setUiScale(scale);
+    }
+
+    float Engine::getUiScale() const {
+        return m_renderer ? m_renderer->getUiScale() : 1.0f;
     }
 
     void Engine::initTestScene() {
@@ -1071,7 +1446,7 @@ function update(entities, dt, input, contacts) {
                 m_registry->get().emplace<ecs::TransformComponent>(entity, glm::vec3(x, y, z));
                 
                 ecs::MeshComponent dynMesh;
-                dynMesh.meshId = 2; // Generic cube
+                dynMesh.meshId = (count % 2 == 0) ? 2 : 3; // 2 = High-grade Cube, 3 = High-grade UV Sphere
                 m_registry->get().emplace<ecs::MeshComponent>(entity, dynMesh);
                 
                 ecs::RigidBodyComponent dynRb;
@@ -1111,7 +1486,7 @@ function update(entities, dt, input, contacts) {
         std::thread([type]() {
             if (type == "hit") {
                 MessageBeep(MB_ICONHAND);
-            } else if (type == "coin" || type == "score") {
+            } else if (type == "coin" || type == "score" || type == "pickup") {
                 MessageBeep(MB_OK);
             } else if (type == "jump") {
                 MessageBeep(MB_ICONASTERISK);
@@ -1119,6 +1494,10 @@ function update(entities, dt, input, contacts) {
                 MessageBeep(MB_ICONQUESTION);
             } else if (type == "gameover") {
                 MessageBeep(MB_ICONEXCLAMATION);
+            } else if (type == "explosion") {
+                MessageBeep(MB_ICONHAND);
+            } else if (type == "victory" || type == "powerup") {
+                MessageBeep(MB_ICONASTERISK);
             } else {
                 MessageBeep(MB_OK);
             }

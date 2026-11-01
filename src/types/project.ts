@@ -121,6 +121,9 @@ export interface ProjectSettings {
   fogColor: string;
   fogNear: number;
   fogFar: number;
+  uiScale?: number;
+  resolutionScale?: number;
+  renderResolution?: { width: number; height: number };
 }
 
 export interface EntityTransform {

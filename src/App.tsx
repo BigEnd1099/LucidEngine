@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
@@ -90,13 +90,46 @@ export default function App() {
   const [viewMode, setViewMode]             = useState<'three' | 'vulkan'>('three');
   const [vulkanFrame, setVulkanFrame]       = useState<string | null>(null);
   const [vulkanFps, setVulkanFps]           = useState(0);
+  const viewModeRef                         = useRef(viewMode);
+  const vulkanFrameRef                      = useRef(vulkanFrame);
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+  useEffect(() => { vulkanFrameRef.current = vulkanFrame; }, [vulkanFrame]);
 
   const [gizmoMode, setGizmoMode]           = useState<'translate' | 'rotate' | 'scale'>('translate');
   const [gizmoSpace, setGizmoSpace]         = useState<'world' | 'local'>('world');
   const [snapEnabled, setSnapEnabled]       = useState(false);
   const [snapStep, setSnapStep]             = useState<number>(0.5);
 
-  // Three.js & Particle Refs
+  // UI & Render Resolution Scaling State
+  const [uiScale, setUiScale]                       = useState<number>(() => project.settings?.uiScale || 1.0);
+  const [resolutionScale, setResolutionScale]       = useState<number>(() => project.settings?.resolutionScale || 1.0);
+  const [renderResolution, setRenderResolution]     = useState<{ width: number; height: number }>(() => project.settings?.renderResolution || { width: 1920, height: 1080 });
+
+  // Automatic UI Scaling based on browser window resolution relative to standard 1080p reference
+  const [windowDims, setWindowDims] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 1920,
+    h: typeof window !== 'undefined' ? window.innerHeight : 1080
+  }));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowDims({ w: window.innerWidth, h: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const autoScale = useMemo(() => {
+    const scale = Math.min(windowDims.w / 1920, windowDims.h / 1080);
+    return Math.max(0.70, Math.min(2.5, scale));
+  }, [windowDims]);
+
+  const effectiveUiScale = useMemo(() => {
+    return Math.round(autoScale * uiScale * 100) / 100;
+  }, [autoScale, uiScale]);
+
+  // Three.js, Vulkan & Particle Refs
+  const viewportWrapperRef  = useRef<HTMLDivElement | null>(null);
   const sceneRef            = useRef<THREE.Scene | null>(null);
   const rendererRef         = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef           = useRef<THREE.PerspectiveCamera | null>(null);
@@ -113,6 +146,7 @@ export default function App() {
   const cameraStateRef   = useRef({ x: 0, y: 15, z: 30, yaw: -90, pitch: -20, fov: 45 });
   const rmbDownRef       = useRef(false);   // Right Mouse Button held
   const mmbDownRef       = useRef(false);   // Middle Mouse Button held
+  const altOrbitDownRef  = useRef(false);   // Alt + Left Mouse Button orbit held
   const lastMouseRef     = useRef({ x: 0, y: 0 });
   const mouseDownPosRef  = useRef({ x: 0, y: 0 });
   const flyKeysRef       = useRef<Record<string, boolean>>({});
@@ -157,7 +191,42 @@ export default function App() {
     setProject(updated);
     ProjectManager.saveProject(updated);
     setAllProjects(ProjectManager.getAllProjects());
-  }, []);
+    if (updated.settings) {
+      sendRpc('engine.setEnvironment', updated.settings).catch(() => {});
+    }
+  }, [sendRpc]);
+
+  // ── UI & Render Resolution Handlers ──────────────────────────────────────
+  const handleSetUiScale = useCallback((scale: number) => {
+    const clamped = Math.round(Math.max(0.7, Math.min(2.0, scale)) * 100) / 100;
+    setUiScale(clamped);
+    persistProject({ ...project, settings: { ...project.settings, uiScale: clamped } });
+    sendRpc('engine.setUiScale', { scale: clamped }).catch(() => {});
+  }, [project, persistProject, sendRpc]);
+
+  const handleSetResolutionScale = useCallback((scale: number) => {
+    const clamped = Math.round(Math.max(0.25, Math.min(2.5, scale)) * 100) / 100;
+    setResolutionScale(clamped);
+    const baseW = 1920, baseH = 1080;
+    const targetW = (Math.round(baseW * clamped) + 1) & ~1;
+    const targetH = (Math.round(baseH * clamped) + 1) & ~1;
+    setRenderResolution({ width: targetW, height: targetH });
+    persistProject({
+      ...project,
+      settings: { ...project.settings, resolutionScale: clamped, renderResolution: { width: targetW, height: targetH } }
+    });
+    sendRpc('engine.setResolutionScale', { scale: clamped }).catch(() => {});
+  }, [project, persistProject, sendRpc]);
+
+  const handleSetRenderResolution = useCallback((res: { width: number; height: number }) => {
+    setRenderResolution(res);
+    persistProject({ ...project, settings: { ...project.settings, renderResolution: res } });
+    sendRpc('engine.setRenderResolution', res).catch(() => {});
+  }, [project, persistProject, sendRpc]);
+
+  useEffect(() => {
+    sendRpc('engine.setCameraMode', { mode: cameraMode }).catch(() => {});
+  }, [cameraMode, sendRpc]);
 
   // ── Undo / Redo History Stack ────────────────────────────────────────────
   const undoStackRef = useRef<EntityData[][]>([]);
@@ -374,8 +443,9 @@ export default function App() {
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(w, h);
+    renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     containerRef.current.innerHTML = '';
@@ -413,7 +483,10 @@ export default function App() {
       if (!obj) return;
       let targetId: number | null = null;
       for (const [id, m] of meshMapRef.current.entries()) {
-        if (m === obj) { targetId = id; break; }
+        if (m === obj || (obj.parent && m === obj.parent)) { targetId = id; break; }
+      }
+      if (targetId === null && obj.userData?.id !== undefined) {
+        targetId = obj.userData.id;
       }
       if (targetId === null) return;
       const newPos = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
@@ -454,12 +527,14 @@ export default function App() {
     const raycaster = new THREE.Raycaster();
     const mouseCoord = new THREE.Vector2();
 
+    const targetDom = dom;
     const onContextMenu = (e: Event) => e.preventDefault();
-    dom.addEventListener('contextmenu', onContextMenu);
+    targetDom.addEventListener('contextmenu', onContextMenu);
 
     const onMouseDown = (e: MouseEvent) => {
       if (isTransformDraggingRef.current) return;
-      if (tc.dragging || tc.axis !== null) return;
+      // Only block Left Mouse Button when user is clicking on a gizmo axis!
+      if (e.button === 0 && (tc.dragging || tc.axis !== null)) return;
 
       mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
       lastMouseRef.current    = { x: e.clientX, y: e.clientY };
@@ -467,8 +542,11 @@ export default function App() {
       if (e.button === 2) {
         rmbDownRef.current = true;
         startFlyLoop();
-      } else if (e.button === 1) {
+      } else if (e.button === 1 || (e.altKey && e.button === 1)) {
         mmbDownRef.current = true;
+        e.preventDefault();
+      } else if (e.altKey && e.button === 0) {
+        altOrbitDownRef.current = true;
         e.preventDefault();
       }
     };
@@ -478,7 +556,7 @@ export default function App() {
       const dy = e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
 
-      if (rmbDownRef.current && !isTransformDraggingRef.current) {
+      if ((rmbDownRef.current || altOrbitDownRef.current) && !isTransformDraggingRef.current) {
         cameraStateRef.current.yaw   += dx * 0.25;
         cameraStateRef.current.pitch  = Math.max(-89, Math.min(89, cameraStateRef.current.pitch - dy * 0.25));
         setCameraRot({ yaw: cameraStateRef.current.yaw, pitch: cameraStateRef.current.pitch });
@@ -502,19 +580,39 @@ export default function App() {
         if (flyRafRef.current) { cancelAnimationFrame(flyRafRef.current); flyRafRef.current = 0; }
       } else if (e.button === 1) {
         mmbDownRef.current = false;
-      } else if (e.button === 0 && !isTransformDraggingRef.current) {
-        const dist = Math.hypot(e.clientX - mouseDownPosRef.current.x, e.clientY - mouseDownPosRef.current.y);
-        if (dist < 4) {
-          const rect = dom.getBoundingClientRect();
-          mouseCoord.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-          mouseCoord.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-          raycaster.setFromCamera(mouseCoord, camera);
-          const meshes = Array.from(meshMapRef.current.values());
-          const hits = raycaster.intersectObjects(meshes);
-          if (hits.length > 0) {
-            const hitMesh = hits[0].object as THREE.Mesh;
-            for (const [id, m] of meshMapRef.current.entries()) {
-              if (m === hitMesh) { setSelectedEntityId(id); break; }
+      } else if (e.button === 0) {
+        altOrbitDownRef.current = false;
+        if (!isTransformDraggingRef.current && !tc.dragging) {
+          const dist = Math.hypot(e.clientX - mouseDownPosRef.current.x, e.clientY - mouseDownPosRef.current.y);
+          if (dist < 8) {
+            const rect = dom.getBoundingClientRect();
+            mouseCoord.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+            mouseCoord.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouseCoord, camera);
+            const meshes = Array.from(meshMapRef.current.values());
+            const hits = raycaster.intersectObjects(meshes, true);
+            if (hits.length > 0) {
+              let hitEntityId: number | null = null;
+              for (const hit of hits) {
+                let cur: THREE.Object3D | null = hit.object;
+                while (cur) {
+                  if (cur.userData?.id !== undefined) {
+                    hitEntityId = cur.userData.id;
+                    break;
+                  }
+                  for (const [id, m] of meshMapRef.current.entries()) {
+                    if (m === cur) { hitEntityId = id; break; }
+                  }
+                  if (hitEntityId !== null) break;
+                  cur = cur.parent;
+                }
+                if (hitEntityId !== null) break;
+              }
+              if (hitEntityId !== null) {
+                setSelectedEntityId(hitEntityId);
+              }
+            } else {
+              setSelectedEntityId(null);
             }
           }
         }
@@ -536,10 +634,10 @@ export default function App() {
       sendCamera();
     };
 
-    dom.addEventListener('mousedown',  onMouseDown);
+    targetDom.addEventListener('mousedown',  onMouseDown as EventListener);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup',   onMouseUp);
-    dom.addEventListener('wheel', onWheel, { passive: false });
+    targetDom.addEventListener('wheel', onWheel as EventListener, { passive: false });
 
     // Render loop with particle updates
     let animId: number;
@@ -629,7 +727,27 @@ export default function App() {
       if (transformControlsRef.current?.object && !transformControlsRef.current.object.parent) {
         transformControlsRef.current.detach();
       }
+
+      const isVulkanStreaming = viewModeRef.current === 'vulkan' && !!vulkanFrameRef.current;
+      if (isVulkanStreaming) {
+        scene.background = null;
+        meshMapRef.current.forEach(m => {
+          m.visible = false;
+        });
+      } else {
+        scene.background = new THREE.Color(0x0a0a14);
+        meshMapRef.current.forEach(m => {
+          m.visible = true;
+        });
+      }
+
       renderer.render(scene, camera);
+
+      if (isVulkanStreaming) {
+        meshMapRef.current.forEach(m => {
+          m.visible = true;
+        });
+      }
     };
     renderLoop();
 
@@ -646,11 +764,11 @@ export default function App() {
     return () => {
       cancelAnimationFrame(animId);
       if (flyRafRef.current) { cancelAnimationFrame(flyRafRef.current); flyRafRef.current = 0; }
-      dom.removeEventListener('contextmenu', onContextMenu);
-      dom.removeEventListener('mousedown', onMouseDown);
+      targetDom.removeEventListener('contextmenu', onContextMenu);
+      targetDom.removeEventListener('mousedown', onMouseDown as EventListener);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
-      dom.removeEventListener('wheel', onWheel);
+      targetDom.removeEventListener('wheel', onWheel as EventListener);
       window.removeEventListener('resize', handleResize);
       tc.dispose();
       renderer.dispose();
@@ -1003,6 +1121,10 @@ export default function App() {
         sendRpc('engine.setPaused', { paused: true }).catch(() => {});
         setSimulating(false);
         sendRpc('engine.getSnapshot').then(snap => setEntities(snap || [])).catch(() => {});
+        sendRpc('engine.setEnvironment', project.settings).catch(() => {});
+        sendRpc('engine.setCameraMode', { mode: cameraModeRef.current }).catch(() => {});
+        if (project.settings?.uiScale) sendRpc('engine.setUiScale', { scale: project.settings.uiScale }).catch(() => {});
+        if (project.settings?.resolutionScale) sendRpc('engine.setResolutionScale', { scale: project.settings.resolutionScale }).catch(() => {});
       };
 
       ws.onmessage = (event) => {
@@ -1151,7 +1273,7 @@ export default function App() {
             isCapturing = false;
           }
         }
-        await new Promise(res => setTimeout(res, 80));
+        await new Promise(res => setTimeout(res, 16));
       }
     };
     poll();
@@ -1218,6 +1340,7 @@ globalThis.update = function(entities, dt, input, contacts) {
         transformControlsRef.current.detach();
       }
       setSelectedEntityId(null);
+      setSimulating(false);
       currentPresetRef.current = preset;
       setGameStatus('PLAYING');
       setPlayerHealth(100);
@@ -1226,7 +1349,9 @@ globalThis.update = function(entities, dt, input, contacts) {
       const code = buildScriptBundle();
       await sendRpc('engine.loadScript', { code });
       const s = await sendRpc('engine.getSnapshot');
-      setEntities(s || []);
+      const loadedEnts = s || [];
+      setEntities(loadedEnts);
+      preSimulationSnapshotRef.current = JSON.parse(JSON.stringify(loadedEnts));
       addLog(`Scena zresetowana: ${preset.toUpperCase()}`);
     } catch (e: any) { addLog(`Błąd resetu: ${e.message}`); }
   };
@@ -1696,7 +1821,7 @@ globalThis.update = function(entities, dt, input, contacts) {
   };
 
   // ── Scene / Level Tabs Management ──────────────────────────────────────────
-  const handleSelectScene = (sceneId: string) => {
+  const handleSelectScene = async (sceneId: string) => {
     const updatedScenes = project.scenes.map(s => s.id === project.activeSceneId ? { ...s, entities } : s);
     const targetScene = project.scenes.find(s => s.id === sceneId);
     if (!targetScene) return;
@@ -1705,24 +1830,51 @@ globalThis.update = function(entities, dt, input, contacts) {
     persistProject(newProject);
     setProject(newProject);
 
-    if (targetScene.entities && targetScene.entities.length > 0) {
-      setEntities(targetScene.entities);
-    } else {
-      setEntities([]);
-    }
+    const sceneEnts = targetScene.entities && targetScene.entities.length > 0 ? targetScene.entities : [];
+    setEntities(sceneEnts);
+    preSimulationSnapshotRef.current = JSON.parse(JSON.stringify(sceneEnts));
     setSelectedEntityId(null);
+    setSimulating(false);
+
+    try {
+      await sendRpc('engine.resetScene', { preset: 'empty' });
+      for (const ent of sceneEnts) {
+        await sendRpc('engine.spawnEntity', ent);
+      }
+      const code = buildScriptBundle();
+      await sendRpc('engine.loadScript', { code });
+      const snap = await sendRpc('engine.getSnapshot');
+      if (snap && snap.length > 0) {
+        setEntities(snap);
+        preSimulationSnapshotRef.current = JSON.parse(JSON.stringify(snap));
+      }
+    } catch (err: any) {
+      console.warn("Failed to sync scene change to engine RPC:", err);
+    }
+
     addLog(`Przełączono na poziom: "${targetScene.name}"`);
   };
 
-  const handleCloseScene = (sceneId: string) => {
+  const handleCloseScene = async (sceneId: string) => {
     if (project.scenes.length > 1) {
       const remaining = project.scenes.filter(s => s.id !== sceneId);
       const nextActive = remaining[0];
       const newProject = { ...project, scenes: remaining, activeSceneId: nextActive.id };
       persistProject(newProject);
       setProject(newProject);
-      setEntities(nextActive.entities || []);
+      const sceneEnts = nextActive.entities || [];
+      setEntities(sceneEnts);
+      preSimulationSnapshotRef.current = JSON.parse(JSON.stringify(sceneEnts));
       setSelectedEntityId(null);
+      setSimulating(false);
+      try {
+        await sendRpc('engine.resetScene', { preset: 'empty' });
+        for (const ent of sceneEnts) {
+          await sendRpc('engine.spawnEntity', ent);
+        }
+        const code = buildScriptBundle();
+        await sendRpc('engine.loadScript', { code });
+      } catch (e) {}
       addLog(`Zamknięto poziom. Aktywny: "${nextActive.name}"`);
     } else {
       const emptyScene = {
@@ -1816,111 +1968,127 @@ globalThis.update = function(entities, dt, input, contacts) {
 
       {/* ═══ 1. UNREAL ENGINE TOP WINDOW TITLE BAR (File, Edit, Menus, Level Tabs) ═══ */}
       {!isImmersivePlay && (
-        <UnrealTitleBar
-          project={project}
-          activeLevelName={activeScene?.name || 'Lvl_MainLevel'}
-          scenes={project.scenes}
-          activeSceneId={project.activeSceneId}
-          onSelectScene={handleSelectScene}
-          onCloseScene={handleCloseScene}
-          onNewScene={handleNewScene}
-          onNewProject={() => setIsProjectModalOpen(true)}
-          onOpenProjectModal={() => setIsProjectModalOpen(true)}
-          onSaveProject={handleSaveProjectAndDisk}
-          onExportProject={handleExportProject}
-          onPackageGame={handlePackageGame}
-          onImportProjectClick={() => fileInputRef.current?.click()}
-          onImportGlbClick={() => glbInputRef.current?.click()}
-          onOpenSettings={() => setIsEffectsPanelOpen(true)}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          onTogglePlaceActors={() => setIsPlaceActorsOpen(p => !p)}
-          onToggleOutliner={() => setIsOutlinerOpen(p => !p)}
-          onToggleDetails={() => setIsDetailsOpen(p => !p)}
-          onToggleContentDrawer={() => setIsContentDrawerOpen(p => !p)}
-          onToggleOutputLog={() => setIsOutputLogOpen(p => !p)}
-          onExecuteScript={handleExecuteActiveScript}
-          onPhysicsDiagnostics={handlePhysicsDiagnostics}
-          onVulkanProfiler={handleVulkanProfiler}
-          onExportTypes={handleExportTypes}
-          onBuildAllLevels={handleBuildAllLevels}
-          onBuildLighting={handleBuildLighting}
-          onBuildCollisionMeshes={handleBuildCollisionMeshes}
-          onSelectAll={() => { if (entities.length > 0) setSelectedEntityId(entities[0].id); }}
-          onDeselect={() => setSelectedEntityId(null)}
-          onInvertSelection={() => {
-            const other = entities.find(e => e.id !== selectedEntityId);
-            if (other) setSelectedEntityId(other.id);
-          }}
-          onFocusSelected={focusOnSelectedEntity}
-          onDuplicateSelected={() => {
-            const cur = entities.find(e => e.id === selectedEntityId);
-            if (cur) handleDuplicateEntity(cur);
-          }}
-          onDeleteSelected={() => {
-            if (selectedEntityId !== null) handleDeleteEntity(selectedEntityId);
-          }}
-          onAttachScript={() => {
-            if (selectedEntityId !== null) {
-              handleUpdateEntityProperty(selectedEntityId, { scriptName: 'CustomBehavior.js' });
-              setIsScriptStudioOpen(true);
-            }
-          }}
-        />
+        <div style={{ zoom: effectiveUiScale }}>
+          <UnrealTitleBar
+            project={project}
+            activeLevelName={activeScene?.name || 'Lvl_MainLevel'}
+            scenes={project.scenes}
+            activeSceneId={project.activeSceneId}
+            onSelectScene={handleSelectScene}
+            onCloseScene={handleCloseScene}
+            onNewScene={handleNewScene}
+            onNewProject={() => setIsProjectModalOpen(true)}
+            onOpenProjectModal={() => setIsProjectModalOpen(true)}
+            onSaveProject={handleSaveProjectAndDisk}
+            onExportProject={handleExportProject}
+            onPackageGame={handlePackageGame}
+            onImportProjectClick={() => fileInputRef.current?.click()}
+            onImportGlbClick={() => glbInputRef.current?.click()}
+            onOpenSettings={() => setIsEffectsPanelOpen(true)}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onTogglePlaceActors={() => setIsPlaceActorsOpen(p => !p)}
+            onToggleOutliner={() => setIsOutlinerOpen(p => !p)}
+            onToggleDetails={() => setIsDetailsOpen(p => !p)}
+            onToggleContentDrawer={() => setIsContentDrawerOpen(p => !p)}
+            onToggleOutputLog={() => setIsOutputLogOpen(p => !p)}
+            onExecuteScript={handleExecuteActiveScript}
+            onPhysicsDiagnostics={handlePhysicsDiagnostics}
+            onVulkanProfiler={handleVulkanProfiler}
+            onExportTypes={handleExportTypes}
+            onBuildAllLevels={handleBuildAllLevels}
+            onBuildLighting={handleBuildLighting}
+            onBuildCollisionMeshes={handleBuildCollisionMeshes}
+            onSelectAll={() => { if (entities.length > 0) setSelectedEntityId(entities[0].id); }}
+            onDeselect={() => setSelectedEntityId(null)}
+            onInvertSelection={() => {
+              const other = entities.find(e => e.id !== selectedEntityId);
+              if (other) setSelectedEntityId(other.id);
+            }}
+            onFocusSelected={focusOnSelectedEntity}
+            onDuplicateSelected={() => {
+              const cur = entities.find(e => e.id === selectedEntityId);
+              if (cur) handleDuplicateEntity(cur);
+            }}
+            onDeleteSelected={() => {
+              if (selectedEntityId !== null) handleDeleteEntity(selectedEntityId);
+            }}
+            onAttachScript={() => {
+              if (selectedEntityId !== null) {
+                handleUpdateEntityProperty(selectedEntityId, { scriptName: 'CustomBehavior.js' });
+                setIsScriptStudioOpen(true);
+              }
+            }}
+          />
+        </div>
       )}
 
       {/* ═══ 2. MAIN TOOLBAR (Selection Mode, Add, Blueprints, Play/Pause/Stop/Step) ═══ */}
-      <UnrealMainToolbar
-        simulating={simulating}
-        connected={connected}
-        onPlay={handlePlay}
-        onPause={handlePause}
-        onStop={handleStop}
-        onStep={handleStepSimulation}
-        onSave={() => { persistProject(project); addLog('Zapisano stan sceny.'); }}
-        onPackageGame={handlePackageGame}
-        onQuickAdd={(type) => {
-          if (type === 'fire' || type === 'portal') handleSpawnEmitter(type);
-          else handleSpawnEntity(type);
-        }}
-        onOpenScripts={() => setIsScriptStudioOpen(true)}
-        onOpenEffects={() => setIsEffectsPanelOpen(true)}
-        onOpenSoundStudio={() => setIsSoundStudioOpen(true)}
-        onOpenWidgetStudio={() => setIsWidgetStudioOpen(true)}
-        cameraMode={cameraMode}
-        onCameraModeChange={setCameraMode}
-        isAudioMuted={isAudioMuted}
-        onToggleAudioMute={() => setIsAudioMuted(p => !p)}
-        isImmersivePlay={isImmersivePlay}
-        onToggleImmersivePlay={() => setIsImmersivePlay(p => !p)}
-      />
+      <div style={{ zoom: effectiveUiScale }}>
+        <UnrealMainToolbar
+          simulating={simulating}
+          connected={connected}
+          onPlay={handlePlay}
+          onPause={handlePause}
+          onStop={handleStop}
+          onStep={handleStepSimulation}
+          onSave={() => { persistProject(project); addLog('Zapisano stan sceny.'); }}
+          onPackageGame={handlePackageGame}
+          onQuickAdd={(type) => {
+            if (type === 'fire' || type === 'portal') handleSpawnEmitter(type);
+            else handleSpawnEntity(type);
+          }}
+          onOpenScripts={() => setIsScriptStudioOpen(true)}
+          onOpenEffects={() => setIsEffectsPanelOpen(true)}
+          onOpenSoundStudio={() => setIsSoundStudioOpen(true)}
+          onOpenWidgetStudio={() => setIsWidgetStudioOpen(true)}
+          cameraMode={cameraMode}
+          onCameraModeChange={setCameraMode}
+          isAudioMuted={isAudioMuted}
+          onToggleAudioMute={() => setIsAudioMuted(p => !p)}
+          isImmersivePlay={isImmersivePlay}
+          onToggleImmersivePlay={() => setIsImmersivePlay(p => !p)}
+        />
+      </div>
 
       {/* ═══ 3. MAIN WORKSPACE (Place Actors Left + Viewport Center + Outliner/Details Right) ═══ */}
       <div className="flex-1 flex overflow-hidden relative">
 
         {/* ── LEFT: Place Actors Panel (Exact UE5 Left Palette) ── */}
-        <PlaceActorsPanel
-          isOpen={!isImmersivePlay && isPlaceActorsOpen}
-          onSpawnEntity={handleSpawnEntity}
-          onSpawnEmitter={handleSpawnEmitter}
-        />
+        <div style={{ zoom: effectiveUiScale }} className="flex shrink-0">
+          <PlaceActorsPanel
+            isOpen={!isImmersivePlay && isPlaceActorsOpen}
+            onSpawnEntity={handleSpawnEntity}
+            onSpawnEmitter={handleSpawnEmitter}
+          />
+        </div>
 
         {/* ── CENTER: 3D Viewport ── */}
         <div className="flex-1 relative flex flex-col bg-[#07070c] overflow-hidden">
           {/* Viewport Top Controls (W/E/R, World/Local, Grid Snap, Camera speed, Perspective, Lit) */}
           {!isImmersivePlay && (
-            <UnrealViewportOverlay
-              gizmoMode={gizmoMode}
-              setGizmoMode={setGizmoMode}
-              gizmoSpace={gizmoSpace}
-              setGizmoSpace={setGizmoSpace}
-              snapEnabled={snapEnabled}
-              setSnapEnabled={setSnapEnabled}
-              snapStep={snapStep}
-              setSnapStep={setSnapStep}
-              viewMode={viewMode}
-              setViewMode={setViewMode}
-            />
+            <div style={{ zoom: effectiveUiScale }} className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
+              <div className="pointer-events-auto">
+                <UnrealViewportOverlay
+                  gizmoMode={gizmoMode}
+                  setGizmoMode={setGizmoMode}
+                  gizmoSpace={gizmoSpace}
+                  setGizmoSpace={setGizmoSpace}
+                  snapEnabled={snapEnabled}
+                  setSnapEnabled={setSnapEnabled}
+                  snapStep={snapStep}
+                  setSnapStep={setSnapStep}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  resolutionScale={resolutionScale}
+                  setResolutionScale={handleSetResolutionScale}
+                  renderResolution={renderResolution}
+                  setRenderResolution={handleSetRenderResolution}
+                  uiScale={uiScale}
+                  setUiScale={handleSetUiScale}
+                />
+              </div>
+            </div>
           )}
 
           {/* UMG UI Widget Blueprint Dynamic Overlay (Authorable HUD / Custom UI) */}
@@ -2074,53 +2242,57 @@ globalThis.update = function(entities, dt, input, contacts) {
           )}
 
           {/* Canvas Render Area */}
-          <div className="flex-1 w-full h-full relative overflow-hidden bg-[#07070c]">
-            {/* Underlying Three.js Viewport (Kept mounted to maintain scene graph & event listeners) */}
-            <div
-              ref={containerRef}
-              className="absolute inset-0 w-full h-full"
-              style={{
-                cursor: 'default',
-                visibility: viewMode === 'three' ? 'visible' : 'hidden'
-              }}
-            />
-
-            {/* Vulkan 1.3 Direct GPU Stream Overlay */}
+          <div
+            ref={viewportWrapperRef}
+            className="flex-1 w-full h-full relative overflow-hidden bg-[#07070c]"
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {/* Vulkan 1.3 Direct GPU Stream Overlay (Rendered in background when Vulkan is active) */}
             {viewMode === 'vulkan' && (
-              <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-[#07070c] select-none">
+              <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-[#07070c] select-none pointer-events-none z-0">
                 {vulkanFrame ? (
                   <img
                     src={vulkanFrame}
                     alt="Vulkan GPU Direct Stream"
-                    className="max-w-full max-h-full object-contain border border-white/10 rounded shadow-2xl pointer-events-none select-none"
+                    className="max-w-full max-h-full object-contain pointer-events-none select-none"
+                    draggable={false}
                   />
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-slate-400 font-mono text-xs pointer-events-none">
                     <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
-                    <span>Oczekiwanie na klatki Vulkan GPU...</span>
+                    <span>Oczekiwanie na klatki Vulkan GPU... (Aktywny podgląd WebGL)</span>
                   </div>
                 )}
-                <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur border border-emerald-500/40 text-[11px] font-mono text-emerald-300 flex items-center gap-2 shadow-lg pointer-events-auto">
+                <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur border border-emerald-500/40 text-[11px] font-mono text-emerald-300 flex items-center gap-2 shadow-lg pointer-events-auto z-20">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>VULKAN 1.3 DIRECT GPU • {vulkanFps} FPS</span>
+                  <span>VULKAN 1.3 DIRECT GPU • {vulkanFps} FPS • {renderResolution.width}x{renderResolution.height} ({Math.round(resolutionScale * 100)}%)</span>
                 </div>
               </div>
             )}
+
+            {/* Three.js Interactive Viewport (Always active & in front, receiving gizmo & click interactions!) */}
+            <div
+              ref={containerRef}
+              className="absolute inset-0 w-full h-full z-10 cursor-default"
+              style={{
+                pointerEvents: 'auto',
+              }}
+            />
           </div>
 
           {/* Bottom-left Coordinate Gizmo (Exact Unreal Engine Tripod) */}
           {!isImmersivePlay && (
-            <div className="absolute bottom-2 left-2 z-10 pointer-events-none">
+            <div style={{ zoom: effectiveUiScale }} className="absolute bottom-2 left-2 z-20 pointer-events-none">
               <UnrealCoordinateGizmo yaw={cameraRot.yaw} pitch={cameraRot.pitch} />
             </div>
           )}
 
           {/* Navigation Hint (Bottom-left, elevated above gizmo) */}
           {!isImmersivePlay && (
-            <div className="absolute bottom-20 left-3 z-10 pointer-events-none">
+            <div style={{ zoom: effectiveUiScale }} className="absolute bottom-20 left-3 z-20 pointer-events-none">
               <div className="px-2.5 py-1.5 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[10px] font-mono text-slate-400 flex items-center gap-2 shadow-lg">
                 <Orbit className="w-3 h-3 text-cyan-400" />
-                <span>PPM+WASD: Leć • ŚPM: Przesuń • Scroll: Zoom • LPM: Zaznacz • W/E/R: Gizmo • F: Skup</span>
+                <span>PPM+WASD: Leć • Alt+LPM: Orbituj • ŚPM: Przesuń • Scroll: Zoom • LPM: Zaznacz • W/E/R: Gizmo • F: Skup</span>
               </div>
             </div>
           )}
@@ -2155,7 +2327,7 @@ globalThis.update = function(entities, dt, input, contacts) {
 
         {/* ── RIGHT: Outliner (Top) + Details & World Settings (Bottom) ── */}
         {!isImmersivePlay && (isOutlinerOpen || isDetailsOpen) && (
-          <aside className="w-80 border-l border-white/10 bg-[#0e0e16] flex flex-col shrink-0 select-none overflow-hidden">
+          <aside style={{ zoom: effectiveUiScale }} className="w-80 border-l border-white/10 bg-[#0e0e16] flex flex-col shrink-0 select-none overflow-hidden">
             {/* Top: Outliner Panel */}
             {isOutlinerOpen && (
               <div className={`${isDetailsOpen ? 'h-[45%]' : 'h-full'} flex flex-col border-b border-white/10 overflow-hidden`}>
@@ -2181,7 +2353,18 @@ globalThis.update = function(entities, dt, input, contacts) {
                   onUpdateProperty={handleUpdateEntityProperty}
                   onApplyMaterial={handleApplyMaterial}
                   onApplyImpulse={handleApplyImpulse}
-                  onUpdateSettings={(patch) => persistProject({ ...project, settings: { ...project.settings, ...patch } })}
+                  onUpdateSettings={(patch) => {
+                    if (patch.uiScale !== undefined) {
+                      handleSetUiScale(patch.uiScale);
+                    }
+                    if (patch.resolutionScale !== undefined) {
+                      handleSetResolutionScale(patch.resolutionScale);
+                    }
+                    if (patch.renderResolution !== undefined) {
+                      handleSetRenderResolution(patch.renderResolution);
+                    }
+                    persistProject({ ...project, settings: { ...project.settings, ...patch } });
+                  }}
                   onOpenScriptEditor={handleOpenScriptEditor}
                 />
               </div>
@@ -2192,7 +2375,7 @@ globalThis.update = function(entities, dt, input, contacts) {
 
       {/* ═══ 4. BOTTOM BAR (Exact UE5 Bottom Dock) ═══════════════════════ */}
       {!isImmersivePlay && (
-        <div className="h-7 bg-[#0b0b12] border-t border-white/10 flex items-center justify-between px-2 text-[11px] font-sans text-slate-300 z-30 select-none shrink-0">
+        <div style={{ zoom: effectiveUiScale }} className="h-7 bg-[#0b0b12] border-t border-white/10 flex items-center justify-between px-2 text-[11px] font-sans text-slate-300 z-30 select-none shrink-0">
           {/* Left: Content Drawer & Output Log Buttons */}
           <div className="flex items-center gap-1.5">
             <button
@@ -2258,7 +2441,9 @@ globalThis.update = function(entities, dt, input, contacts) {
               All Saved
             </span>
             <span className="text-slate-600">•</span>
-            <span className="text-cyan-300">{viewMode === 'vulkan' ? `Vulkan: ${vulkanFps} FPS` : 'WebGL: 60 FPS'}</span>
+            <span className="text-indigo-400">UI: {Math.round(effectiveUiScale * 100)}%</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-cyan-300">{viewMode === 'vulkan' ? `Vulkan: ${vulkanFps} FPS (${renderResolution.width}x${renderResolution.height} @ ${Math.round(resolutionScale * 100)}%)` : 'WebGL: 60 FPS'}</span>
           </div>
         </div>
       )}
@@ -2267,7 +2452,7 @@ globalThis.update = function(entities, dt, input, contacts) {
 
       {/* Output Log Drawer */}
       {isOutputLogOpen && (
-        <div className="h-48 bg-[#08080e] border-t border-white/10 flex flex-col z-20 shrink-0 font-mono text-xs">
+        <div style={{ zoom: effectiveUiScale }} className="h-48 bg-[#08080e] border-t border-white/10 flex flex-col z-20 shrink-0 font-mono text-xs">
           <div className="h-7 bg-[#0b0b14] border-b border-white/10 px-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Terminal className="w-3.5 h-3.5 text-cyan-400" />
@@ -2295,26 +2480,28 @@ globalThis.update = function(entities, dt, input, contacts) {
       )}
 
       {/* Content Drawer (Sliding Up from Bottom) */}
-      <ContentBrowser
-        project={project}
-        isOpen={isContentDrawerOpen}
-        onClose={() => setIsContentDrawerOpen(false)}
-        onSelectScript={(s) => { setActiveScriptId(s.id); setIsScriptStudioOpen(true); }}
-        onApplyMaterial={(m) => { if (selectedEntityId !== null) handleApplyMaterial(selectedEntityId, m); }}
-        onSelectEmitter={() => setIsEffectsPanelOpen(true)}
-        onSelectSound={() => setIsSoundStudioOpen(true)}
-        onSelectWidget={() => setIsWidgetStudioOpen(true)}
-        onCreateScript={handleCreateScript}
-        onCreateMaterial={handleCreateMaterial}
-        onCreateEmitter={() => handleSpawnEmitter('fire')}
-        onCreateSound={() => setIsSoundStudioOpen(true)}
-        onCreateWidget={() => setIsWidgetStudioOpen(true)}
-        onDeleteScript={handleDeleteScript}
-        onDeleteMaterial={handleDeleteMaterial}
-        onDeleteEmitter={handleDeleteEmitter}
-        onDeleteSound={handleDeleteSound}
-        onDeleteWidget={handleDeleteWidget}
-      />
+      <div style={{ zoom: effectiveUiScale }}>
+        <ContentBrowser
+          project={project}
+          isOpen={isContentDrawerOpen}
+          onClose={() => setIsContentDrawerOpen(false)}
+          onSelectScript={(s) => { setActiveScriptId(s.id); setIsScriptStudioOpen(true); }}
+          onApplyMaterial={(m) => { if (selectedEntityId !== null) handleApplyMaterial(selectedEntityId, m); }}
+          onSelectEmitter={() => setIsEffectsPanelOpen(true)}
+          onSelectSound={() => setIsSoundStudioOpen(true)}
+          onSelectWidget={() => setIsWidgetStudioOpen(true)}
+          onCreateScript={handleCreateScript}
+          onCreateMaterial={handleCreateMaterial}
+          onCreateEmitter={() => handleSpawnEmitter('fire')}
+          onCreateSound={() => setIsSoundStudioOpen(true)}
+          onCreateWidget={() => setIsWidgetStudioOpen(true)}
+          onDeleteScript={handleDeleteScript}
+          onDeleteMaterial={handleDeleteMaterial}
+          onDeleteEmitter={handleDeleteEmitter}
+          onDeleteSound={handleDeleteSound}
+          onDeleteWidget={handleDeleteWidget}
+        />
+      </div>
 
       {/* Script Studio Modal / Floating IDE */}
       {isScriptStudioOpen && (

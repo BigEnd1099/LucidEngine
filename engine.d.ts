@@ -48,9 +48,49 @@ export interface RigidBodyComponent {
 }
 
 export interface MaterialComponent {
-  color?: [number, number, number, number?];
+  color?: string | [number, number, number, number?];
   metallic?: number;
   roughness?: number;
+  emissive?: string | [number, number, number];
+  emissiveIntensity?: number;
+}
+
+export interface LightComponent {
+  type: 'directional' | 'point' | 'spot' | 'sky';
+  color: string | [number, number, number];
+  intensity: number;
+  range?: number;
+}
+
+export interface AudioComponent {
+  soundAssetId: string;
+  volume?: number;
+  pitch?: number;
+  is3D?: boolean;
+  loop?: boolean;
+  autoPlay?: boolean;
+}
+
+export interface CharacterMovementComponent {
+  maxWalkSpeed?: number;
+  jumpZVelocity?: number;
+  gravityScale?: number;
+  airControl?: number;
+}
+
+export interface CameraBoomComponent {
+  targetArmLength?: number;
+  socketOffsetY?: number;
+  cameraLag?: boolean;
+  lagSpeed?: number;
+}
+
+export interface ParticleEmitterComponent {
+  type: 'fire' | 'sparks' | 'smoke' | 'portal' | 'explosion';
+  color?: string | [number, number, number];
+  count?: number;
+  speed?: number;
+  size?: number;
 }
 
 export interface Contact {
@@ -72,6 +112,11 @@ export interface Entity {
   mesh?: MeshComponent;
   material?: MaterialComponent;
   rigidBody?: RigidBodyComponent;
+  light?: LightComponent;
+  audio?: AudioComponent;
+  movement?: CharacterMovementComponent;
+  cameraBoom?: CameraBoomComponent;
+  particles?: ParticleEmitterComponent;
   [customProp: string]: any; // Allow custom game logic state per entity
 }
 

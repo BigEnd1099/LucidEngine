@@ -3,6 +3,8 @@
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
 #include <stdexcept>
+#include <cmath>
+#include <glm/gtc/constants.hpp>
 #include "core/Logger.hpp"
 
 namespace engine::core {
@@ -236,7 +238,8 @@ namespace engine::core {
     }
 
     void AssetManager::createFallbackMeshes() {
-        std::vector<engine::renderer::Vertex> vertices = {
+        // --- 1. MESH 1: GROUND BOX / PLANE (Large horizontal surface) ---
+        std::vector<engine::renderer::Vertex> planeVertices = {
             // Front
             { {-0.5f, -0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f} },
             { { 0.5f, -0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f} },
@@ -247,11 +250,11 @@ namespace engine::core {
             { {-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {1.0f, 0.0f} },
             { { 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f} },
             { { 0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f} },
-            // Top
-            { {-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f} },
+            // Top (Normal 0, 1, 0)
+            { {-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 10.0f} },
             { {-0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f} },
-            { { 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f} },
-            { { 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f} },
+            { { 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, {10.0f, 0.0f} },
+            { { 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {10.0f, 10.0f} },
             // Bottom
             { {-0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f} },
             { { 0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {1.0f, 0.0f} },
@@ -268,7 +271,7 @@ namespace engine::core {
             { {-0.5f,  0.5f,  0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f} },
             { {-0.5f,  0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, {1.0f, 0.0f} }
         };
-        std::vector<uint32_t> indices = {
+        std::vector<uint32_t> cubeIndices = {
             0,  1,  2,  2,  3,  0,
             4,  5,  6,  6,  7,  4,
             8,  9, 10, 10, 11,  8,
@@ -276,21 +279,161 @@ namespace engine::core {
             16, 17, 18, 18, 19, 16,
             20, 21, 22, 22, 23, 20
         };
-        
+
         auto plane = std::make_unique<MeshAsset>();
         plane->id = m_nextMeshId++; // 1
-        plane->vertexCount = vertices.size();
-        plane->indexCount = indices.size();
-        uploadBuffer(plane->vertexBuffer, plane->vertexAllocation, vertices.data(), vertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        uploadBuffer(plane->indexBuffer, plane->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        plane->vertexCount = planeVertices.size();
+        plane->indexCount = cubeIndices.size();
+        uploadBuffer(plane->vertexBuffer, plane->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploadBuffer(plane->indexBuffer, plane->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(plane));
 
+        // --- 2. MESH 2: STANDARD CUBE ---
         auto cube = std::make_unique<MeshAsset>();
         cube->id = m_nextMeshId++; // 2
-        cube->vertexCount = vertices.size();
-        cube->indexCount = indices.size();
-        uploadBuffer(cube->vertexBuffer, cube->vertexAllocation, vertices.data(), vertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        uploadBuffer(cube->indexBuffer, cube->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        cube->vertexCount = planeVertices.size();
+        cube->indexCount = cubeIndices.size();
+        uploadBuffer(cube->vertexBuffer, cube->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploadBuffer(cube->indexBuffer, cube->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(cube));
+
+        // --- 3. MESH 3: UV SPHERE (Smooth Normals & Proper UVs) ---
+        std::vector<engine::renderer::Vertex> sphereVertices;
+        std::vector<uint32_t> sphereIndices;
+        int const rings = 24;
+        int const sectors = 32;
+        float const radius = 0.5f;
+        float const R = 1.0f / (float)(rings - 1);
+        float const S = 1.0f / (float)(sectors - 1);
+
+        for (int r = 0; r < rings; ++r) {
+            for (int s = 0; s < sectors; ++s) {
+                float const y = sin(-glm::half_pi<float>() + glm::pi<float>() * r * R);
+                float const x = cos(2.0f * glm::pi<float>() * s * S) * sin(glm::pi<float>() * r * R);
+                float const z = sin(2.0f * glm::pi<float>() * s * S) * sin(glm::pi<float>() * r * R);
+
+                engine::renderer::Vertex v{};
+                v.position = glm::vec3(x * radius, y * radius, z * radius);
+                v.normal = glm::normalize(glm::vec3(x, y, z));
+                v.texCoord = glm::vec2(s * S, r * R);
+                v.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                sphereVertices.push_back(v);
+            }
+        }
+
+        for (int r = 0; r < rings - 1; ++r) {
+            for (int s = 0; s < sectors - 1; ++s) {
+                uint32_t cur = r * sectors + s;
+                uint32_t next = (r + 1) * sectors + s;
+                sphereIndices.push_back(cur);
+                sphereIndices.push_back(next);
+                sphereIndices.push_back(next + 1);
+
+                sphereIndices.push_back(cur);
+                sphereIndices.push_back(next + 1);
+                sphereIndices.push_back(cur + 1);
+            }
+        }
+
+        auto sphere = std::make_unique<MeshAsset>();
+        sphere->id = m_nextMeshId++; // 3
+        sphere->vertexCount = sphereVertices.size();
+        sphere->indexCount = sphereIndices.size();
+        uploadBuffer(sphere->vertexBuffer, sphere->vertexAllocation, sphereVertices.data(), sphereVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploadBuffer(sphere->indexBuffer, sphere->indexAllocation, sphereIndices.data(), sphereIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshes.push_back(std::move(sphere));
+
+        // --- 4. MESH 4: CYLINDER ---
+        std::vector<engine::renderer::Vertex> cylVertices;
+        std::vector<uint32_t> cylIndices;
+        int const cylSectors = 24;
+        float const cylRad = 0.5f;
+        float const cylHalfH = 0.5f;
+
+        // Side vertices
+        for (int i = 0; i <= cylSectors; ++i) {
+            float angle = (float)i / (float)cylSectors * glm::two_pi<float>();
+            float x = cos(angle);
+            float z = sin(angle);
+            float u = (float)i / (float)cylSectors;
+
+            // Top rim
+            cylVertices.push_back({ {x * cylRad, cylHalfH, z * cylRad}, {x, 0.0f, z}, {u, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f} });
+            // Bottom rim
+            cylVertices.push_back({ {x * cylRad, -cylHalfH, z * cylRad}, {x, 0.0f, z}, {u, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f} });
+        }
+
+        for (int i = 0; i < cylSectors; ++i) {
+            uint32_t topCur = i * 2;
+            uint32_t botCur = i * 2 + 1;
+            uint32_t topNext = (i + 1) * 2;
+            uint32_t botNext = (i + 1) * 2 + 1;
+
+            cylIndices.push_back(topCur);
+            cylIndices.push_back(botCur);
+            cylIndices.push_back(botNext);
+
+            cylIndices.push_back(topCur);
+            cylIndices.push_back(botNext);
+            cylIndices.push_back(topNext);
+        }
+
+        auto cylinder = std::make_unique<MeshAsset>();
+        cylinder->id = m_nextMeshId++; // 4
+        cylinder->vertexCount = cylVertices.size();
+        cylinder->indexCount = cylIndices.size();
+        uploadBuffer(cylinder->vertexBuffer, cylinder->vertexAllocation, cylVertices.data(), cylVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploadBuffer(cylinder->indexBuffer, cylinder->indexAllocation, cylIndices.data(), cylIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshes.push_back(std::move(cylinder));
+
+        // --- 5. MESH 5: CAPSULE ---
+        std::vector<engine::renderer::Vertex> capVertices;
+        std::vector<uint32_t> capIndices;
+        int const capRings = 16;
+        int const capSectors = 24;
+        float const capRadius = 0.5f;
+        float const capCylHalfH = 0.5f;
+
+        for (int r = 0; r < capRings; ++r) {
+            float phi = glm::pi<float>() * (float)r / (float)(capRings - 1);
+            float yOffset = (r < capRings / 2) ? capCylHalfH : -capCylHalfH;
+            for (int s = 0; s < capSectors; ++s) {
+                float theta = glm::two_pi<float>() * (float)s / (float)(capSectors - 1);
+                float x = sin(phi) * cos(theta);
+                float y = cos(phi);
+                float z = sin(phi) * sin(theta);
+
+                engine::renderer::Vertex v{};
+                v.position = glm::vec3(x * capRadius, y * capRadius + yOffset, z * capRadius);
+                v.normal = glm::normalize(glm::vec3(x, y, z));
+                v.texCoord = glm::vec2((float)s / (float)(capSectors - 1), (float)r / (float)(capRings - 1));
+                v.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                capVertices.push_back(v);
+            }
+        }
+
+        for (int r = 0; r < capRings - 1; ++r) {
+            for (int s = 0; s < capSectors - 1; ++s) {
+                uint32_t cur = r * capSectors + s;
+                uint32_t next = (r + 1) * capSectors + s;
+                capIndices.push_back(cur);
+                capIndices.push_back(next);
+                capIndices.push_back(next + 1);
+
+                capIndices.push_back(cur);
+                capIndices.push_back(next + 1);
+                capIndices.push_back(cur + 1);
+            }
+        }
+
+        auto capsule = std::make_unique<MeshAsset>();
+        capsule->id = m_nextMeshId++; // 5
+        capsule->vertexCount = capVertices.size();
+        capsule->indexCount = capIndices.size();
+        uploadBuffer(capsule->vertexBuffer, capsule->vertexAllocation, capVertices.data(), capVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploadBuffer(capsule->indexBuffer, capsule->indexAllocation, capIndices.data(), capIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshes.push_back(std::move(capsule));
+
+        core::Logger::info("Created 5 high-fidelity Unreal-grade fallback primitives (Plane, Cube, Sphere, Cylinder, Capsule).");
     }
 }

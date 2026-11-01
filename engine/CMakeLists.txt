@@ -27,6 +27,9 @@ if(MSVC)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
+# Vulkan 1.3 clip space depth range [0.0, 1.0] and radians for GLM
+add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -126,6 +129,10 @@ set(SHADER_FILES
     src/shaders/triangle.frag
     src/shaders/pbr.vert
     src/shaders/pbr.frag
+    src/shaders/shadow_depth.vert
+    src/shaders/shadow_depth.frag
+    src/shaders/particle.vert
+    src/shaders/particle.frag
 )
 
 set(SPV_FILES "")

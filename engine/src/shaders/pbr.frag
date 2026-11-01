@@ -2,19 +2,34 @@
 
 // ============================================================================
 // Lucid Engine - High-Fidelity PBR Shader adapted from Unreal Engine 5.8
-// Cook-Torrance GGX / Smith / Schlick BRDF + UE5 Grid + ACES Tone Mapping
+// Cook-Torrance GGX / Smith / Schlick BRDF + UE5 Grid + PCF Soft Shadows + ACES
 // ============================================================================
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragColor;
 layout(location = 3) in vec3 fragWorldPos;
+layout(location = 4) in vec4 fragLightSpacePos;
 
 layout(location = 0) out vec4 outColor;
+
+layout(set = 0, binding = 0) uniform sampler2D shadowMap;
+
+layout(set = 0, binding = 1) uniform SceneUbo {
+    vec4 sunDirection;      // xyz = sun direction, w = intensity
+    vec4 sunColor;          // rgb = sun color, w = unused
+    vec4 ambientColor;      // rgb = sky ambient radiance, w = ground radiance scale
+    vec4 fogParams;         // x = enabled (1.0 or 0.0), y = near, z = far, w = unused
+    vec4 fogColor;          // rgb = fog color
+    vec4 pointLightsPos[8]; // xyz = pos, w = range
+    vec4 pointLightsCol[8]; // rgb = color, w = intensity
+    int numPointLights;
+} scene;
 
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
+    mat4 lightSpaceMatrix;
     vec4 baseColorFactor;
     vec4 cameraPos;        // xyz = camera position in world space, w = time
     vec4 materialParams;   // x = metallic, y = roughness, z = isGround, w = emissive
@@ -60,9 +75,37 @@ vec3 ACESFilm(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+// [UE5 ShadowPercentageCloserFiltering.ush: PCF 3x3 Filter]
+float CalculateShadow(vec4 lightSpacePos, vec3 N, vec3 L) {
+    vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    if (projCoords.z > 1.0 || projCoords.z < 0.0 ||
+        projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 0.0;
+    }
+
+    float currentDepth = projCoords.z;
+    float cosTheta = max(dot(N, L), 0.0);
+    float bias = max(0.0015 * (1.0 - cosTheta), 0.0004);
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            if (currentDepth - bias > pcfDepth) {
+                shadow += 1.0;
+            }
+        }
+    }
+    return (shadow / 9.0) * 0.78; // 78% shadow occlusion for soft realistic contact shadows
+}
+
 void main() {
     vec3 N = normalize(fragNormal);
-    // True Camera View Vector
     vec3 V = normalize(pcs.cameraPos.xyz - fragWorldPos);
 
     vec3 baseColor = fragColor;
@@ -70,8 +113,7 @@ void main() {
     float roughness = clamp(pcs.materialParams.y, 0.04, 1.0);
     bool isGround = (pcs.materialParams.z > 0.5) || (N.y > 0.8 && abs(fragWorldPos.y) < 0.2);
 
-    // Viewport background horizon color (matches clean UE5 Editor tone)
-    vec3 horizonColor = vec3(0.06, 0.07, 0.09);
+    vec3 horizonColor = (scene.fogParams.x > 0.5) ? scene.fogColor.rgb : vec3(0.06, 0.07, 0.09);
 
     if (isGround) {
         vec2 coord = fragWorldPos.xz;
@@ -90,8 +132,8 @@ void main() {
         float majorLineAlpha = 1.0 - min(majorLine, 1.0);
 
         // 3. Central coordinate axes (Red = X-axis, Cyan = Z-axis)
-        float axisZ = 1.0 - min(abs(coord.x) / max(dcoord.x, 1e-4), 1.0); // Z-axis at X=0
-        float axisX = 1.0 - min(abs(coord.y) / max(dcoord.y, 1e-4), 1.0); // X-axis at Z=0
+        float axisZ = 1.0 - min(abs(coord.x) / max(dcoord.x, 1e-4), 1.0);
+        float axisX = 1.0 - min(abs(coord.y) / max(dcoord.y, 1e-4), 1.0);
 
         vec3 groundSurface = vec3(0.04, 0.045, 0.06);
         vec3 subGridColor   = vec3(0.09, 0.12, 0.17);
@@ -120,7 +162,7 @@ void main() {
     vec3 diffColor = baseColor * (1.0 - metallic);
 
     // --- 1. Primary Directional Sun Light (Unreal Engine 5 Sun Sky) ---
-    vec3 L = normalize(vec3(0.55, 0.85, 0.40));
+    vec3 L = normalize(scene.sunDirection.xyz);
     vec3 H = normalize(V + L);
 
     float NoL = clamp(dot(N, L), 0.0, 1.0);
@@ -134,27 +176,54 @@ void main() {
     vec3 specular = D * Vis * F;
     vec3 diffuse = Diffuse_Burley(diffColor, roughness, NoV, NoL, VoH);
 
-    vec3 sunColor = vec3(1.0, 0.97, 0.92) * 3.4;
-    vec3 directLighting = (diffuse + specular) * sunColor * NoL;
+    float shadow = CalculateShadow(fragLightSpacePos, N, L);
+    vec3 sunColor = scene.sunColor.rgb * scene.sunDirection.w;
+    vec3 directLighting = (diffuse + specular) * sunColor * NoL * (1.0 - shadow);
 
-    // --- 2. Secondary Fill Light (Soft cool reflection) ---
-    vec3 fillDir = normalize(vec3(-0.6, 0.4, -0.5));
-    float fillNoL = clamp(dot(N, fillDir), 0.0, 1.0);
-    vec3 fillH = normalize(V + fillDir);
-    float fillVoH = clamp(dot(V, fillH), 0.0, 1.0);
-    vec3 fillLight = Diffuse_Burley(diffColor, roughness, NoV, fillNoL, fillVoH) * vec3(0.2, 0.35, 0.55) * fillNoL * 1.5;
+    // --- 2. Dynamic Point Lights (Multi-Light Cook-Torrance PBR) ---
+    vec3 pointLighting = vec3(0.0);
+    for (int i = 0; i < scene.numPointLights && i < 8; ++i) {
+        vec3 lightVec = scene.pointLightsPos[i].xyz - fragWorldPos;
+        float dist = length(lightVec);
+        float range = scene.pointLightsPos[i].w;
+        if (dist < range && dist > 1e-4) {
+            vec3 pL = normalize(lightVec);
+            float pNoL = clamp(dot(N, pL), 0.0, 1.0);
+            if (pNoL > 0.0) {
+                float atten = clamp(1.0 - (dist / range), 0.0, 1.0);
+                atten = (atten * atten) / (1.0 + 0.1 * dist * dist);
+                vec3 pH = normalize(V + pL);
+                float pNoH = clamp(dot(N, pH), 0.0, 1.0);
+                float pVoH = clamp(dot(V, pH), 0.0, 1.0);
+                float pD = D_GGX(a2, pNoH);
+                float pVis = Vis_SmithJointApprox(a2, NoV, pNoL);
+                vec3 pF = F_Schlick(F0, pVoH);
+                vec3 pSpec = pD * pVis * pF;
+                vec3 pDiff = Diffuse_Burley(diffColor, roughness, NoV, pNoL, pVoH);
+                vec3 pLightColor = scene.pointLightsCol[i].rgb * scene.pointLightsCol[i].w;
+                pointLighting += (pDiff + pSpec) * pLightColor * pNoL * atten;
+            }
+        }
+    }
 
     // --- 3. Dual-Hemisphere Ambient (Rayleigh Sky Top + Ground Bounce) ---
-    vec3 skyRadiance = vec3(0.15, 0.22, 0.35);
-    vec3 groundRadiance = vec3(0.08, 0.07, 0.06);
+    vec3 skyRadiance = scene.ambientColor.rgb;
+    vec3 groundRadiance = scene.ambientColor.rgb * scene.ambientColor.w * 0.4;
     float skyWeight = 0.5 + 0.5 * N.y;
     vec3 ambientLighting = diffColor * mix(groundRadiance, skyRadiance, skyWeight);
 
     // --- 4. Emissive Component ---
-    vec3 emissive = baseColor * pcs.materialParams.w * 2.5;
+    vec3 emissive = baseColor * pcs.materialParams.w * 3.0;
 
     // Total High Dynamic Range Radiance
-    vec3 hdrColor = directLighting + fillLight + ambientLighting + emissive;
+    vec3 hdrColor = directLighting + pointLighting + ambientLighting + emissive;
+
+    // --- 5. Volumetric / Distance Fog ---
+    if (scene.fogParams.x > 0.5) {
+        float fdist = length(fragWorldPos - pcs.cameraPos.xyz);
+        float fogFactor = clamp((fdist - scene.fogParams.y) / max(scene.fogParams.z - scene.fogParams.y, 1e-4), 0.0, 1.0);
+        hdrColor = mix(hdrColor, scene.fogColor.rgb, fogFactor);
+    }
 
     // ACES Filmic Tone Mapping & Gamma Correction
     vec3 ldrColor = ACESFilm(hdrColor);

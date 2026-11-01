@@ -10,6 +10,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <chrono>
+#include <cmath>
+#include <algorithm>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_STATIC
@@ -23,11 +25,15 @@
 
 namespace engine::renderer {
     VulkanRenderer::VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height)
-        : m_context(context), m_width(width), m_height(height) {
+        : m_context(context), m_width(width), m_height(height), m_baseWidth(width), m_baseHeight(height) {
         createOffscreenTarget();
         createCommandBuffer();
+        createShadowResources();
+        createDescriptorSets();
+        createShadowPipeline();
         createComputePipelines();
         createGraphicsPipeline();
+        createParticlePipeline();
         initCaptureResources();
 
 #ifdef USE_GLFW
@@ -51,13 +57,12 @@ namespace engine::renderer {
         if (m_context->getDevice()) {
             vkDeviceWaitIdle(m_context->getDevice());
             cleanupCaptureResources();
+            cleanupParticlePipeline();
+            cleanupShadowResources();
+            cleanupOffscreenTarget();
             
 #ifdef USE_GLFW
             if (!m_context->isHeadless()) {
-                if (m_viewportDescriptor) {
-                    ImGui_ImplVulkan_RemoveTexture(m_viewportDescriptor);
-                    m_viewportDescriptor = VK_NULL_HANDLE;
-                }
                 ImGui_ImplVulkan_Shutdown();
                 ImGui_ImplGlfw_Shutdown();
                 ImGui::DestroyContext();
@@ -77,15 +82,86 @@ namespace engine::renderer {
                 vkDestroySampler(m_context->getDevice(), m_viewportSampler, nullptr);
                 m_viewportSampler = VK_NULL_HANDLE;
             }
-            vkDestroyImageView(m_context->getDevice(), m_depthImageView, nullptr);
-            vmaDestroyImage(m_context->getAllocator(), m_depthImage, m_depthAllocation);
-
-            vkDestroyImageView(m_context->getDevice(), m_objectIdImageView, nullptr);
-            vmaDestroyImage(m_context->getAllocator(), m_objectIdImage, m_objectIdAllocation);
-            vkDestroyImageView(m_context->getDevice(), m_colorImageView, nullptr);
-            vmaDestroyImage(m_context->getAllocator(), m_colorImage, m_colorAllocation);
             vkFreeCommandBuffers(m_context->getDevice(), m_context->getCommandPool(), 1, &m_commandBuffer);
         }
+    }
+
+    void VulkanRenderer::cleanupOffscreenTarget() {
+        if (!m_context || !m_context->getDevice()) return;
+        VkDevice device = m_context->getDevice();
+        VmaAllocator allocator = m_context->getAllocator();
+
+#ifdef USE_GLFW
+        if (m_viewportDescriptor) {
+            ImGui_ImplVulkan_RemoveTexture(m_viewportDescriptor);
+            m_viewportDescriptor = VK_NULL_HANDLE;
+        }
+#endif
+        if (m_depthImageView) {
+            vkDestroyImageView(device, m_depthImageView, nullptr);
+            m_depthImageView = VK_NULL_HANDLE;
+        }
+        if (m_depthImage) {
+            vmaDestroyImage(allocator, m_depthImage, m_depthAllocation);
+            m_depthImage = VK_NULL_HANDLE;
+            m_depthAllocation = VK_NULL_HANDLE;
+        }
+        if (m_objectIdImageView) {
+            vkDestroyImageView(device, m_objectIdImageView, nullptr);
+            m_objectIdImageView = VK_NULL_HANDLE;
+        }
+        if (m_objectIdImage) {
+            vmaDestroyImage(allocator, m_objectIdImage, m_objectIdAllocation);
+            m_objectIdImage = VK_NULL_HANDLE;
+            m_objectIdAllocation = VK_NULL_HANDLE;
+        }
+        if (m_colorImageView) {
+            vkDestroyImageView(device, m_colorImageView, nullptr);
+            m_colorImageView = VK_NULL_HANDLE;
+        }
+        if (m_colorImage) {
+            vmaDestroyImage(allocator, m_colorImage, m_colorAllocation);
+            m_colorImage = VK_NULL_HANDLE;
+            m_colorAllocation = VK_NULL_HANDLE;
+        }
+    }
+
+    void VulkanRenderer::setRenderResolution(uint32_t width, uint32_t height) {
+        if (width < 64) width = 64;
+        if (height < 64) height = 64;
+        if (width > 7680) width = 7680;
+        if (height > 4320) height = 4320;
+
+        if (m_width == width && m_height == height) return;
+
+        if (m_context && m_context->getDevice()) {
+            vkDeviceWaitIdle(m_context->getDevice());
+        }
+
+        cleanupCaptureResources();
+        cleanupOffscreenTarget();
+
+        m_width = width;
+        m_height = height;
+
+        createOffscreenTarget();
+        initCaptureResources();
+
+#ifdef USE_GLFW
+        if (!m_context->isHeadless() && m_viewportSampler && m_colorImageView) {
+            m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+#endif
+        core::Logger::info("Render resolution updated to " + std::to_string(m_width) + "x" + std::to_string(m_height));
+    }
+
+    void VulkanRenderer::setResolutionScale(float scale) {
+        m_resolutionScale = std::clamp(scale, 0.25f, 2.5f);
+        uint32_t targetW = static_cast<uint32_t>(static_cast<float>(m_baseWidth) * m_resolutionScale);
+        uint32_t targetH = static_cast<uint32_t>(static_cast<float>(m_baseHeight) * m_resolutionScale);
+        targetW = (targetW + 1) & ~1u;
+        targetH = (targetH + 1) & ~1u;
+        setRenderResolution(targetW, targetH);
     }
 
     void VulkanRenderer::createOffscreenTarget() {
@@ -152,12 +228,6 @@ namespace engine::renderer {
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-#ifdef USE_GLFW
-        if (!m_context->isHeadless()) {
-            depthImageInfo.extent.width = m_context->getSwapchainExtent().width;
-            depthImageInfo.extent.height = m_context->getSwapchainExtent().height;
-        }
-#endif
         if (vmaCreateImage(m_context->getAllocator(), &depthImageInfo, &allocInfo, &m_depthImage, &m_depthAllocation, nullptr) != VK_SUCCESS) {
             throw std::runtime_error("failed to create depth image!");
         }
@@ -179,6 +249,320 @@ namespace engine::renderer {
 
         if (vkAllocateCommandBuffers(m_context->getDevice(), &allocInfo, &m_commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate command buffers!");
+        }
+    }
+
+    void VulkanRenderer::createShadowResources() {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = m_shadowWidth;
+        imageInfo.extent.height = m_shadowHeight;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = VK_FORMAT_D32_SFLOAT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+        if (vmaCreateImage(m_context->getAllocator(), &imageInfo, &allocInfo, &m_shadowImage, &m_shadowAllocation, nullptr) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shadow depth image!");
+        }
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_shadowImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = VK_FORMAT_D32_SFLOAT;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(m_context->getDevice(), &viewInfo, nullptr, &m_shadowImageView) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shadow depth image view!");
+        }
+
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        samplerInfo.compareEnable = VK_FALSE;
+
+        if (vkCreateSampler(m_context->getDevice(), &samplerInfo, nullptr, &m_shadowSampler) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shadow sampler!");
+        }
+    }
+
+    void VulkanRenderer::createDescriptorSets() {
+        // 1. Allocate Scene UBO Buffer
+        VkBufferCreateInfo uboBufferInfo{};
+        uboBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        uboBufferInfo.size = sizeof(SceneUboData);
+        uboBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+
+        VmaAllocationCreateInfo uboAllocInfo{};
+        uboAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        uboAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo uboResultInfo{};
+        if (vmaCreateBuffer(m_context->getAllocator(), &uboBufferInfo, &uboAllocInfo, &m_sceneUboBuffer, &m_sceneUboAlloc, &uboResultInfo) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create scene ubo buffer!");
+        }
+        m_sceneUboMappedPtr = uboResultInfo.pMappedData;
+
+        // 2. Setup Descriptor Layout (Binding 0: Shadow Map, Binding 1: Scene UBO)
+        std::vector<VkDescriptorSetLayoutBinding> bindings(2);
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_context->getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor set layout!");
+        }
+
+        // 3. Setup Descriptor Pool
+        std::vector<VkDescriptorPoolSize> poolSizes = {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4 }
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.maxSets = 4;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+
+        if (vkCreateDescriptorPool(m_context->getDevice(), &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+
+        // 4. Allocate and Write Descriptor Set
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &m_descriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(m_context->getDevice(), &allocInfo, &m_descriptorSet) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor set!");
+        }
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = m_shadowImageView;
+        imageInfo.sampler = m_shadowSampler;
+
+        VkDescriptorBufferInfo uboDescInfo{};
+        uboDescInfo.buffer = m_sceneUboBuffer;
+        uboDescInfo.offset = 0;
+        uboDescInfo.range = sizeof(SceneUboData);
+
+        std::vector<VkWriteDescriptorSet> descriptorWrites(2);
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet = m_descriptorSet;
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pImageInfo = &imageInfo;
+
+        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet = m_descriptorSet;
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pBufferInfo = &uboDescInfo;
+
+        vkUpdateDescriptorSets(m_context->getDevice(), static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+    }
+
+    void VulkanRenderer::createShadowPipeline() {
+        auto vertCode = utils::readFile("shadow_depth.vert.spv");
+        auto fragCode = utils::readFile("shadow_depth.frag.spv");
+
+        auto createShaderModule = [&](const std::vector<char>& code) {
+            VkShaderModuleCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            createInfo.codeSize = code.size();
+            createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+            VkShaderModule shaderModule;
+            if (vkCreateShaderModule(m_context->getDevice(), &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create shader module!");
+            }
+            return shaderModule;
+        };
+
+        VkShaderModule vertModule = createShaderModule(vertCode);
+        VkShaderModule fragModule = createShaderModule(fragCode);
+
+        VkPipelineShaderStageCreateInfo vertStage{};
+        vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertStage.module = vertModule;
+        vertStage.pName = "main";
+
+        VkPipelineShaderStageCreateInfo fragStage{};
+        fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragStage.module = fragModule;
+        fragStage.pName = "main";
+
+        VkPipelineShaderStageCreateInfo stages[] = {vertStage, fragStage};
+
+        auto bindingDescriptions = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
+        vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.depthBiasEnable = VK_TRUE;
+        rasterizer.depthBiasConstantFactor = 1.25f;
+        rasterizer.depthBiasSlopeFactor = 1.75f;
+
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        std::vector<VkDynamicState> dynamicStates = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR
+        };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
+
+        struct ShadowPushConstants {
+            glm::mat4 lightSpaceMvp;
+        };
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(ShadowPushConstants);
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+        if (vkCreatePipelineLayout(m_context->getDevice(), &layoutInfo, nullptr, &m_shadowPipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shadow pipeline layout!");
+        }
+
+        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+        VkPipelineRenderingCreateInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        renderingInfo.colorAttachmentCount = 0;
+        renderingInfo.depthAttachmentFormat = depthFormat;
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.pNext = &renderingInfo;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = stages;
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_shadowPipelineLayout;
+
+        if (vkCreateGraphicsPipelines(m_context->getDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_shadowPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shadow pipeline!");
+        }
+
+        vkDestroyShaderModule(m_context->getDevice(), fragModule, nullptr);
+        vkDestroyShaderModule(m_context->getDevice(), vertModule, nullptr);
+    }
+
+    void VulkanRenderer::cleanupShadowResources() {
+        if (!m_context || !m_context->getDevice()) return;
+        VkDevice device = m_context->getDevice();
+
+        if (m_shadowPipeline) {
+            vkDestroyPipeline(device, m_shadowPipeline, nullptr);
+            m_shadowPipeline = VK_NULL_HANDLE;
+        }
+        if (m_shadowPipelineLayout) {
+            vkDestroyPipelineLayout(device, m_shadowPipelineLayout, nullptr);
+            m_shadowPipelineLayout = VK_NULL_HANDLE;
+        }
+        if (m_descriptorPool) {
+            vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
+            m_descriptorPool = VK_NULL_HANDLE;
+        }
+        if (m_descriptorSetLayout) {
+            vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
+            m_descriptorSetLayout = VK_NULL_HANDLE;
+        }
+        if (m_shadowSampler) {
+            vkDestroySampler(device, m_shadowSampler, nullptr);
+            m_shadowSampler = VK_NULL_HANDLE;
+        }
+        if (m_shadowImageView) {
+            vkDestroyImageView(device, m_shadowImageView, nullptr);
+            m_shadowImageView = VK_NULL_HANDLE;
+        }
+        if (m_sceneUboBuffer) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_sceneUboBuffer, m_sceneUboAlloc);
+            m_sceneUboBuffer = VK_NULL_HANDLE;
+            m_sceneUboAlloc = VK_NULL_HANDLE;
+            m_sceneUboMappedPtr = nullptr;
+        }
+        if (m_shadowImage) {
+            vmaDestroyImage(m_context->getAllocator(), m_shadowImage, m_shadowAllocation);
+            m_shadowImage = VK_NULL_HANDLE;
+            m_shadowAllocation = VK_NULL_HANDLE;
         }
     }
 
@@ -279,6 +663,7 @@ namespace engine::renderer {
         struct PushConstants {
             glm::mat4 mvp;
             glm::mat4 model;
+            glm::mat4 lightSpaceMatrix;
             glm::vec4 baseColorFactor;
             glm::vec4 cameraPos;
             glm::vec4 materialParams;
@@ -291,6 +676,8 @@ namespace engine::renderer {
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
         pipelineLayoutInfo.pushConstantRangeCount = 1;
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -330,6 +717,216 @@ namespace engine::renderer {
         vkDestroyShaderModule(m_context->getDevice(), vertShaderModule, nullptr);
     }
 
+    void VulkanRenderer::createParticlePipeline() {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(ParticleVertex) * MAX_PARTICLES;
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo vmaAllocInfo{};
+        if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocInfo, &m_particleVertexBuffer, &m_particleVertexAlloc, &vmaAllocInfo) != VK_SUCCESS) {
+            std::cerr << "[Renderer] Warning: Failed to create particle vertex buffer" << std::endl;
+            return;
+        }
+        m_particleMappedPtr = vmaAllocInfo.pMappedData;
+
+        std::vector<char> vertShaderCode;
+        std::vector<char> fragShaderCode;
+        try {
+            vertShaderCode = utils::readFile("particle.vert.spv");
+            fragShaderCode = utils::readFile("particle.frag.spv");
+        } catch (const std::exception& e) {
+            std::cerr << "[Renderer] Warning: Could not load particle shaders: " << e.what() << std::endl;
+            return;
+        }
+
+        auto createShaderModule = [&](const std::vector<char>& code) {
+            VkShaderModuleCreateInfo ci{};
+            ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            ci.codeSize = code.size();
+            ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
+            VkShaderModule mod{VK_NULL_HANDLE};
+            vkCreateShaderModule(m_context->getDevice(), &ci, nullptr, &mod);
+            return mod;
+        };
+
+        VkShaderModule vertMod = createShaderModule(vertShaderCode);
+        VkShaderModule fragMod = createShaderModule(fragShaderCode);
+        if (!vertMod || !fragMod) {
+            if (vertMod) vkDestroyShaderModule(m_context->getDevice(), vertMod, nullptr);
+            if (fragMod) vkDestroyShaderModule(m_context->getDevice(), fragMod, nullptr);
+            return;
+        }
+
+        VkPipelineShaderStageCreateInfo shaderStages[2]{};
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shaderStages[0].module = vertMod;
+        shaderStages[0].pName = "main";
+
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shaderStages[1].module = fragMod;
+        shaderStages[1].pName = "main";
+
+        VkVertexInputBindingDescription bindingDesc{};
+        bindingDesc.binding = 0;
+        bindingDesc.stride = sizeof(ParticleVertex);
+        bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        std::array<VkVertexInputAttributeDescription, 3> attrDescs{};
+        attrDescs[0].location = 0;
+        attrDescs[0].binding = 0;
+        attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attrDescs[0].offset = offsetof(ParticleVertex, pos);
+
+        attrDescs[1].location = 1;
+        attrDescs[1].binding = 0;
+        attrDescs[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attrDescs[1].offset = offsetof(ParticleVertex, color);
+
+        attrDescs[2].location = 2;
+        attrDescs[2].binding = 0;
+        attrDescs[2].format = VK_FORMAT_R32_SFLOAT;
+        attrDescs[2].offset = offsetof(ParticleVertex, size);
+
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrDescs.size());
+        vertexInputInfo.pVertexAttributeDescriptions = attrDescs.data();
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+        inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineColorBlendAttachmentState colorBlend{};
+        colorBlend.blendEnable = VK_TRUE;
+        colorBlend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        colorBlend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlend.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlend.alphaBlendOp = VK_BLEND_OP_ADD;
+        colorBlend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlend;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_FALSE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
+        std::vector<VkDynamicState> dynamicStates = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR
+        };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
+
+        VkPushConstantRange pcr{};
+        pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pcr.offset = 0;
+        pcr.size = sizeof(glm::mat4);
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pcr;
+
+        if (vkCreatePipelineLayout(m_context->getDevice(), &layoutInfo, nullptr, &m_particlePipelineLayout) != VK_SUCCESS) {
+            std::cerr << "[Renderer] Failed to create particle pipeline layout" << std::endl;
+            vkDestroyShaderModule(m_context->getDevice(), fragMod, nullptr);
+            vkDestroyShaderModule(m_context->getDevice(), vertMod, nullptr);
+            return;
+        }
+
+        VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+        VkPipelineRenderingCreateInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachmentFormats = &colorFormat;
+        renderingInfo.depthAttachmentFormat = depthFormat;
+
+        VkGraphicsPipelineCreateInfo pipeInfo{};
+        pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipeInfo.pNext = &renderingInfo;
+        pipeInfo.stageCount = 2;
+        pipeInfo.pStages = shaderStages;
+        pipeInfo.pVertexInputState = &vertexInputInfo;
+        pipeInfo.pInputAssemblyState = &inputAssembly;
+        pipeInfo.pViewportState = &viewportState;
+        pipeInfo.pRasterizationState = &rasterizer;
+        pipeInfo.pMultisampleState = &multisampling;
+        pipeInfo.pColorBlendState = &colorBlending;
+        pipeInfo.pDepthStencilState = &depthStencil;
+        pipeInfo.pDynamicState = &dynamicState;
+        pipeInfo.layout = m_particlePipelineLayout;
+        pipeInfo.renderPass = VK_NULL_HANDLE;
+
+        if (vkCreateGraphicsPipelines(m_context->getDevice(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &m_particlePipeline) != VK_SUCCESS) {
+            std::cerr << "[Renderer] Failed to create particle graphics pipeline" << std::endl;
+        }
+
+        vkDestroyShaderModule(m_context->getDevice(), fragMod, nullptr);
+        vkDestroyShaderModule(m_context->getDevice(), vertMod, nullptr);
+    }
+
+    void VulkanRenderer::cleanupParticlePipeline() {
+        if (!m_context || !m_context->getDevice()) return;
+        VkDevice dev = m_context->getDevice();
+        if (m_particlePipeline) {
+            vkDestroyPipeline(dev, m_particlePipeline, nullptr);
+            m_particlePipeline = VK_NULL_HANDLE;
+        }
+        if (m_particlePipelineLayout) {
+            vkDestroyPipelineLayout(dev, m_particlePipelineLayout, nullptr);
+            m_particlePipelineLayout = VK_NULL_HANDLE;
+        }
+        if (m_particleVertexBuffer) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_particleVertexBuffer, m_particleVertexAlloc);
+            m_particleVertexBuffer = VK_NULL_HANDLE;
+            m_particleVertexAlloc = VK_NULL_HANDLE;
+            m_particleMappedPtr = nullptr;
+        }
+    }
+
     void VulkanRenderer::render(ecs::Registry& registry, core::AssetManager* assetManager, glm::mat4 viewMatrix, core::Engine* engine) {
 #ifdef USE_GLFW
         uint32_t imageIndex = 0;
@@ -358,6 +955,148 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
+
+        // =========================================================================
+        // PASS 1: DIRECTIONAL SHADOW PASS (Unreal Engine 5 Cascaded/Directional Depth)
+        // =========================================================================
+        glm::vec3 sunDir = engine ? glm::normalize(engine->getEnvironmentSettings().sunDirection) : glm::normalize(glm::vec3(0.55f, 0.85f, 0.40f));
+        glm::vec3 camPos = engine ? engine->getCameraPosition() : glm::vec3(glm::inverse(viewMatrix)[3]);
+        
+        // Target focal area in world space
+        glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+        if (engine) {
+            float yaw = glm::radians(engine->getCameraYaw());
+            float pitch = glm::radians(engine->getCameraPitch());
+            glm::vec3 front = glm::normalize(glm::vec3(
+                cos(yaw) * cos(pitch),
+                sin(pitch),
+                sin(yaw) * cos(pitch)
+            ));
+            if (std::abs(front.y) > 0.05f) {
+                float t = -camPos.y / front.y;
+                if (t > 0.0f && t < 80.0f) {
+                    lightTarget = camPos + front * t;
+                }
+            }
+        }
+        lightTarget.y = 0.0f; // Anchor shadow projection plane to ground level
+
+        float orthoExtent = 35.0f;
+        // Snap light target to shadow texels to eliminate shadow crawling/shimmering (UE5 technique)
+        float worldUnitsPerTexel = (2.0f * orthoExtent) / static_cast<float>(m_shadowWidth);
+        lightTarget.x = std::round(lightTarget.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+        lightTarget.z = std::round(lightTarget.z / worldUnitsPerTexel) * worldUnitsPerTexel;
+
+        glm::vec3 lightPos = lightTarget + sunDir * 60.0f;
+        glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 lightProj = glm::ortho(-orthoExtent, orthoExtent, -orthoExtent, orthoExtent, 1.0f, 120.0f);
+        lightProj[1][1] *= -1.0f; // Vulkan Y-flip
+        glm::mat4 lightSpaceMatrix = lightProj * lightView;
+
+        if (m_shadowPipeline && m_shadowImage) {
+            VkImageMemoryBarrier2 shadowBarrierInit{};
+            shadowBarrierInit.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            shadowBarrierInit.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            shadowBarrierInit.srcAccessMask = 0;
+            shadowBarrierInit.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            shadowBarrierInit.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            shadowBarrierInit.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            shadowBarrierInit.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            shadowBarrierInit.image = m_shadowImage;
+            shadowBarrierInit.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            shadowBarrierInit.subresourceRange.baseMipLevel = 0;
+            shadowBarrierInit.subresourceRange.levelCount = 1;
+            shadowBarrierInit.subresourceRange.baseArrayLayer = 0;
+            shadowBarrierInit.subresourceRange.layerCount = 1;
+
+            VkDependencyInfo shadowDepInfo{};
+            shadowDepInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            shadowDepInfo.imageMemoryBarrierCount = 1;
+            shadowDepInfo.pImageMemoryBarriers = &shadowBarrierInit;
+            vkCmdPipelineBarrier2(m_commandBuffer, &shadowDepInfo);
+
+            VkRenderingAttachmentInfo shadowDepthAttachment{};
+            shadowDepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            shadowDepthAttachment.imageView = m_shadowImageView;
+            shadowDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            shadowDepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            shadowDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            shadowDepthAttachment.clearValue.depthStencil = {1.0f, 0};
+
+            VkRenderingInfo shadowRenderingInfo{};
+            shadowRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+            shadowRenderingInfo.renderArea.offset = {0, 0};
+            shadowRenderingInfo.renderArea.extent = {m_shadowWidth, m_shadowHeight};
+            shadowRenderingInfo.layerCount = 1;
+            shadowRenderingInfo.pDepthAttachment = &shadowDepthAttachment;
+
+            vkCmdBeginRendering(m_commandBuffer, &shadowRenderingInfo);
+
+            vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline);
+            VkViewport shadowVp{0.0f, 0.0f, static_cast<float>(m_shadowWidth), static_cast<float>(m_shadowHeight), 0.0f, 1.0f};
+            vkCmdSetViewport(m_commandBuffer, 0, 1, &shadowVp);
+            VkRect2D shadowScissor{{0, 0}, {m_shadowWidth, m_shadowHeight}};
+            vkCmdSetScissor(m_commandBuffer, 0, 1, &shadowScissor);
+
+            auto shadowView = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
+            for (auto entity : shadowView) {
+                const auto& transform = shadowView.get<ecs::TransformComponent>(entity);
+                const auto& meshComp = shadowView.get<ecs::MeshComponent>(entity);
+
+                // Ground plane doesn't cast shadow onto itself
+                if (meshComp.meshId == 1) continue;
+
+                glm::mat4 model = glm::mat4(1.0f);
+                model = glm::translate(model, transform.position);
+                model *= glm::mat4_cast(transform.orientation);
+                model = glm::scale(model, transform.scale);
+
+                struct ShadowPushConstants {
+                    glm::mat4 lightSpaceMvp;
+                } shadowPcs;
+                shadowPcs.lightSpaceMvp = lightSpaceMatrix * model;
+
+                vkCmdPushConstants(m_commandBuffer, m_shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &shadowPcs);
+
+                if (assetManager) {
+                    auto* meshAsset = assetManager->getMesh(meshComp.meshId);
+                    if (meshAsset && meshAsset->vertexBuffer && meshAsset->indexBuffer) {
+                        VkDeviceSize offset = 0;
+                        vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &meshAsset->vertexBuffer, &offset);
+                        vkCmdBindIndexBuffer(m_commandBuffer, meshAsset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(m_commandBuffer, meshAsset->indexCount, 1, 0, 0, 0);
+                    }
+                }
+            }
+
+            vkCmdEndRendering(m_commandBuffer);
+
+            // Transition shadow map to SHADER_READ_ONLY_OPTIMAL for sampling in Pass 2
+            VkImageMemoryBarrier2 shadowToSampleBarrier{};
+            shadowToSampleBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            shadowToSampleBarrier.srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            shadowToSampleBarrier.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            shadowToSampleBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            shadowToSampleBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            shadowToSampleBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            shadowToSampleBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            shadowToSampleBarrier.image = m_shadowImage;
+            shadowToSampleBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            shadowToSampleBarrier.subresourceRange.baseMipLevel = 0;
+            shadowToSampleBarrier.subresourceRange.levelCount = 1;
+            shadowToSampleBarrier.subresourceRange.baseArrayLayer = 0;
+            shadowToSampleBarrier.subresourceRange.layerCount = 1;
+
+            VkDependencyInfo shadowReadDepInfo{};
+            shadowReadDepInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            shadowReadDepInfo.imageMemoryBarrierCount = 1;
+            shadowReadDepInfo.pImageMemoryBarriers = &shadowToSampleBarrier;
+            vkCmdPipelineBarrier2(m_commandBuffer, &shadowReadDepInfo);
+        }
+
+        // =========================================================================
+        // PASS 2: MAIN PBR PASS (UE5 Cook-Torrance BRDF + PCF Soft Shadows)
+        // =========================================================================
 
         // Transition m_colorImage to COLOR_ATTACHMENT_OPTIMAL and m_depthImage to DEPTH_STENCIL_ATTACHMENT_OPTIMAL
         VkImageMemoryBarrier2 colorBarrier{};
@@ -427,6 +1166,45 @@ namespace engine::renderer {
         // --- DRAW 3D SCENE ---
         if (m_graphicsPipeline) {
             vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+
+            // Populate Scene Lighting, Atmosphere & Point Lights UBO
+            if (m_sceneUboMappedPtr) {
+                SceneUboData ubo{};
+                if (engine) {
+                    const auto& env = engine->getEnvironmentSettings();
+                    ubo.sunDirection = glm::vec4(glm::normalize(env.sunDirection), env.sunIntensity);
+                    ubo.sunColor = glm::vec4(env.sunColor, 1.0f);
+                    ubo.ambientColor = glm::vec4(env.ambientColor, env.ambientIntensity);
+                    ubo.fogParams = glm::vec4(env.fogEnabled ? 1.0f : 0.0f, env.fogNear, env.fogFar, 0.0f);
+                    ubo.fogColor = glm::vec4(env.fogColor, 1.0f);
+                } else {
+                    ubo.sunDirection = glm::vec4(glm::normalize(glm::vec3(0.55f, 0.85f, 0.40f)), 3.4f);
+                    ubo.sunColor = glm::vec4(1.0f, 0.97f, 0.92f, 1.0f);
+                    ubo.ambientColor = glm::vec4(0.15f, 0.22f, 0.35f, 1.0f);
+                    ubo.fogParams = glm::vec4(0.0f, 20.0f, 100.0f, 0.0f);
+                    ubo.fogColor = glm::vec4(0.06f, 0.07f, 0.09f, 1.0f);
+                }
+
+                auto lightView = registry.get().view<ecs::TransformComponent, ecs::LightComponent>();
+                int lightIdx = 0;
+                for (auto lEntity : lightView) {
+                    if (lightIdx >= 8) break;
+                    const auto& lt = lightView.get<ecs::TransformComponent>(lEntity);
+                    const auto& lc = lightView.get<ecs::LightComponent>(lEntity);
+                    if (lc.type == "point" || lc.type.empty()) {
+                        ubo.pointLightsPos[lightIdx] = glm::vec4(lt.position, lc.range);
+                        ubo.pointLightsCol[lightIdx] = glm::vec4(lc.color, lc.intensity);
+                        lightIdx++;
+                    }
+                }
+                ubo.numPointLights = lightIdx;
+                std::memcpy(m_sceneUboMappedPtr, &ubo, sizeof(SceneUboData));
+            }
+
+            if (m_descriptorSet) {
+                vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
+            }
+
             VkViewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
@@ -444,11 +1222,13 @@ namespace engine::renderer {
             struct PushConstants {
                 glm::mat4 mvp;
                 glm::mat4 model;
+                glm::mat4 lightSpaceMatrix;
                 glm::vec4 baseColorFactor;
                 glm::vec4 cameraPos;
                 glm::vec4 materialParams;
             } pcs;
 
+            pcs.lightSpaceMatrix = lightSpaceMatrix;
             glm::vec3 camPos = engine ? engine->getCameraPosition() : glm::vec3(glm::inverse(viewMatrix)[3]);
             pcs.cameraPos = glm::vec4(camPos, 0.0f);
 
@@ -480,7 +1260,7 @@ namespace engine::renderer {
                     if (registry.get().all_of<ecs::MaterialComponent>(entity)) {
                         const auto& mat = registry.get().get<ecs::MaterialComponent>(entity);
                         pcs.baseColorFactor = mat.baseColor;
-                        pcs.materialParams = glm::vec4(mat.metallic, mat.roughness, 0.0f, 0.0f);
+                        pcs.materialParams = glm::vec4(mat.metallic, mat.roughness, 0.0f, mat.emissiveIntensity);
                     } else {
                         // Cohesive high-fidelity UE5 studio palette
                         static const glm::vec4 uePalette[] = {
@@ -511,6 +1291,100 @@ namespace engine::renderer {
                         vkCmdDrawIndexed(m_commandBuffer, meshAsset->indexCount, 1, 0, 0, 0);
                     }
                 }
+            }
+        }
+
+        // Render Niagara-style particles
+        if (m_particlePipeline && m_particleMappedPtr) {
+            std::vector<ParticleVertex> particles;
+            particles.reserve(2048);
+
+            static auto particleClockStart = std::chrono::steady_clock::now();
+            float curTime = std::chrono::duration<float>(std::chrono::steady_clock::now() - particleClockStart).count();
+
+            auto particleView = registry.get().view<ecs::TransformComponent, ecs::ParticleEmitterComponent>();
+            for (auto entity : particleView) {
+                const auto& transform = particleView.get<ecs::TransformComponent>(entity);
+                const auto& emitter = particleView.get<ecs::ParticleEmitterComponent>(entity);
+
+                uint32_t numParticles = std::min(emitter.count, 500u);
+                glm::vec3 basePos = transform.position;
+                glm::vec3 emitColor = emitter.color;
+                float emitSpeed = emitter.speed > 0.01f ? emitter.speed : 3.0f;
+                float emitSize = emitter.size > 0.01f ? emitter.size : 0.4f;
+
+                for (uint32_t i = 0; i < numParticles; ++i) {
+                    if (particles.size() >= MAX_PARTICLES) break;
+
+                    float seed = static_cast<float>((i * 1337) % 1000) / 1000.0f;
+                    float seed2 = static_cast<float>((i * 7919) % 1000) / 1000.0f;
+                    float seed3 = static_cast<float>((i * 4973) % 1000) / 1000.0f;
+                    float lifetime = 1.0f + seed * 1.5f;
+                    float age = fmod(curTime * emitSpeed + seed * lifetime, lifetime);
+                    float progress = age / lifetime;
+
+                    ParticleVertex pv{};
+                    if (emitter.type == "sparks") {
+                        float phi = seed2 * 6.283185f;
+                        float theta = seed3 * 3.14159f;
+                        glm::vec3 dir(sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi));
+                        pv.pos = basePos + dir * (age * emitSpeed) + glm::vec3(0.0f, -4.9f * age * age, 0.0f);
+                        float alpha = (1.0f - progress);
+                        pv.color = glm::vec4(emitColor * 1.5f, alpha);
+                        pv.size = emitSize * (1.0f - progress * 0.5f);
+                    } else if (emitter.type == "smoke") {
+                        glm::vec3 dir(sin(seed2 * 6.28f) * 0.5f, 1.0f, cos(seed3 * 6.28f) * 0.5f);
+                        pv.pos = basePos + dir * (age * emitSpeed * 0.6f);
+                        float alpha = sin(progress * 3.14159f) * 0.35f;
+                        pv.color = glm::vec4(emitColor * 0.6f, alpha);
+                        pv.size = emitSize * (1.0f + progress * 2.5f);
+                    } else if (emitter.type == "portal") {
+                        float angle = curTime * emitSpeed * 2.0f + seed * 6.283185f;
+                        float radius = 0.8f + 0.3f * sin(angle * 2.0f);
+                        pv.pos = basePos + glm::vec3(cos(angle) * radius, (seed2 - 0.5f) * 0.5f + sin(angle * 3.0f) * 0.2f, sin(angle) * radius);
+                        pv.color = glm::vec4(emitColor, 0.8f);
+                        pv.size = emitSize * (0.8f + 0.4f * sin(curTime * 5.0f + seed));
+                    } else if (emitter.type == "explosion") {
+                        float phi = seed2 * 6.283185f;
+                        float theta = seed3 * 3.14159f;
+                        glm::vec3 dir(sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi));
+                        pv.pos = basePos + dir * (progress * emitSpeed * 2.5f);
+                        float alpha = std::max(0.0f, 1.0f - progress);
+                        glm::vec3 c = glm::mix(emitColor * 2.0f, glm::vec3(0.2f, 0.05f, 0.0f), progress);
+                        pv.color = glm::vec4(c, alpha);
+                        pv.size = emitSize * (1.5f - progress);
+                    } else { // default: fire
+                        float phi = seed2 * 6.283185f;
+                        float r = (1.0f - progress) * 0.3f;
+                        pv.pos = basePos + glm::vec3(cos(phi) * r, age * emitSpeed, sin(phi) * r);
+                        glm::vec3 c = glm::mix(emitColor * 1.8f, glm::vec3(0.8f, 0.1f, 0.0f), progress);
+                        float alpha = (1.0f - progress);
+                        pv.color = glm::vec4(c, alpha);
+                        pv.size = emitSize * (1.0f - progress * 0.6f);
+                    }
+                    particles.push_back(pv);
+                }
+            }
+
+            if (!particles.empty()) {
+                memcpy(m_particleMappedPtr, particles.data(), particles.size() * sizeof(ParticleVertex));
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_particlePipeline);
+
+                float pAspect = static_cast<float>(m_width) / static_cast<float>(m_height);
+#ifdef USE_GLFW
+                if (!m_standaloneGameMode && m_viewportAspectRatio > 0.1f) {
+                    pAspect = m_viewportAspectRatio;
+                }
+#endif
+                glm::mat4 pProj = glm::perspective(glm::radians(45.0f), pAspect, 0.1f, 1000.0f);
+                pProj[1][1] *= -1;
+                glm::mat4 pVp = pProj * viewMatrix;
+
+                vkCmdPushConstants(m_commandBuffer, m_particlePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &pVp);
+
+                VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &m_particleVertexBuffer, &offset);
+                vkCmdDraw(m_commandBuffer, static_cast<uint32_t>(particles.size()), 1, 0, 0);
             }
         }
         vkCmdEndRendering(m_commandBuffer);
@@ -803,6 +1677,14 @@ namespace engine::renderer {
                 return "";
             }
         }
+
+        static std::string s_cachedFrame = "";
+        static auto s_lastTime = std::chrono::steady_clock::now();
+        auto nowTime = std::chrono::steady_clock::now();
+        if (!s_cachedFrame.empty() && std::chrono::duration<float, std::milli>(nowTime - s_lastTime).count() < 14.0f) {
+            return s_cachedFrame;
+        }
+
         VkDeviceSize bufferSize = m_width * m_height * 4;
 
         vkResetCommandBuffer(m_captureCommandBuffer, 0);
@@ -861,11 +1743,13 @@ namespace engine::renderer {
 
         const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtr);
         std::vector<uint8_t> jpegBytes;
-        jpegBytes.reserve(128 * 1024);
-        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 85);
+        jpegBytes.reserve(256 * 1024);
+        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 75);
 
         std::string encoded = encodeBase64Data(jpegBytes.data(), jpegBytes.size());
-        return "data:image/jpeg;base64," + encoded;
+        s_cachedFrame = "data:image/jpeg;base64," + encoded;
+        s_lastTime = std::chrono::steady_clock::now();
+        return s_cachedFrame;
     }
 
     void VulkanRenderer::submitBufferBarrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size) {
@@ -983,6 +1867,11 @@ namespace engine::renderer {
         applyUnrealWebTheme();
 
         ImGui_ImplGlfw_InitForVulkan(m_context->getWindow(), true);
+#ifdef USE_GLFW
+        if (glfwRawMouseMotionSupported()) {
+            glfwSetInputMode(m_context->getWindow(), GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        }
+#endif
         
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.Instance = m_context->getInstance();
@@ -1047,7 +1936,32 @@ namespace engine::renderer {
         m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    static void drawVec3Control(const char* label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 70.0f) {
+    enum class NativeGizmoMode {
+        TRANSLATE = 0,
+        ROTATE = 1,
+        SCALE = 2
+    };
+
+    static float distToSegment(const ImVec2& p, const ImVec2& a, const ImVec2& b) {
+        float abx = b.x - a.x;
+        float aby = b.y - a.y;
+        float lenSq = abx * abx + aby * aby;
+        if (lenSq < 1e-4f) {
+            float dx = p.x - a.x;
+            float dy = p.y - a.y;
+            return sqrtf(dx * dx + dy * dy);
+        }
+        float t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
+        t = std::clamp(t, 0.0f, 1.0f);
+        float projX = a.x + t * abx;
+        float projY = a.y + t * aby;
+        float dx = p.x - projX;
+        float dy = p.y - projY;
+        return sqrtf(dx * dx + dy * dy);
+    }
+
+    static bool drawVec3Control(const char* label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 70.0f) {
+        bool changed = false;
         ImGui::PushID(label);
         ImGui::Columns(2);
         ImGui::SetColumnWidth(0, columnWidth);
@@ -1066,37 +1980,38 @@ namespace engine::renderer {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.18f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.28f, 0.30f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.12f, 0.14f, 1.0f));
-        if (ImGui::Button("X", buttonSize)) values.x = resetValue;
+        if (ImGui::Button("X", buttonSize)) { values.x = resetValue; changed = true; }
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
         ImGui::SameLine();
 
         // Y (Green button)
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.75f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.90f, 0.35f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.60f, 0.18f, 1.0f));
-        if (ImGui::Button("Y", buttonSize)) values.y = resetValue;
+        if (ImGui::Button("Y", buttonSize)) { values.y = resetValue; changed = true; }
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
         ImGui::SameLine();
 
         // Z (Blue button)
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.90f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.48f, 1.0f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.28f, 0.75f, 1.0f));
-        if (ImGui::Button("Z", buttonSize)) values.z = resetValue;
+        if (ImGui::Button("Z", buttonSize)) { values.z = resetValue; changed = true; }
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
 
         ImGui::PopStyleVar();
         ImGui::Columns(1);
         ImGui::PopID();
+        return changed;
     }
 
     void VulkanRenderer::renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine) {
@@ -1105,12 +2020,22 @@ namespace engine::renderer {
         ImGui::NewFrame();
 
         // --- GLOBAL UI SCALING & RESPONSIVE LAYOUT CALCULATION ---
-        static float s_uiScale = 1.0f;
-        ImGui::GetIO().FontGlobalScale = s_uiScale;
-
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         float screenW = viewport->Size.x;
         float screenH = viewport->Size.y;
+
+        // Auto-scale relative to 1080p standard reference resolution (1920x1080)
+        // This guarantees that on 720p, 1080p, 1440p, 4K or ultra-wide monitors,
+        // the UI elements maintain identical visual proportions.
+        float autoScaleY = screenH / 1080.0f;
+        float autoScaleX = screenW / 1920.0f;
+        float autoScale = std::min(autoScaleX, autoScaleY);
+        if (autoScale < 0.65f) autoScale = 0.65f;
+        if (autoScale > 3.0f) autoScale = 3.0f;
+
+        // Effective UI Scale: Auto-Scale * user modifier (m_uiScale)
+        float s_uiScale = autoScale * m_uiScale;
+        ImGui::GetIO().FontGlobalScale = s_uiScale;
 
         float topMenuBarH = 26.0f * s_uiScale;
         float topToolbarH = 40.0f * s_uiScale;
@@ -1132,9 +2057,41 @@ namespace engine::renderer {
         if (centerViewportW < 200.0f) centerViewportW = 200.0f;
 
         static entt::entity selectedEnt = entt::null;
+        static NativeGizmoMode s_gizmoMode = NativeGizmoMode::TRANSLATE;
+        static int s_draggingGizmoAxis = 0;
+        static glm::vec3 s_dragInitialEntityPos(0.0f);
+        static glm::vec3 s_dragPlaneNormal(0.0f, 1.0f, 0.0f);
+        static glm::vec3 s_dragAxisVec(1.0f, 0.0f, 0.0f);
+        static glm::vec3 s_dragInitialHitPoint(0.0f);
+        static float s_dragInitialOffset = 0.0f;
+        static bool s_dragHasHit = false;
+
+        static glm::vec3 s_dragInitialRotation(0.0f);
+        static float s_dragInitialAngle = 0.0f;
+        static float s_lastRotAngle = 0.0f;
+        static float s_accumulatedRotAngle = 0.0f;
+        static ImVec2 s_dragPivotScreen(0.0f, 0.0f);
+
+        static glm::vec3 s_dragInitialScale(1.0f);
+        static float s_dragInitialDist = 1.0f;
+
+        static bool s_isRmbNavigating = false;
+        static bool s_isMmbPanning = false;
+        static bool s_isAltOrbiting = false;
+        static float s_camFlySpeed = 25.0f;
         static bool s_showScriptStudio = false;
         static bool s_showContentDrawer = false;
         static bool s_showOutputLog = true;
+
+        if (selectedEnt != entt::null && (!registry.get().valid(selectedEnt))) {
+            selectedEnt = entt::null;
+            s_draggingGizmoAxis = 0;
+            if (engine) engine->setSelectedEntity(entt::null);
+        }
+
+        if (engine && engine->getSelectedEntity() != entt::null && selectedEnt == entt::null) {
+            selectedEnt = engine->getSelectedEntity();
+        }
 
         if (m_standaloneGameMode) {
             // Standalone Pure Game HUD (Health, Score, ESC - Pause/Quit)
@@ -1212,7 +2169,10 @@ namespace engine::renderer {
             }
             if (ImGui::BeginMenu("Select")) {
                 if (ImGui::MenuItem("Select All Actors")) {}
-                if (ImGui::MenuItem("Deselect All")) { selectedEnt = entt::null; }
+                if (ImGui::MenuItem("Deselect All")) {
+                    selectedEnt = entt::null;
+                    if (engine) engine->setSelectedEntity(entt::null);
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Actor")) {
@@ -1220,6 +2180,7 @@ namespace engine::renderer {
                     if (selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
                         registry.get().destroy(selectedEnt);
                         selectedEnt = entt::null;
+                        if (engine) engine->setSelectedEntity(entt::null);
                     }
                 }
                 ImGui::EndMenu();
@@ -1230,22 +2191,43 @@ namespace engine::renderer {
                 ImGui::EndMenu();
             }
 
-            // Right-aligned Project Title and UI Scale
-            float rightInfoWidth = 430.0f * s_uiScale;
+            // Right-aligned Project Title, UI Scale and Resolution Scale
+            float rightInfoWidth = 570.0f * s_uiScale;
             ImGui::SameLine(screenW - rightInfoWidth);
-            ImGui::TextColored(ImVec4(0.5f, 0.6f, 0.75f, 1.0f), "Project: moj projekt gry | UE 5.4 / Vulkan Hybrid");
+            ImGui::TextColored(ImVec4(0.5f, 0.6f, 0.75f, 1.0f), "Project: moj projekt gry | Vulkan 1.3");
             ImGui::SameLine();
             ImGui::TextDisabled("|");
+
+            // UI Scale selector (Displays effective Auto-Scale percentage)
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "Scale:");
+            ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "UI: (%.0f%%)", s_uiScale * 100.0f);
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(70 * s_uiScale);
-            const char* scaleItems[] = { "100%", "125%", "150%" };
+            ImGui::SetNextItemWidth(95 * s_uiScale);
+            const char* scaleItems[] = { "Auto", "75%", "100%", "125%", "150%", "200%" };
             static int scaleIdx = 0;
             if (ImGui::Combo("##UIScaleCombo", &scaleIdx, scaleItems, IM_ARRAYSIZE(scaleItems))) {
-                if (scaleIdx == 0) s_uiScale = 1.0f;
-                else if (scaleIdx == 1) s_uiScale = 1.25f;
-                else if (scaleIdx == 2) s_uiScale = 1.50f;
+                if (scaleIdx == 0) setUiScale(1.0f);
+                else if (scaleIdx == 1) setUiScale(0.75f);
+                else if (scaleIdx == 2) setUiScale(1.0f);
+                else if (scaleIdx == 3) setUiScale(1.25f);
+                else if (scaleIdx == 4) setUiScale(1.50f);
+                else if (scaleIdx == 5) setUiScale(2.0f);
+            }
+
+            // Resolution Scale selector
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.5f, 1.0f), "Res:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(95 * s_uiScale);
+            const char* resItems[] = { "50% (540p)", "67% (720p)", "75% (810p)", "100% (1080p)", "133% (1440p)", "200% (4K)" };
+            static int resIdx = 3;
+            if (ImGui::Combo("##ResScaleCombo", &resIdx, resItems, IM_ARRAYSIZE(resItems))) {
+                if (resIdx == 0) setResolutionScale(0.5f);
+                else if (resIdx == 1) setResolutionScale(0.67f);
+                else if (resIdx == 2) setResolutionScale(0.75f);
+                else if (resIdx == 3) setResolutionScale(1.0f);
+                else if (resIdx == 4) setResolutionScale(1.33f);
+                else if (resIdx == 5) setResolutionScale(2.0f);
             }
 
             ImGui::EndMenuBar();
@@ -1317,13 +2299,19 @@ namespace engine::renderer {
         ImGui::SetNextItemWidth(110 * s_uiScale);
         if (ImGui::Combo("##PresetCombo", &currentPresetIdx, presets, IM_ARRAYSIZE(presets))) {
             if (engine) {
+                selectedEnt = entt::null;
+                s_draggingGizmoAxis = 0;
                 engine->setCurrentPreset(presets[currentPresetIdx]);
                 engine->resetScene(presets[currentPresetIdx]);
             }
         }
         ImGui::SameLine();
         if (ImGui::Button("Load Level")) {
-            if (engine) engine->resetScene(presets[currentPresetIdx]);
+            if (engine) {
+                selectedEnt = entt::null;
+                s_draggingGizmoAxis = 0;
+                engine->resetScene(presets[currentPresetIdx]);
+            }
         }
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.45f, 0.25f, 1.0f));
@@ -1438,6 +2426,7 @@ namespace engine::renderer {
                     registry.get().emplace<ecs::RigidBodyComponent>(entity, dynRb);
                 }
                 selectedEnt = entity;
+                if (engine) engine->setSelectedEntity(selectedEnt);
                 engine::core::Logger::info(std::string("Placed Actor: ") + title + " (ID: " + std::to_string(static_cast<uint32_t>(entity)) + ")");
             }
             ImGui::TextDisabled("  %s", desc);
@@ -1467,9 +2456,62 @@ namespace engine::renderer {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        // Viewport Header Controls Bar
-        ImGui::SetCursorPos(ImVec2(8, 6));
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "Perspective v  |  Lit (Vulkan 1.3 3D) v  |  Snap: 10  |  Angle: 45 deg  |  Cam Speed: 4");
+        // Viewport Header Controls Bar (Unreal Engine 5 style)
+        ImGui::SetCursorPos(ImVec2(8, 4));
+        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "Perspective v | Lit (Vulkan 1.3 3D) v |");
+        ImGui::SameLine();
+
+        // Gizmo Mode Buttons (W, E, R)
+        if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.9f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.14f, 0.20f, 1.0f));
+        }
+        if (ImGui::Button("[W] Translate")) s_gizmoMode = NativeGizmoMode::TRANSLATE;
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        if (s_gizmoMode == NativeGizmoMode::ROTATE) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.9f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.14f, 0.20f, 1.0f));
+        }
+        if (ImGui::Button("[E] Rotate")) s_gizmoMode = NativeGizmoMode::ROTATE;
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        if (s_gizmoMode == NativeGizmoMode::SCALE) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.9f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.14f, 0.20f, 1.0f));
+        }
+        if (ImGui::Button("[R] Scale")) s_gizmoMode = NativeGizmoMode::SCALE;
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        if (ImGui::Button("Focus (F)")) {
+            if (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt) && engine) {
+                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+                float cYaw = engine->getCameraYaw();
+                float cPitch = engine->getCameraPitch();
+                glm::vec3 cFront(
+                    cos(glm::radians(cYaw)) * cos(glm::radians(cPitch)),
+                    sin(glm::radians(cPitch)),
+                    sin(glm::radians(cYaw)) * cos(glm::radians(cPitch))
+                );
+                cFront = glm::normalize(cFront);
+                glm::vec3 newCamPos = t.position - cFront * 8.0f;
+                engine->setCamera(newCamPos, cYaw, cPitch, engine->getCameraFov());
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset Cam")) {
+            if (engine) engine->setCamera(glm::vec3(0.0f, 15.0f, 30.0f), -90.0f, -20.0f, 45.0f);
+        }
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.85f, 1.0f), "Cam Speed: %.0f", s_camFlySpeed);
 
         ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
         if (viewportPanelSize.x > 10.0f && viewportPanelSize.y > 10.0f) {
@@ -1478,6 +2520,538 @@ namespace engine::renderer {
 
         if (m_viewportDescriptor != VK_NULL_HANDLE && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
             ImGui::Image((ImTextureID)m_viewportDescriptor, viewportPanelSize);
+        }
+
+        ImVec2 vMin = ImGui::GetItemRectMin();
+        ImVec2 vMax = ImGui::GetItemRectMax();
+        ImVec2 vSize = ImGui::GetItemRectSize();
+        bool isHovered = ImGui::IsItemHovered();
+        bool isWindowFocused = ImGui::IsWindowFocused();
+        ImVec2 mousePos = ImGui::GetIO().MousePos;
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        float camYaw = engine ? engine->getCameraYaw() : -90.0f;
+        float camPitch = engine ? engine->getCameraPitch() : -20.0f;
+        float camFov = engine ? engine->getCameraFov() : 45.0f;
+        glm::vec3 camPos = engine ? engine->getCameraPosition() : glm::vec3(0.0f, 15.0f, 30.0f);
+
+        glm::vec3 front(
+            cos(glm::radians(camYaw)) * cos(glm::radians(camPitch)),
+            sin(glm::radians(camPitch)),
+            sin(glm::radians(camYaw)) * cos(glm::radians(camPitch))
+        );
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+        glm::vec3 up = glm::normalize(glm::cross(right, front));
+
+        float aspect = (m_standaloneGameMode || m_viewportAspectRatio <= 0.1f) ? (16.0f / 9.0f) : m_viewportAspectRatio;
+        glm::mat4 curProj = glm::perspective(glm::radians(camFov), aspect, 0.1f, 1000.0f);
+        curProj[1][1] *= -1.0f; // Vulkan Y-flip
+        glm::mat4 curView = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 curVP = curProj * curView;
+        glm::mat4 invVP = glm::inverse(curVP);
+
+        auto worldToScreen = [&](const glm::vec3& worldPos, ImVec2& screenPt, float& outW) -> bool {
+            glm::vec4 clip = curVP * glm::vec4(worldPos, 1.0f);
+            outW = clip.w;
+            if (clip.w <= 0.05f) return false;
+            glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            screenPt.x = vMin.x + (ndc.x * 0.5f + 0.5f) * vSize.x;
+            screenPt.y = vMin.y + (ndc.y * 0.5f + 0.5f) * vSize.y;
+            return true;
+        };
+
+        auto getRayFromScreen = [&](const ImVec2& screenPt, glm::vec3& outOrig, glm::vec3& outDir) {
+            float relX = (screenPt.x - vMin.x) / (vSize.x > 0.0f ? vSize.x : 1.0f);
+            float relY = (screenPt.y - vMin.y) / (vSize.y > 0.0f ? vSize.y : 1.0f);
+            float ndcX = relX * 2.0f - 1.0f;
+            float ndcY = relY * 2.0f - 1.0f;
+
+            glm::vec4 nearPt = invVP * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+            nearPt /= nearPt.w;
+            glm::vec4 farPt = invVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+            farPt /= farPt.w;
+
+            outOrig = camPos;
+            outDir = glm::normalize(glm::vec3(farPt - nearPt));
+        };
+
+        auto intersectRayPlane = [](const glm::vec3& rayOrig, const glm::vec3& rayDir, const glm::vec3& planePos, const glm::vec3& planeNormal, glm::vec3& outHit) -> bool {
+            float denom = glm::dot(rayDir, planeNormal);
+            if (std::abs(denom) < 1e-5f) return false;
+            float t = glm::dot(planePos - rayOrig, planeNormal) / denom;
+            if (t < 0.05f) return false;
+            outHit = rayOrig + t * rayDir;
+            return true;
+        };
+
+        // Hotkeys in Viewport
+        if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
+            if (!s_isRmbNavigating) {
+                if (ImGui::IsKeyPressed(ImGuiKey_W)) s_gizmoMode = NativeGizmoMode::TRANSLATE;
+                if (ImGui::IsKeyPressed(ImGuiKey_E)) s_gizmoMode = NativeGizmoMode::ROTATE;
+                if (ImGui::IsKeyPressed(ImGuiKey_R)) s_gizmoMode = NativeGizmoMode::SCALE;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_F) && selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
+                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+                glm::vec3 newCamPos = t.position - front * 8.0f;
+                if (engine) engine->setCamera(newCamPos, camYaw, camPitch, camFov);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                registry.get().destroy(selectedEnt);
+                selectedEnt = entt::null;
+                if (engine) engine->setSelectedEntity(entt::null);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                selectedEnt = entt::null;
+                if (engine) engine->setSelectedEntity(entt::null);
+            }
+        }
+
+        // Hit-test Gizmo Handles
+        int hoveredGizmoAxis = 0;
+        ImVec2 originScreen(0, 0);
+        ImVec2 ptX(0, 0), ptY(0, 0), ptZ(0, 0);
+        float distToCam = 10.0f;
+        bool hasSelectedTransform = (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt));
+
+        if (hasSelectedTransform) {
+            auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+            distToCam = glm::length(camPos - t.position);
+            float gizmoLen = std::max(0.7f, distToCam * 0.14f);
+
+            float originW = 0.0f, wX = 0.0f, wY = 0.0f, wZ = 0.0f;
+            bool originVisible = worldToScreen(t.position, originScreen, originW);
+            bool xVis = worldToScreen(t.position + glm::vec3(gizmoLen, 0.0f, 0.0f), ptX, wX);
+            bool yVis = worldToScreen(t.position + glm::vec3(0.0f, gizmoLen, 0.0f), ptY, wY);
+            bool zVis = worldToScreen(t.position + glm::vec3(0.0f, 0.0f, gizmoLen), ptZ, wZ);
+
+            if (originVisible && isHovered && !s_isRmbNavigating && !s_isMmbPanning && !s_isAltOrbiting) {
+                float dCenter = sqrtf((mousePos.x - originScreen.x)*(mousePos.x - originScreen.x) + (mousePos.y - originScreen.y)*(mousePos.y - originScreen.y));
+                if (dCenter <= 14.0f) {
+                    hoveredGizmoAxis = 4;
+                } else if (xVis && distToSegment(mousePos, originScreen, ptX) <= 12.0f) {
+                    hoveredGizmoAxis = 1;
+                } else if (yVis && distToSegment(mousePos, originScreen, ptY) <= 12.0f) {
+                    hoveredGizmoAxis = 2;
+                } else if (zVis && distToSegment(mousePos, originScreen, ptZ) <= 12.0f) {
+                    hoveredGizmoAxis = 3;
+                }
+            }
+        }
+
+        // Mouse buttons handling
+        if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            s_isRmbNavigating = true;
+            ImGui::SetWindowFocus("Viewport");
+        }
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            s_isRmbNavigating = false;
+        }
+
+        if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+            s_isMmbPanning = true;
+            ImGui::SetWindowFocus("Viewport");
+        }
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+            s_isMmbPanning = false;
+        }
+
+        bool altDown = ImGui::IsKeyDown(ImGuiKey_LeftAlt) || ImGui::IsKeyDown(ImGuiKey_RightAlt);
+        if (isHovered && altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            s_isAltOrbiting = true;
+            ImGui::SetWindowFocus("Viewport");
+        }
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            s_isAltOrbiting = false;
+            s_draggingGizmoAxis = 0;
+        }
+
+        // LMB Click on Gizmo or Raycast Picking
+        if (isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            if (hoveredGizmoAxis > 0 && hasSelectedTransform) {
+                s_draggingGizmoAxis = hoveredGizmoAxis;
+                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+                s_dragInitialEntityPos = t.position;
+                s_dragInitialRotation = t.rotation;
+                s_dragInitialScale = t.scale;
+                s_dragPivotScreen = originScreen;
+
+                if (s_draggingGizmoAxis == 1) s_dragAxisVec = glm::vec3(1.0f, 0.0f, 0.0f);
+                else if (s_draggingGizmoAxis == 2) s_dragAxisVec = glm::vec3(0.0f, 1.0f, 0.0f);
+                else if (s_draggingGizmoAxis == 3) s_dragAxisVec = glm::vec3(0.0f, 0.0f, 1.0f);
+                else s_dragAxisVec = glm::vec3(0.0f);
+
+                if (s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
+                    glm::vec3 toCam = camPos - s_dragInitialEntityPos;
+                    glm::vec3 vPerp = toCam - glm::dot(toCam, s_dragAxisVec) * s_dragAxisVec;
+                    if (glm::length(vPerp) < 1e-4f) {
+                        if (std::abs(s_dragAxisVec.x) > 0.8f) vPerp = glm::vec3(0.0f, 1.0f, 0.0f);
+                        else vPerp = glm::vec3(1.0f, 0.0f, 0.0f);
+                    }
+                    s_dragPlaneNormal = glm::normalize(vPerp);
+                } else {
+                    s_dragPlaneNormal = -front;
+                }
+
+                glm::vec3 clickRayOrig, clickRayDir;
+                getRayFromScreen(mousePos, clickRayOrig, clickRayDir);
+                s_dragHasHit = intersectRayPlane(clickRayOrig, clickRayDir, s_dragInitialEntityPos, s_dragPlaneNormal, s_dragInitialHitPoint);
+                if (s_dragHasHit && s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
+                    s_dragInitialOffset = glm::dot(s_dragInitialHitPoint - s_dragInitialEntityPos, s_dragAxisVec);
+                } else {
+                    s_dragInitialOffset = 0.0f;
+                    if (!s_dragHasHit) s_dragInitialHitPoint = s_dragInitialEntityPos;
+                }
+
+                s_dragInitialAngle = atan2f(mousePos.y - originScreen.y, mousePos.x - originScreen.x) * (180.0f / 3.1415926535f);
+                s_lastRotAngle = s_dragInitialAngle;
+                s_accumulatedRotAngle = 0.0f;
+
+                float initDist = sqrtf((mousePos.x - originScreen.x)*(mousePos.x - originScreen.x) + (mousePos.y - originScreen.y)*(mousePos.y - originScreen.y));
+                s_dragInitialDist = std::max(10.0f, initDist);
+            } else {
+                glm::vec3 rayOrig, rayDir;
+                getRayFromScreen(mousePos, rayOrig, rayDir);
+
+                entt::entity hitEnt = entt::null;
+                float closestDist = 1e9f;
+
+                auto tView = registry.get().view<ecs::TransformComponent>();
+                for (auto entity : tView) {
+                    const auto& tc = tView.get<ecs::TransformComponent>(entity);
+
+                    // Skip ground plane
+                    if (registry.get().all_of<ecs::MeshComponent>(entity)) {
+                        if (registry.get().get<ecs::MeshComponent>(entity).meshId == 1) continue;
+                    }
+                    if (registry.get().all_of<ecs::TagComponent>(entity)) {
+                        const std::string& tagName = registry.get().get<ecs::TagComponent>(entity).name;
+                        if (tagName == "Ground" || tagName == "GroundPlane") continue;
+                    }
+
+                    // Compute actor half-extents in local space
+                    glm::vec3 halfExt = glm::max(tc.scale * 0.5f, glm::vec3(0.05f));
+                    if (registry.get().all_of<ecs::RigidBodyComponent>(entity)) {
+                        const auto& rb = registry.get().get<ecs::RigidBodyComponent>(entity);
+                        if (rb.shapeType == 0 && (rb.halfExtents.x > 0.01f || rb.halfExtents.y > 0.01f || rb.halfExtents.z > 0.01f)) {
+                            halfExt = rb.halfExtents;
+                        }
+                    }
+
+                    // Transform ray to actor's local space (accounting for exact position and rotation)
+                    glm::quat rot = tc.orientation;
+                    if (glm::dot(rot, rot) < 0.001f) {
+                        rot = glm::quat(glm::radians(tc.rotation));
+                    }
+                    rot = glm::normalize(rot);
+                    glm::quat invRot = glm::inverse(rot);
+                    glm::vec3 rOrigLocal = invRot * (rayOrig - tc.position);
+                    glm::vec3 rDirLocal = invRot * rayDir;
+
+                    bool isSphere = false;
+                    if (registry.get().all_of<ecs::MeshComponent>(entity)) {
+                        if (registry.get().get<ecs::MeshComponent>(entity).meshId == 3) isSphere = true;
+                    }
+                    if (registry.get().all_of<ecs::RigidBodyComponent>(entity)) {
+                        if (registry.get().get<ecs::RigidBodyComponent>(entity).shapeType == 1) isSphere = true;
+                    }
+
+                    float tHit = -1.0f;
+                    if (isSphere) {
+                        // Ray vs Ellipsoid/Sphere in local space
+                        glm::vec3 pOrig = rOrigLocal / halfExt;
+                        glm::vec3 pDir = rDirLocal / halfExt;
+                        float a = glm::dot(pDir, pDir);
+                        float b = glm::dot(pOrig, pDir);
+                        float c = glm::dot(pOrig, pOrig) - 1.0f;
+                        float discr = b * b - a * c;
+                        if (discr >= 0.0f) {
+                            float sq = sqrtf(discr);
+                            float t0 = (-b - sq) / a;
+                            float t1 = (-b + sq) / a;
+                            tHit = (t0 >= 0.0f) ? t0 : t1;
+                        }
+                    } else {
+                        // Exact Ray vs Oriented Bounding Box (OBB) via local AABB slab test
+                        glm::vec3 invD(
+                            std::abs(rDirLocal.x) > 1e-7f ? 1.0f / rDirLocal.x : (rDirLocal.x >= 0 ? 1e7f : -1e7f),
+                            std::abs(rDirLocal.y) > 1e-7f ? 1.0f / rDirLocal.y : (rDirLocal.y >= 0 ? 1e7f : -1e7f),
+                            std::abs(rDirLocal.z) > 1e-7f ? 1.0f / rDirLocal.z : (rDirLocal.z >= 0 ? 1e7f : -1e7f)
+                        );
+
+                        // Tight padding (1cm) so clicking next to an object never falsely picks it
+                        glm::vec3 boxMin = -halfExt - glm::vec3(0.01f);
+                        glm::vec3 boxMax = +halfExt + glm::vec3(0.01f);
+
+                        glm::vec3 t0 = (boxMin - rOrigLocal) * invD;
+                        glm::vec3 t1 = (boxMax - rOrigLocal) * invD;
+
+                        glm::vec3 tMinV = glm::min(t0, t1);
+                        glm::vec3 tMaxV = glm::max(t0, t1);
+
+                        float tNear = std::max({tMinV.x, tMinV.y, tMinV.z});
+                        float tFar = std::min({tMaxV.x, tMaxV.y, tMaxV.z});
+
+                        if (tNear <= tFar && tFar >= 0.0f) {
+                            tHit = (tNear >= 0.0f) ? tNear : tFar;
+                        }
+                    }
+
+                    if (tHit >= 0.0f && tHit < closestDist) {
+                        closestDist = tHit;
+                        hitEnt = entity;
+                    }
+                }
+
+                selectedEnt = hitEnt;
+                if (engine) engine->setSelectedEntity(hitEnt);
+                hasSelectedTransform = (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt));
+                if (selectedEnt != entt::null) {
+                    engine::core::Logger::info("Selected Actor in Viewport: ID " + std::to_string(static_cast<uint32_t>(selectedEnt)));
+                }
+            }
+        }
+
+        // Dragging Gizmo with 1:1 Ray-Plane Projection (True 1:1 hardware mouse tracking like UE5 FWidget & Blender)
+        if (s_draggingGizmoAxis > 0 && hasSelectedTransform) {
+            auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+
+            if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                glm::vec3 curRayOrig, curRayDir;
+                getRayFromScreen(mousePos, curRayOrig, curRayDir);
+
+                float denom = glm::dot(curRayDir, s_dragPlaneNormal);
+                if (std::abs(denom) > 0.03f) {
+                    float tDist = glm::dot(s_dragInitialEntityPos - curRayOrig, s_dragPlaneNormal) / denom;
+                    if (tDist > 0.05f && tDist < 5000.0f) {
+                        glm::vec3 curHit = curRayOrig + tDist * curRayDir;
+
+                        if (s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
+                            float curOffset = glm::dot(curHit - s_dragInitialEntityPos, s_dragAxisVec);
+                            float deltaAxis = curOffset - s_dragInitialOffset;
+                            t.position = s_dragInitialEntityPos + s_dragAxisVec * deltaAxis;
+                        } else if (s_draggingGizmoAxis == 4) {
+                            glm::vec3 delta = curHit - s_dragInitialHitPoint;
+                            t.position = s_dragInitialEntityPos + delta;
+                        }
+
+                        if (engine) engine->syncEntityTransformPhysics(selectedEnt);
+                    }
+                }
+            } else if (s_gizmoMode == NativeGizmoMode::ROTATE) {
+                float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.1415926535f);
+                float dAngle = curAngle - s_lastRotAngle;
+                while (dAngle > 180.0f) dAngle -= 360.0f;
+                while (dAngle < -180.0f) dAngle += 360.0f;
+                s_accumulatedRotAngle += dAngle;
+                s_lastRotAngle = curAngle;
+
+                t.rotation = s_dragInitialRotation;
+                if (s_draggingGizmoAxis == 1) t.rotation.x += s_accumulatedRotAngle;
+                else if (s_draggingGizmoAxis == 2) t.rotation.y += s_accumulatedRotAngle;
+                else if (s_draggingGizmoAxis == 3) t.rotation.z += s_accumulatedRotAngle;
+                else if (s_draggingGizmoAxis == 4) t.rotation.y += s_accumulatedRotAngle;
+
+                t.orientation = glm::quat(glm::radians(t.rotation));
+                if (engine) engine->syncEntityTransformPhysics(selectedEnt);
+            } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                float curDist = sqrtf((mousePos.x - s_dragPivotScreen.x)*(mousePos.x - s_dragPivotScreen.x) + (mousePos.y - s_dragPivotScreen.y)*(mousePos.y - s_dragPivotScreen.y));
+                float scaleFactor = curDist / s_dragInitialDist;
+
+                if (s_draggingGizmoAxis == 1) t.scale.x = std::max(0.01f, s_dragInitialScale.x * scaleFactor);
+                else if (s_draggingGizmoAxis == 2) t.scale.y = std::max(0.01f, s_dragInitialScale.y * scaleFactor);
+                else if (s_draggingGizmoAxis == 3) t.scale.z = std::max(0.01f, s_dragInitialScale.z * scaleFactor);
+                else if (s_draggingGizmoAxis == 4) t.scale = glm::max(glm::vec3(0.01f), s_dragInitialScale * scaleFactor);
+            }
+        }
+
+        // RMB Fly Look & Movement
+        if (s_isRmbNavigating && engine) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            float dx = ImGui::GetIO().MouseDelta.x;
+            float dy = ImGui::GetIO().MouseDelta.y;
+            camYaw += dx * 0.20f;
+            camPitch = glm::clamp(camPitch - dy * 0.20f, -89.0f, 89.0f);
+
+            glm::vec3 curFront(
+                cos(glm::radians(camYaw)) * cos(glm::radians(camPitch)),
+                sin(glm::radians(camPitch)),
+                sin(glm::radians(camYaw)) * cos(glm::radians(camPitch))
+            );
+            curFront = glm::normalize(curFront);
+            glm::vec3 curRight = glm::normalize(glm::cross(curFront, glm::vec3(0.0f, 1.0f, 0.0f)));
+            glm::vec3 curUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+            float dt = ImGui::GetIO().DeltaTime;
+            float speed = s_camFlySpeed * dt;
+            if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) speed *= 3.0f;
+
+            if (ImGui::IsKeyDown(ImGuiKey_W)) camPos += curFront * speed;
+            if (ImGui::IsKeyDown(ImGuiKey_S)) camPos -= curFront * speed;
+            if (ImGui::IsKeyDown(ImGuiKey_A)) camPos -= curRight * speed;
+            if (ImGui::IsKeyDown(ImGuiKey_D)) camPos += curRight * speed;
+            if (ImGui::IsKeyDown(ImGuiKey_E)) camPos += curUp * speed;
+            if (ImGui::IsKeyDown(ImGuiKey_Q)) camPos -= curUp * speed;
+
+            engine->setCamera(camPos, camYaw, camPitch, camFov);
+        }
+
+        // MMB Pan
+        if (s_isMmbPanning && engine) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            float dx = ImGui::GetIO().MouseDelta.x;
+            float dy = ImGui::GetIO().MouseDelta.y;
+            float panScale = 0.04f;
+            camPos -= (right * dx - up * dy) * panScale;
+            engine->setCamera(camPos, camYaw, camPitch, camFov);
+        }
+
+        // Alt+LMB Orbit
+        if (s_isAltOrbiting && engine) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            float dx = ImGui::GetIO().MouseDelta.x;
+            float dy = ImGui::GetIO().MouseDelta.y;
+            glm::vec3 pivot = (hasSelectedTransform) ? registry.get().get<ecs::TransformComponent>(selectedEnt).position : (camPos + front * 10.0f);
+            float orbitDist = glm::length(camPos - pivot);
+            if (orbitDist < 0.5f) orbitDist = 0.5f;
+
+            camYaw += dx * 0.25f;
+            camPitch = glm::clamp(camPitch - dy * 0.25f, -89.0f, 89.0f);
+
+            glm::vec3 orbitFront(
+                cos(glm::radians(camYaw)) * cos(glm::radians(camPitch)),
+                sin(glm::radians(camPitch)),
+                sin(glm::radians(camYaw)) * cos(glm::radians(camPitch))
+            );
+            orbitFront = glm::normalize(orbitFront);
+            camPos = pivot - orbitFront * orbitDist;
+            engine->setCamera(camPos, camYaw, camPitch, camFov);
+        }
+
+        // Mouse Wheel Zoom
+        if (isHovered && std::abs(ImGui::GetIO().MouseWheel) > 0.01f && engine) {
+            float wheel = ImGui::GetIO().MouseWheel;
+            camPos += front * (wheel * 3.0f);
+            engine->setCamera(camPos, camYaw, camPitch, camFov);
+        }
+
+        // Draw 3D Selection Bounding Box & 3D Transform Gizmo
+        if (hasSelectedTransform) {
+            auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+            glm::vec3 halfExt(std::max(0.4f, t.scale.x * 0.5f), std::max(0.4f, t.scale.y * 0.5f), std::max(0.4f, t.scale.z * 0.5f));
+            if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
+                auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEnt);
+                if (rb.halfExtents.x > 0.01f) halfExt = rb.halfExtents;
+                else if (rb.shapeType == 1 && rb.capsuleRadius > 0.01f) halfExt = glm::vec3(rb.capsuleRadius);
+                else if (rb.shapeType == 2 && rb.capsuleRadius > 0.01f) halfExt = glm::vec3(rb.capsuleRadius, rb.capsuleHalfHeight, rb.capsuleRadius);
+            }
+
+            glm::vec3 corners[8] = {
+                t.position + glm::vec3(-halfExt.x, -halfExt.y, -halfExt.z),
+                t.position + glm::vec3( halfExt.x, -halfExt.y, -halfExt.z),
+                t.position + glm::vec3( halfExt.x,  halfExt.y, -halfExt.z),
+                t.position + glm::vec3(-halfExt.x,  halfExt.y, -halfExt.z),
+                t.position + glm::vec3(-halfExt.x, -halfExt.y,  halfExt.z),
+                t.position + glm::vec3( halfExt.x, -halfExt.y,  halfExt.z),
+                t.position + glm::vec3( halfExt.x,  halfExt.y,  halfExt.z),
+                t.position + glm::vec3(-halfExt.x,  halfExt.y,  halfExt.z),
+            };
+
+            ImVec2 sCorners[8];
+            float sW[8];
+            bool allVis = true;
+            for (int i = 0; i < 8; ++i) {
+                if (!worldToScreen(corners[i], sCorners[i], sW[i])) allVis = false;
+            }
+
+            if (allVis) {
+                ImU32 boxCol = IM_COL32(255, 185, 30, 160);
+                int edges[12][2] = {
+                    {0,1}, {1,2}, {2,3}, {3,0},
+                    {4,5}, {5,6}, {6,7}, {7,4},
+                    {0,4}, {1,5}, {2,6}, {3,7}
+                };
+                for (int e = 0; e < 12; ++e) {
+                    drawList->AddLine(sCorners[edges[e][0]], sCorners[edges[e][1]], boxCol, 1.5f);
+                }
+            }
+
+            // Draw Actor Name Label
+            ImVec2 topPt; float topW;
+            if (worldToScreen(t.position + glm::vec3(0.0f, halfExt.y + 0.35f, 0.0f), topPt, topW)) {
+                std::string tagLabel = "Actor_" + std::to_string(static_cast<uint32_t>(selectedEnt));
+                if (registry.get().all_of<ecs::TagComponent>(selectedEnt)) {
+                    tagLabel = registry.get().get<ecs::TagComponent>(selectedEnt).name;
+                }
+                drawList->AddText(ImVec2(topPt.x - 20, topPt.y - 14), IM_COL32(0, 240, 255, 230), tagLabel.c_str());
+            }
+
+            // Draw Gizmo
+            float origW;
+            if (worldToScreen(t.position, originScreen, origW)) {
+                int activeOrHovered = (s_draggingGizmoAxis > 0) ? s_draggingGizmoAxis : hoveredGizmoAxis;
+
+                ImU32 colX = (activeOrHovered == 1) ? IM_COL32(255, 255, 50, 255) : IM_COL32(235, 55, 55, 255);
+                ImU32 colY = (activeOrHovered == 2) ? IM_COL32(255, 255, 50, 255) : IM_COL32(50, 220, 50, 255);
+                ImU32 colZ = (activeOrHovered == 3) ? IM_COL32(255, 255, 50, 255) : IM_COL32(50, 130, 250, 255);
+                ImU32 colCenter = (activeOrHovered == 4) ? IM_COL32(255, 255, 50, 255) : IM_COL32(240, 240, 240, 200);
+
+                float thickX = (activeOrHovered == 1) ? 4.5f : 3.0f;
+                float thickY = (activeOrHovered == 2) ? 4.5f : 3.0f;
+                float thickZ = (activeOrHovered == 3) ? 4.5f : 3.0f;
+
+                drawList->AddCircleFilled(originScreen, (activeOrHovered == 4) ? 8.0f : 5.5f, colCenter);
+                drawList->AddCircle(originScreen, (activeOrHovered == 4) ? 8.0f : 5.5f, IM_COL32(0, 0, 0, 180), 0, 1.5f);
+
+                // X Axis
+                drawList->AddLine(originScreen, ptX, colX, thickX);
+                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                    drawList->AddTriangleFilled(
+                        ImVec2(ptX.x + 4, ptX.y),
+                        ImVec2(ptX.x - 5, ptX.y - 5),
+                        ImVec2(ptX.x - 5, ptX.y + 5),
+                        colX
+                    );
+                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                    drawList->AddRectFilled(ImVec2(ptX.x - 4, ptX.y - 4), ImVec2(ptX.x + 4, ptX.y + 4), colX);
+                } else {
+                    drawList->AddCircle(ptX, 6.0f, colX, 0, 2.0f);
+                }
+                drawList->AddText(ImVec2(ptX.x + 6, ptX.y - 6), colX, "X");
+
+                // Y Axis
+                drawList->AddLine(originScreen, ptY, colY, thickY);
+                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                    drawList->AddTriangleFilled(
+                        ImVec2(ptY.x, ptY.y - 6),
+                        ImVec2(ptY.x - 5, ptY.y + 4),
+                        ImVec2(ptY.x + 5, ptY.y + 4),
+                        colY
+                    );
+                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                    drawList->AddRectFilled(ImVec2(ptY.x - 4, ptY.y - 4), ImVec2(ptY.x + 4, ptY.y + 4), colY);
+                } else {
+                    drawList->AddCircle(ptY, 6.0f, colY, 0, 2.0f);
+                }
+                drawList->AddText(ImVec2(ptY.x + 6, ptY.y - 6), colY, "Y");
+
+                // Z Axis
+                drawList->AddLine(originScreen, ptZ, colZ, thickZ);
+                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                    drawList->AddTriangleFilled(
+                        ImVec2(ptZ.x + 4, ptZ.y),
+                        ImVec2(ptZ.x - 5, ptZ.y - 5),
+                        ImVec2(ptZ.x - 5, ptZ.y + 5),
+                        colZ
+                    );
+                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                    drawList->AddRectFilled(ImVec2(ptZ.x - 4, ptZ.y - 4), ImVec2(ptZ.x + 4, ptZ.y + 4), colZ);
+                } else {
+                    drawList->AddCircle(ptZ, 6.0f, colZ, 0, 2.0f);
+                }
+                drawList->AddText(ImVec2(ptZ.x + 6, ptZ.y - 6), colZ, "Z");
+            }
         }
 
         // Live Native Game HUD Overlay (Bottom of Viewport)
@@ -1496,7 +3070,7 @@ namespace engine::renderer {
             }
 
             ImGui::SetCursorPos(ImVec2(15, viewportPanelSize.y - 24));
-            ImGui::TextColored(ImVec4(0.7f, 0.75f, 0.85f, 0.9f), "WSAD/Arrows: ruch * LPM: obrot * Scroll: zoom * PPM: rozgladanie * Spacja: skok");
+            ImGui::TextColored(ImVec4(0.7f, 0.75f, 0.85f, 0.9f), "PPM: lot kamery * WSAD: ruch * Scroll: zoom * LPM: zaznacz / przesun [W/E/R] * Spacja: skok");
         }
 
         ImGui::End();
@@ -1545,6 +3119,7 @@ namespace engine::renderer {
                     bool isSelected = (selectedEnt == entity);
                     if (ImGui::Selectable(label.c_str(), isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
                         selectedEnt = entity;
+                        if (engine) engine->setSelectedEntity(selectedEnt);
                     }
                     ImGui::NextColumn();
                     if (registry.get().all_of<ecs::RigidBodyComponent>(entity)) {
@@ -1592,15 +3167,31 @@ namespace engine::renderer {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                 ImGui::Spacing();
                 ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Transform");
-                drawVec3Control("Location", t.position, 0.0f);
-                drawVec3Control("Rotation", t.rotation, 0.0f);
-                drawVec3Control("Scale", t.scale, 1.0f);
+                bool posChanged = drawVec3Control("Location", t.position, 0.0f);
+                bool rotChanged = drawVec3Control("Rotation", t.rotation, 0.0f);
+                bool scaleChanged = drawVec3Control("Scale", t.scale, 1.0f);
 
-                if (ImGui::Button("Reset Pos")) { t.position = glm::vec3(0.0f); }
+                if (rotChanged) {
+                    t.orientation = glm::quat(glm::radians(t.rotation));
+                }
+                if ((posChanged || rotChanged) && engine) {
+                    engine->syncEntityTransformPhysics(selectedEnt);
+                }
+
+                if (ImGui::Button("Reset Pos")) {
+                    t.position = glm::vec3(0.0f);
+                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
+                }
                 ImGui::SameLine();
-                if (ImGui::Button("Ground (Y=0.5)")) { t.position.y = 0.5f; }
+                if (ImGui::Button("Ground (Y=0.5)")) {
+                    t.position.y = 0.5f;
+                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
+                }
                 ImGui::SameLine();
-                if (ImGui::Button("+5 Y Jump")) { t.position.y += 5.0f; }
+                if (ImGui::Button("+5 Y Jump")) {
+                    t.position.y += 5.0f;
+                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
+                }
             }
 
             if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
@@ -1629,6 +3220,7 @@ namespace engine::renderer {
             if (ImGui::Button("Delete Entity", ImVec2(120, 0))) {
                 registry.get().destroy(selectedEnt);
                 selectedEnt = entt::null;
+                if (engine) engine->setSelectedEntity(entt::null);
             }
         } else {
             ImGui::TextDisabled("Brak zaznaczonego aktora.");

@@ -50,6 +50,47 @@ namespace engine::ecs {
         glm::vec4 baseColor{1.0f, 1.0f, 1.0f, 1.0f};
         float metallic{0.1f};
         float roughness{0.5f};
+        glm::vec3 emissive{0.0f, 0.0f, 0.0f};
+        float emissiveIntensity{0.0f};
+    };
+
+    struct LightComponent {
+        std::string type{"point"}; // "directional", "point", "spot", "sky"
+        glm::vec3 color{1.0f, 1.0f, 1.0f};
+        float intensity{1.0f};
+        float range{15.0f};
+    };
+
+    struct AudioComponent {
+        std::string soundAssetId;
+        float volume{1.0f};
+        float pitch{1.0f};
+        bool is3D{true};
+        bool loop{false};
+        bool autoPlay{false};
+    };
+
+    struct CharacterMovementComponent {
+        float maxWalkSpeed{8.0f};
+        float jumpZVelocity{12.0f};
+        float gravityScale{1.0f};
+        float airControl{0.3f};
+    };
+
+    struct CameraBoomComponent {
+        float targetArmLength{10.0f};
+        float socketOffsetY{3.0f};
+        bool cameraLag{true};
+        float lagSpeed{10.0f};
+    };
+
+    struct ParticleEmitterComponent {
+        std::string type{"fire"}; // "fire", "sparks", "smoke", "portal", "explosion"
+        glm::vec3 color{1.0f, 0.4f, 0.0f};
+        uint32_t count{200};
+        float speed{3.0f};
+        float size{0.4f};
+        uint32_t attachedToEntityId{0xFFFFFFFF};
     };
 
     struct TagComponent {

@@ -45,6 +45,13 @@ ws.on('open', async () => {
     console.log('4. captureFrame format prefix:', frameRes?.frame?.substring(0, 30));
     console.log('   captureFrame total base64 length:', frameRes?.frame?.length);
 
+    if (frameRes?.frame) {
+      const fs = await import('fs');
+      const base64Data = frameRes.frame.replace(/^data:image\/jpeg;base64,/, '');
+      fs.writeFileSync('test_frame.jpg', Buffer.from(base64Data, 'base64'));
+      console.log('   Saved captured frame to test_frame.jpg');
+    }
+
     console.log('ALL TESTS PASSED SUCCESSFULLY!');
   } catch (err) {
     console.error('Test error:', err);

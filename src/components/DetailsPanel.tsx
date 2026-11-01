@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Sliders, Plus, RotateCcw, Box, Lock, Unlock, Rocket,
   Palette, FileCode, Globe, Sun, Search, ChevronDown, ChevronRight,
-  Volume2, Camera, User, Play
+  Volume2, Camera, User, Play, Monitor
 } from 'lucide-react';
 import { EntityData, MaterialAsset, ProjectSettings, SoundAsset } from '../types/project';
 import { AudioSystem } from '../services/audioSystem';
@@ -1249,6 +1249,71 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
                   </div>
                 </>
               )}
+            </div>
+          </div>
+
+          {/* Display & Render Resolution Settings */}
+          <div className="p-2 rounded bg-[#161622] border border-white/[0.08] space-y-2">
+            <span className="font-bold text-white text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+              <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Display & Render Resolution</span>
+            </span>
+
+            <div className="space-y-2 text-[10px]">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-300">Screen Percentage (Res Scale)</span>
+                <span className="font-mono text-emerald-400 font-bold">{Math.round((settings.resolutionScale || 1.0) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="2.0"
+                step="0.05"
+                value={settings.resolutionScale || 1.0}
+                onChange={e => {
+                  const s = parseFloat(e.target.value);
+                  const baseW = 1920, baseH = 1080;
+                  const w = (Math.round(baseW * s) + 1) & ~1;
+                  const h = (Math.round(baseH * s) + 1) & ~1;
+                  onUpdateSettings({ resolutionScale: s, renderResolution: { width: w, height: h } });
+                }}
+                className="w-full accent-emerald-400 cursor-pointer"
+              />
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-slate-300">UI Scale (DPI)</span>
+                <span className="font-mono text-cyan-400 font-bold">{Math.round((settings.uiScale || 1.0) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.75"
+                max="1.75"
+                step="0.05"
+                value={settings.uiScale || 1.0}
+                onChange={e => onUpdateSettings({ uiScale: parseFloat(e.target.value) })}
+                className="w-full accent-cyan-400 cursor-pointer"
+              />
+
+              <div className="grid grid-cols-3 gap-1 pt-1">
+                <button
+                  onClick={() => onUpdateSettings({ resolutionScale: 0.67, renderResolution: { width: 1280, height: 720 } })}
+                  className="py-1 px-1 text-center bg-white/5 hover:bg-white/10 rounded border border-white/5 text-[9px] font-mono text-slate-300 hover:text-white"
+                >
+                  720p (67%)
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ resolutionScale: 1.0, renderResolution: { width: 1920, height: 1080 } })}
+                  className="py-1 px-1 text-center bg-white/5 hover:bg-white/10 rounded border border-white/5 text-[9px] font-mono text-slate-300 hover:text-white"
+                >
+                  1080p (100%)
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ resolutionScale: 2.0, renderResolution: { width: 3840, height: 2160 } })}
+                  className="py-1 px-1 text-center bg-white/5 hover:bg-white/10 rounded border border-white/5 text-[9px] font-mono text-slate-300 hover:text-white"
+                >
+                  4K (200%)
+                </button>
+              </div>
             </div>
           </div>
         </div>

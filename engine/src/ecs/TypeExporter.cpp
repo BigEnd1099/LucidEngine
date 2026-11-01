@@ -55,9 +55,49 @@ namespace engine::ecs {
         out += "}\n\n";
 
         out += "export interface MaterialComponent {\n";
-        out += "  color?: [number, number, number, number?];\n";
+        out += "  color?: string | [number, number, number, number?];\n";
         out += "  metallic?: number;\n";
         out += "  roughness?: number;\n";
+        out += "  emissive?: string | [number, number, number];\n";
+        out += "  emissiveIntensity?: number;\n";
+        out += "}\n\n";
+
+        out += "export interface LightComponent {\n";
+        out += "  type: 'directional' | 'point' | 'spot' | 'sky';\n";
+        out += "  color: string | [number, number, number];\n";
+        out += "  intensity: number;\n";
+        out += "  range?: number;\n";
+        out += "}\n\n";
+
+        out += "export interface AudioComponent {\n";
+        out += "  soundAssetId: string;\n";
+        out += "  volume?: number;\n";
+        out += "  pitch?: number;\n";
+        out += "  is3D?: boolean;\n";
+        out += "  loop?: boolean;\n";
+        out += "  autoPlay?: boolean;\n";
+        out += "}\n\n";
+
+        out += "export interface CharacterMovementComponent {\n";
+        out += "  maxWalkSpeed?: number;\n";
+        out += "  jumpZVelocity?: number;\n";
+        out += "  gravityScale?: number;\n";
+        out += "  airControl?: number;\n";
+        out += "}\n\n";
+
+        out += "export interface CameraBoomComponent {\n";
+        out += "  targetArmLength?: number;\n";
+        out += "  socketOffsetY?: number;\n";
+        out += "  cameraLag?: boolean;\n";
+        out += "  lagSpeed?: number;\n";
+        out += "}\n\n";
+
+        out += "export interface ParticleEmitterComponent {\n";
+        out += "  type: 'fire' | 'sparks' | 'smoke' | 'portal' | 'explosion';\n";
+        out += "  color?: string | [number, number, number];\n";
+        out += "  count?: number;\n";
+        out += "  speed?: number;\n";
+        out += "  size?: number;\n";
         out += "}\n\n";
 
         out += "export interface Contact {\n";
@@ -79,6 +119,11 @@ namespace engine::ecs {
         out += "  mesh?: MeshComponent;\n";
         out += "  material?: MaterialComponent;\n";
         out += "  rigidBody?: RigidBodyComponent;\n";
+        out += "  light?: LightComponent;\n";
+        out += "  audio?: AudioComponent;\n";
+        out += "  movement?: CharacterMovementComponent;\n";
+        out += "  cameraBoom?: CameraBoomComponent;\n";
+        out += "  particles?: ParticleEmitterComponent;\n";
         out += "  [customProp: string]: any; // Allow custom game logic state per entity\n";
         out += "}\n\n";
 

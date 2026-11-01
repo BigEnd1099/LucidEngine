@@ -21,6 +21,19 @@
 #include "physics/PhysicsSystem.hpp"
 
 namespace engine::core {
+    struct EnvironmentSettings {
+        float gravity{-9.81f};
+        glm::vec3 ambientColor{0.15f, 0.22f, 0.35f};
+        float ambientIntensity{1.0f};
+        glm::vec3 sunColor{1.0f, 0.97f, 0.92f};
+        float sunIntensity{3.4f};
+        glm::vec3 sunDirection{0.55f, 0.85f, 0.40f};
+        bool fogEnabled{false};
+        glm::vec3 fogColor{0.06f, 0.07f, 0.09f};
+        float fogNear{20.0f};
+        float fogFar{100.0f};
+    };
+
     class Engine {
     public:
         Engine(int wsPort, bool headless);
@@ -99,6 +112,29 @@ namespace engine::core {
             m_camFov = fov;
         }
 
+        // Camera Mode API (editor, thirdPerson, topDown, firstPerson, sideScroller)
+        void setCameraMode(const std::string& mode) { m_cameraMode = mode; }
+        std::string getCameraMode() const { return m_cameraMode; }
+
+        // Environment & Lighting API
+        void setEnvironmentSettings(const EnvironmentSettings& env) { m_envSettings = env; }
+        const EnvironmentSettings& getEnvironmentSettings() const { return m_envSettings; }
+        void setEnvironmentFromJson(const nlohmann::json& json);
+        nlohmann::json getEnvironmentJson() const;
+
+        // Selection & Physics Sync API
+        entt::entity getSelectedEntity() const { return m_selectedEntity; }
+        void setSelectedEntity(entt::entity e) { m_selectedEntity = e; }
+        void syncEntityTransformPhysics(entt::entity entity);
+
+        // Resolution & UI Scaling APIs
+        void setRenderResolution(uint32_t width, uint32_t height);
+        void getRenderResolution(uint32_t& width, uint32_t& height) const;
+        void setResolutionScale(float scale);
+        float getResolutionScale() const;
+        void setUiScale(float scale);
+        float getUiScale() const;
+
         // Input API (Gamepad, Keyboard, Mouse from Studio)
         void setInputState(const nlohmann::json& input) { m_inputState = input; }
         nlohmann::json getInputState() const { return m_inputState; }
@@ -151,6 +187,9 @@ namespace engine::core {
         float m_camYaw{-90.0f};
         float m_camPitch{-20.0f};
         float m_camFov{45.0f};
+        std::string m_cameraMode{"editor"};
+        entt::entity m_selectedEntity{entt::null};
+        EnvironmentSettings m_envSettings;
 
         nlohmann::json m_inputState = nlohmann::json::object();
 

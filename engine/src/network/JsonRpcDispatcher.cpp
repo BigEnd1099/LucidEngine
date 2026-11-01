@@ -252,6 +252,133 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.setCameraMode") {
+                std::string mode = "editor";
+                if (json.contains("params")) {
+                    if (json["params"].is_string()) mode = json["params"].get<std::string>();
+                    else if (json["params"].is_object() && json["params"].contains("mode")) mode = json["params"]["mode"].get<std::string>();
+                }
+                queue.push([mode, client, id](core::Engine* eng) {
+                    eng->setCameraMode(mode);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getCameraMode") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"mode", eng->getCameraMode()}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setEnvironment" || method == "engine.setProjectSettings") {
+                nlohmann::json envParams = nlohmann::json::object();
+                if (json.contains("params") && json["params"].is_object()) {
+                    envParams = json["params"];
+                }
+                queue.push([envParams, client, id](core::Engine* eng) {
+                    eng->setEnvironmentFromJson(envParams);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getEnvironment" || method == "engine.getProjectSettings") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", eng->getEnvironmentJson()}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setRenderResolution") {
+                uint32_t width = 1920;
+                uint32_t height = 1080;
+                if (json.contains("params") && json["params"].is_object()) {
+                    const auto& p = json["params"];
+                    if (p.contains("width")) width = p["width"].get<uint32_t>();
+                    if (p.contains("height")) height = p["height"].get<uint32_t>();
+                }
+                queue.push([width, height, client, id](core::Engine* eng) {
+                    eng->setRenderResolution(width, height);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getRenderResolution") {
+                queue.push([client, id](core::Engine* eng) {
+                    uint32_t w = 1920, h = 1080;
+                    eng->getRenderResolution(w, h);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {
+                            {"width", w},
+                            {"height", h},
+                            {"resolutionScale", eng->getResolutionScale()}
+                        }}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setResolutionScale") {
+                float scale = 1.0f;
+                if (json.contains("params")) {
+                    if (json["params"].is_number()) scale = json["params"].get<float>();
+                    else if (json["params"].is_object() && json["params"].contains("scale")) scale = json["params"]["scale"].get<float>();
+                }
+                queue.push([scale, client, id](core::Engine* eng) {
+                    eng->setResolutionScale(scale);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getResolutionScale") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"resolutionScale", eng->getResolutionScale()}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setUiScale") {
+                float scale = 1.0f;
+                if (json.contains("params")) {
+                    if (json["params"].is_number()) scale = json["params"].get<float>();
+                    else if (json["params"].is_object() && json["params"].contains("scale")) scale = json["params"]["scale"].get<float>();
+                }
+                queue.push([scale, client, id](core::Engine* eng) {
+                    eng->setUiScale(scale);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getUiScale") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"uiScale", eng->getUiScale()}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.getGameState") {
                 queue.push([client, id](core::Engine* eng) {
                     nlohmann::json res = {
