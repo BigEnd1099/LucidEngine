@@ -3539,25 +3539,25 @@ namespace engine::renderer {
         // ══════════════════════════════════════════════════════════════════════════
         ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, topTotalH + contentH * 0.45f), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(rightPanelW, contentH * 0.55f), ImGuiCond_Always);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.067f, 0.067f, 0.098f, 1.0f)); // #111119
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.086f, 0.086f, 0.086f, 1.0f)); // #161616 neutral charcoal
         ImGui::Begin("Details", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
         // Header Tabs: Details vs World Settings
-        if (s_detailsTab == 0) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.094f, 0.094f, 0.145f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
+        if (s_detailsTab == 0) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.07f, 0.07f, 0.07f, 1.0f));
         if (ImGui::Button(" Details x ")) s_detailsTab = 0;
         ImGui::PopStyleColor();
         ImGui::SameLine();
 
-        if (s_detailsTab == 1) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.094f, 0.094f, 0.145f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
+        if (s_detailsTab == 1) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.07f, 0.07f, 0.07f, 1.0f));
         if (ImGui::Button(" World Settings ")) s_detailsTab = 1;
         ImGui::PopStyleColor();
         ImGui::Separator();
 
         if (s_detailsTab == 0 && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
             // Actor Header Card
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.086f, 0.086f, 0.133f, 1.0f)); // #161622
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.10f, 1.0f)); // #1a1a1a
             ImGui::BeginChild("ActorHeaderCard", ImVec2(0, 58 * s_uiScale), true);
             
             std::string tagStr = "Actor";
@@ -3614,9 +3614,9 @@ namespace engine::renderer {
             const char* filterCats[] = { "All", "General", "Actor", "Physics", "Rendering" };
             for (int fc = 0; fc < 5; ++fc) {
                 if (s_detailsFilterCat == fc) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.37f, 0.72f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f)); // #0078d4
                 } else {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
                 }
                 if (ImGui::Button(filterCats[fc])) s_detailsFilterCat = fc;
                 ImGui::PopStyleColor();
@@ -3646,8 +3646,8 @@ namespace engine::renderer {
                     bool isStationary = registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt) && registry.get().get<ecs::RigidBodyComponent>(selectedEnt).mass == 0;
                     bool isStatic = !registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt);
 
-                    if (isStatic) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.37f, 0.72f, 1.0f));
-                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.1f, 0.15f, 1.0f));
+                    if (isStatic) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
                     if (ImGui::Button("Static")) {
                         if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) registry.get().erase<ecs::RigidBodyComponent>(selectedEnt);
                     }
@@ -3655,7 +3655,7 @@ namespace engine::renderer {
                     ImGui::SameLine();
 
                     if (isStationary) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.55f, 0.1f, 1.0f));
-                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.1f, 0.15f, 1.0f));
+                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
                     if (ImGui::Button("Stationary")) {
                         if (!registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) registry.get().emplace<ecs::RigidBodyComponent>(selectedEnt, ecs::RigidBodyComponent{});
                         registry.get().get<ecs::RigidBodyComponent>(selectedEnt).mass = 0.0f;
@@ -3664,7 +3664,7 @@ namespace engine::renderer {
                     ImGui::SameLine();
 
                     if (isDynamic) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.06f, 0.65f, 0.35f, 1.0f));
-                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.1f, 0.15f, 1.0f));
+                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
                     if (ImGui::Button("Movable")) {
                         if (!registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) registry.get().emplace<ecs::RigidBodyComponent>(selectedEnt, ecs::RigidBodyComponent{});
                         registry.get().get<ecs::RigidBodyComponent>(selectedEnt).mass = 1.0f;
@@ -3762,7 +3762,7 @@ namespace engine::renderer {
         if (s_showContentDrawer) {
             ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomTotalH), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(screenW, drawerH), ImGuiCond_Always);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.051f, 0.086f, 1.0f)); // #0d0d16
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.075f, 0.075f, 0.075f, 1.0f)); // #131313 neutral charcoal
             ImGui::Begin("ContentDrawerWindow", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
             // Drawer Header
@@ -3783,8 +3783,8 @@ namespace engine::renderer {
 
             // Asset Cards Grid
             auto renderAssetCard = [&](const char* name, const char* type, ImVec4 col) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.08f, 0.12f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.12f, 0.12f, 0.18f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.11f, 0.11f, 0.11f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.16f, 0.16f, 1.0f));
                 if (ImGui::Button(name, ImVec2(130 * s_uiScale, 65 * s_uiScale))) {}
                 ImGui::PopStyleColor(2);
                 ImGui::TextColored(col, "  %s", type);
@@ -3805,7 +3805,7 @@ namespace engine::renderer {
         } else if (s_showOutputLog) {
             ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomTotalH), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(screenW, drawerH), ImGuiCond_Always);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.031f, 0.031f, 0.055f, 1.0f)); // #08080e
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.065f, 0.065f, 0.065f, 1.0f)); // #101010
             ImGui::Begin("OutputLogWindow", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
             ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), ">_ Output Log");
