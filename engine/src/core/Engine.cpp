@@ -713,7 +713,9 @@ namespace engine::core {
                 }
 
                 if (m_headless || m_paused) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    if (m_commandQueue.empty() && (!m_mpscCommandQueue || m_mpscCommandQueue->empty())) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
                 }
             } catch (const std::exception& e) {
                 core::Logger::error(std::string("Loop exception: ") + e.what());

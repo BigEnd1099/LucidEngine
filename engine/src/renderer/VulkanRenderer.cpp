@@ -1638,18 +1638,16 @@ namespace engine::renderer {
     static const char s_b64chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     static std::string encodeBase64Data(const unsigned char* data, size_t len) {
         size_t out_len = 4 * ((len + 2) / 3);
-        std::string ret;
-        ret.reserve(out_len);
+        std::string ret(out_len, '=');
+        char* dst = ret.data();
         for (size_t i = 0; i < len; i += 3) {
             uint32_t b = (static_cast<uint32_t>(data[i]) << 16);
             if (i + 1 < len) b |= (static_cast<uint32_t>(data[i + 1]) << 8);
             if (i + 2 < len) b |= static_cast<uint32_t>(data[i + 2]);
-            ret.push_back(s_b64chars[(b >> 18) & 0x3F]);
-            ret.push_back(s_b64chars[(b >> 12) & 0x3F]);
-            if (i + 1 < len) ret.push_back(s_b64chars[(b >> 6) & 0x3F]);
-            else ret.push_back('=');
-            if (i + 2 < len) ret.push_back(s_b64chars[b & 0x3F]);
-            else ret.push_back('=');
+            *dst++ = s_b64chars[(b >> 18) & 0x3F];
+            *dst++ = s_b64chars[(b >> 12) & 0x3F];
+            if (i + 1 < len) *dst++ = s_b64chars[(b >> 6) & 0x3F]; else dst++;
+            if (i + 2 < len) *dst++ = s_b64chars[b & 0x3F]; else dst++;
         }
         return ret;
     }
@@ -1666,7 +1664,7 @@ namespace engine::renderer {
         static std::string s_cachedFrame = "";
         static auto s_lastTime = std::chrono::steady_clock::now();
         auto nowTime = std::chrono::steady_clock::now();
-        if (!s_cachedFrame.empty() && std::chrono::duration<float, std::milli>(nowTime - s_lastTime).count() < 14.0f) {
+        if (!s_cachedFrame.empty() && std::chrono::duration<float, std::milli>(nowTime - s_lastTime).count() < 10.0f) {
             return s_cachedFrame;
         }
 
@@ -1723,9 +1721,30 @@ namespace engine::renderer {
         vkQueueWaitIdle(m_context->getGraphicsQueue());
 
         const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtr);
+        int outW = static_cast<int>(m_width);
+        int outH = static_cast<int>(m_height);
+        std::vector<uint8_t> downsampled;
+
+        // High-speed 60 FPS pixel streaming: fast 2x subsampling for 1080p+
+        if (outW >= 1920 && outH >= 1080) {
+            outW /= 2;
+            outH /= 2;
+            downsampled.resize(outW * outH * 4);
+            uint32_t* dst = reinterpret_cast<uint32_t*>(downsampled.data());
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(srcPixels);
+            int srcStride = static_cast<int>(m_width);
+            for (int y = 0; y < outH; ++y) {
+                const uint32_t* rowSrc = src + (y * 2) * srcStride;
+                for (int x = 0; x < outW; ++x) {
+                    *dst++ = rowSrc[x * 2];
+                }
+            }
+            srcPixels = downsampled.data();
+        }
+
         std::vector<uint8_t> jpegBytes;
-        jpegBytes.reserve(256 * 1024);
-        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+        jpegBytes.reserve(128 * 1024);
+        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, outW, outH, 4, srcPixels, 68);
 
         std::string encoded = encodeBase64Data(jpegBytes.data(), jpegBytes.size());
         s_cachedFrame = "data:image/jpeg;base64," + encoded;

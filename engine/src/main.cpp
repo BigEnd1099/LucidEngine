@@ -7,6 +7,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 void logCrash(const std::string& msg, bool showBox = false) {
@@ -121,15 +122,15 @@ int main(int argc, char** argv) {
 
         if (launchStudio) {
 #ifdef _WIN32
-            // 1. Prefer local Electron runner if installed (full desktop experience)
+            // Use ShellExecuteA so handles (such as listening sockets) are NEVER inherited by the UI process
             if (std::filesystem::exists("node_modules\\electron\\dist\\electron.exe")) {
-                std::system("start \"\" \"node_modules\\electron\\dist\\electron.exe\" .");
+                ShellExecuteA(NULL, "open", "node_modules\\electron\\dist\\electron.exe", ".", NULL, SW_SHOWNORMAL);
             } else if (std::filesystem::exists("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")) {
-                std::system("start \"\" \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
+                ShellExecuteA(NULL, "open", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--app=http://127.0.0.1:9000 --window-size=1920,1080", NULL, SW_SHOWNORMAL);
             } else if (std::filesystem::exists("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe")) {
-                std::system("start \"\" \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
+                ShellExecuteA(NULL, "open", "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "--app=http://127.0.0.1:9000 --window-size=1920,1080", NULL, SW_SHOWNORMAL);
             } else {
-                std::system("start http://127.0.0.1:9000");
+                ShellExecuteA(NULL, "open", "http://127.0.0.1:9000", NULL, NULL, SW_SHOWNORMAL);
             }
 #endif
         }

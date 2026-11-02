@@ -1260,6 +1260,7 @@ export default function App() {
 
     const poll = async () => {
       while (active && connected && viewMode === 'vulkan') {
+        const frameStart = performance.now();
         if (!isCapturing) {
           isCapturing = true;
           try {
@@ -1273,7 +1274,13 @@ export default function App() {
             isCapturing = false;
           }
         }
-        await new Promise(res => setTimeout(res, 16));
+        const elapsed = performance.now() - frameStart;
+        const delay = Math.max(0, 16 - elapsed);
+        if (delay > 0) {
+          await new Promise(res => setTimeout(res, delay));
+        } else {
+          await new Promise(res => setTimeout(res, 0));
+        }
       }
     };
     poll();

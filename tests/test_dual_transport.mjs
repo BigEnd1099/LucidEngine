@@ -35,21 +35,30 @@ try {
 // 1. Launch engine in headless mode
 console.log('[1/5] Uruchamianie instancji Lucid Engine (--headless)...');
 const engineProcess = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
-  stdio: ['ignore', 'pipe', 'inherit']
+  stdio: 'inherit'
 });
 
 await new Promise(r => setTimeout(r, 2000));
 
 try {
-  // 2. Test HTTP GET on port 9000 (Serving embedded index.html)
+  // 2. Test HTTP GET on port 9000 (Serving embedded index.html) with retry
   console.log('[2/5] Testowanie serwowania zasobow HTTP na porcie 9000 (Single Port)...');
-  const httpRes = await new Promise((resolve, reject) => {
-    http.get('http://127.0.0.1:9000/', (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
-    }).on('error', reject);
-  });
+  let httpRes = null;
+  for (let i = 0; i < 15; ++i) {
+    try {
+      httpRes = await new Promise((resolve, reject) => {
+        http.get('http://127.0.0.1:9000/', (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+        }).on('error', reject);
+      });
+      if (httpRes) break;
+    } catch (err) {
+      console.log('HTTP retry error:', err.message);
+      await new Promise(r => setTimeout(r, 400));
+    }
+  }
 
   assert.strictEqual(httpRes.status, 200, 'HTTP status dla / powinien wynosic 200 OK');
   assert(httpRes.headers['content-type']?.includes('text/html'), 'Content-Type powinien byc text/html');
