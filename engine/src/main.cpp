@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
     bool enableRemote = true;
     bool launchStudio = false;
     bool noStudio = false;
+    bool vulkanWindow = false;
     std::string projectPath = "";
     std::string playPreset = "";
 
@@ -59,12 +60,15 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--headless") {
             headless = true;
+            noStudio = true;
         } else if (arg == "--studio" || arg == "--web-ui") {
             launchStudio = true;
         } else if (arg == "--no-studio" || arg == "--no-ui") {
             noStudio = true;
         } else if (arg == "--no-remote" || arg == "--local-only") {
             enableRemote = false;
+        } else if (arg == "--vulkan-window" || arg == "--window") {
+            vulkanWindow = true;
         } else if (arg == "--game" || arg == "--standalone") {
             standaloneGame = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -81,9 +85,14 @@ int main(int argc, char** argv) {
         projectPath = "game.json";
     }
 
-    // Default: In desktop editor mode, launch the unified 1:1 Studio UI Shell
-    if (!headless && !standaloneGame && !noStudio) {
-        launchStudio = true;
+    // Default: In desktop editor mode, run headless backend (offscreen Vulkan GPU streaming)
+    // and launch the unified 1:1 Studio UI Shell (so user has EXACTLY ONE unified window on desktop).
+    // The GLFW window is only opened if specifically requested via --vulkan-window or --game.
+    if (!standaloneGame && !vulkanWindow) {
+        if (!noStudio && !headless) {
+            launchStudio = true;
+        }
+        headless = true; // Offscreen Vulkan GPU streaming; UI shell embeds viewport directly
     }
 
     // Clear previous log

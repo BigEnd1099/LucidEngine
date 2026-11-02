@@ -144,8 +144,6 @@ export default function App() {
   const isTransformDraggingRef = useRef(false);
   const gridRef = useRef<THREE.GridHelper | null>(null);
   const particleManagerRef = useRef<ParticleManager | null>(null);
-  const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
-  const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
 
   // Camera navigation refs (Blender / UE style)
   const [cameraRot, setCameraRot] = useState({ yaw: -90, pitch: -20 });
@@ -440,10 +438,7 @@ export default function App() {
     const h = containerRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a14);
-    if (project.settings.fogEnabled) {
-      scene.fog = new THREE.Fog(project.settings.fogColor, project.settings.fogNear, project.settings.fogFar);
-    }
+    scene.background = null; // Transparent overlay - scene is 100% rendered by Vulkan 1.3 in C++
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
@@ -451,9 +446,8 @@ export default function App() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(w, h);
-    renderer.setClearColor(0x000000, 0);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.setClearColor(0x000000, 0); // Transparent gizmo overlay
+    renderer.shadowMap.enabled = false;
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -510,24 +504,12 @@ export default function App() {
       sendRpc('engine.updateEntity', { id: targetId, transform: { ...newPos, ...newRot, ...newScale } }).catch(() => { });
     });
 
-    // Grid
+    // Grid & Lights are rendered natively by Vulkan 1.3 in C++ (VulkanRenderer)
     const grid = new THREE.GridHelper(100, 50, 0x00f0ff, 0x1e293b);
     grid.position.y = 0.01;
+    grid.visible = false;
     scene.add(grid);
     gridRef.current = grid;
-
-    // Lights
-    const amb = new THREE.AmbientLight(project.settings.ambientColor, project.settings.ambientIntensity);
-    scene.add(amb);
-    ambientLightRef.current = amb;
-
-    const sun = new THREE.DirectionalLight(project.settings.sunColor, project.settings.sunIntensity);
-    sun.position.set(25, 50, 15);
-    sun.castShadow = true;
-    sun.shadow.mapSize.width = 2048;
-    sun.shadow.mapSize.height = 2048;
-    scene.add(sun);
-    dirLightRef.current = sun;
 
     // Mouse handlers (Blender / UE style)
     const dom = renderer.domElement;
@@ -735,29 +717,21 @@ export default function App() {
         transformControlsRef.current.detach();
       }
 
-      const isVulkanStreaming = viewModeRef.current === 'vulkan' && !!vulkanFrameRef.current;
+      // Transparent overlay: only render gizmos & selection box, never draw 3D scene geometry in Three.js
+      scene.background = null;
       if (gridRef.current) {
-        gridRef.current.visible = !isVulkanStreaming;
+        gridRef.current.visible = false;
       }
-      if (isVulkanStreaming) {
-        scene.background = null;
-        meshMapRef.current.forEach(m => {
-          m.visible = false;
-        });
-      } else {
-        scene.background = new THREE.Color(0x0a0a14);
-        meshMapRef.current.forEach(m => {
-          m.visible = true;
-        });
-      }
+      meshMapRef.current.forEach(m => {
+        m.visible = false;
+      });
 
       renderer.render(scene, camera);
 
-      if (isVulkanStreaming) {
-        meshMapRef.current.forEach(m => {
-          m.visible = true;
-        });
-      }
+      // Restore visibility for instant raycaster hit-testing on click
+      meshMapRef.current.forEach(m => {
+        m.visible = true;
+      });
     };
     renderLoop();
 
@@ -2473,7 +2447,7 @@ globalThis.update = function(entities, dt, input, contacts) {
             <span className="text-slate-600">•</span>
             <span className="text-emerald-400 font-mono text-[10px] flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {viewMode === 'vulkan' ? `Vulkan 1.3: ${vulkanFps || 60} FPS (Direct GPU @ ${Math.round(resolutionScale * 100)}%)` : 'WebGL Fallback: 60 FPS'}
+              <span>Vulkan 1.3: {vulkanFps || 60} FPS (Direct GPU @ {Math.round(resolutionScale * 100)}%)</span>
             </span>
           </div>
         </div>

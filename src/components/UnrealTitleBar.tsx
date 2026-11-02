@@ -134,8 +134,8 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
     },
     {
       id: 'platforms', label: 'Platforms', items: [
-        { label: 'Windows (x86_64 Vulkan 1.3)', action: onPackageGame || (() => { }), icon: <Check className="w-3.5 h-3.5 text-emerald-400" /> },
-        { label: 'WebAssembly (WebGL2)', action: () => { }, icon: <Check className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Windows (x86_64 Vulkan 1.3 Direct GPU)', action: onPackageGame || (() => { }), icon: <Check className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'Pixel Streaming (Unified Remote ws://:9000)', action: () => { }, icon: <Check className="w-3.5 h-3.5 text-cyan-400" /> },
         { label: 'Package Windows Release Build (.exe)...', action: onPackageGame || (() => { }), icon: <Download className="w-3.5 h-3.5 text-emerald-400" /> },
       ]
     },

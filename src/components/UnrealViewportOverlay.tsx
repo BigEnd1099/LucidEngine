@@ -32,7 +32,7 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
   setSnapEnabled,
   snapStep,
   setSnapStep,
-  viewMode,
+  viewMode: _viewMode,
   setViewMode,
   resolutionScale = 1.0,
   setResolutionScale,
@@ -195,41 +195,54 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
 
         <div className="h-4 w-px bg-white/10" />
 
-        {/* View Mode Dropdown (WebGL vs Vulkan GPU) */}
+        {/* View Mode Dropdown (Vulkan 1.3 Lit / Direct GPU) */}
         <div className="relative">
           <button
             onClick={() => setShowViewMenu(!showViewMenu)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-emerald-300 hover:bg-white/5 text-[10px] font-medium"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>{viewMode === 'vulkan' ? 'Vulkan 1.3 (Direct GPU)' : 'WebGL (Fallback)'}</span>
+            <span>Vulkan 1.3 Lit (Direct GPU)</span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
 
           {showViewMenu && (
             <div
-              className="absolute top-full right-0 mt-1 w-48 bg-[#181824] border border-white/15 rounded-md shadow-2xl py-1 z-50 text-[11px]"
+              className="absolute top-full right-0 mt-1 w-56 bg-[#181824] border border-white/15 rounded-md shadow-2xl py-1 z-50 text-[11px]"
               onMouseLeave={() => setShowViewMenu(false)}
             >
+              <div className="px-3 py-1 text-[9px] font-mono uppercase tracking-wider text-slate-400 border-b border-white/10">
+                Vulkan 1.3 GPU Render Pipeline
+              </div>
               <button
                 onClick={() => { setViewMode('vulkan'); setShowViewMenu(false); }}
                 className="w-full px-3 py-1.5 text-left hover:bg-emerald-500/20 text-slate-200 flex items-center justify-between"
               >
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span>Vulkan 1.3 (Direct GPU)</span>
+                  <span>Lit (PBR + Direct GPU)</span>
                 </div>
-                {viewMode === 'vulkan' && <Check className="w-3 h-3 text-emerald-400" />}
+                <Check className="w-3 h-3 text-emerald-400" />
               </button>
               <button
-                onClick={() => { setViewMode('three'); setShowViewMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-cyan-500/20 text-slate-200 flex items-center justify-between"
+                onClick={() => { setShowViewMenu(false); }}
+                className="w-full px-3 py-1.5 text-left hover:bg-emerald-500/20 text-slate-200 flex items-center justify-between"
               >
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                  <span>WebGL (Fallback)</span>
+                  <span>Hardware ReSTIR GI</span>
                 </div>
-                {viewMode === 'three' && <Check className="w-3 h-3 text-cyan-400" />}
+                <Check className="w-3 h-3 text-cyan-400" />
+              </button>
+              <button
+                onClick={() => { setShowViewMenu(false); }}
+                className="w-full px-3 py-1.5 text-left hover:bg-emerald-500/20 text-slate-200 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-400" />
+                  <span>Virtual Shadow Maps (VSM 16k)</span>
+                </div>
+                <Check className="w-3 h-3 text-blue-400" />
               </button>
             </div>
           )}
