@@ -1270,7 +1270,7 @@ function update(entities, dt, input, contacts) {
     }
 
     std::string Engine::captureFrameBase64() {
-        if (m_headless) {
+        if (true) { // Always render on frame capture
             glm::vec3 front;
             front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
             front.y = sin(glm::radians(m_camPitch));

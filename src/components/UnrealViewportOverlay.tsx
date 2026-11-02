@@ -199,30 +199,37 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowViewMenu(!showViewMenu)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded text-cyan-300 hover:bg-white/5 text-[10px] font-medium"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-emerald-300 hover:bg-white/5 text-[10px] font-medium"
           >
-            <span>{viewMode === 'three' ? 'WebGL' : 'Vulkan (GPU)'}</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{viewMode === 'vulkan' ? 'Vulkan 1.3 (Direct GPU)' : 'WebGL (Fallback)'}</span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
 
           {showViewMenu && (
             <div
-              className="absolute top-full right-0 mt-1 w-40 bg-[#181824] border border-white/15 rounded-md shadow-2xl py-1 z-50 text-[11px]"
+              className="absolute top-full right-0 mt-1 w-48 bg-[#181824] border border-white/15 rounded-md shadow-2xl py-1 z-50 text-[11px]"
               onMouseLeave={() => setShowViewMenu(false)}
             >
+              <button
+                onClick={() => { setViewMode('vulkan'); setShowViewMenu(false); }}
+                className="w-full px-3 py-1.5 text-left hover:bg-emerald-500/20 text-slate-200 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span>Vulkan 1.3 (Direct GPU)</span>
+                </div>
+                {viewMode === 'vulkan' && <Check className="w-3 h-3 text-emerald-400" />}
+              </button>
               <button
                 onClick={() => { setViewMode('three'); setShowViewMenu(false); }}
                 className="w-full px-3 py-1.5 text-left hover:bg-cyan-500/20 text-slate-200 flex items-center justify-between"
               >
-                <span>WebGL</span>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                  <span>WebGL (Fallback)</span>
+                </div>
                 {viewMode === 'three' && <Check className="w-3 h-3 text-cyan-400" />}
-              </button>
-              <button
-                onClick={() => { setViewMode('vulkan'); setShowViewMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-cyan-500/20 text-slate-200 flex items-center justify-between"
-              >
-                <span>Vulkan (GPU)</span>
-                {viewMode === 'vulkan' && <Check className="w-3 h-3 text-emerald-400" />}
               </button>
             </div>
           )}

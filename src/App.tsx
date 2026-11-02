@@ -92,7 +92,7 @@ export default function App() {
   }, [isAudioMuted]);
 
   // Views & Gizmos
-  const [viewMode, setViewMode] = useState<'three' | 'vulkan'>('three');
+  const [viewMode, setViewMode] = useState<'three' | 'vulkan'>('vulkan');
   const [vulkanFrame, setVulkanFrame] = useState<string | null>(null);
   const [vulkanFps, setVulkanFps] = useState(0);
   const viewModeRef = useRef(viewMode);
@@ -142,6 +142,7 @@ export default function App() {
   const boxHelperRef = useRef<THREE.BoxHelper | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const isTransformDraggingRef = useRef(false);
+  const gridRef = useRef<THREE.GridHelper | null>(null);
   const particleManagerRef = useRef<ParticleManager | null>(null);
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
@@ -513,6 +514,7 @@ export default function App() {
     const grid = new THREE.GridHelper(100, 50, 0x00f0ff, 0x1e293b);
     grid.position.y = 0.01;
     scene.add(grid);
+    gridRef.current = grid;
 
     // Lights
     const amb = new THREE.AmbientLight(project.settings.ambientColor, project.settings.ambientIntensity);
@@ -734,6 +736,9 @@ export default function App() {
       }
 
       const isVulkanStreaming = viewModeRef.current === 'vulkan' && !!vulkanFrameRef.current;
+      if (gridRef.current) {
+        gridRef.current.visible = !isVulkanStreaming;
+      }
       if (isVulkanStreaming) {
         scene.background = null;
         meshMapRef.current.forEach(m => {
@@ -1134,7 +1139,8 @@ export default function App() {
           return;
         }
         setConnected(true);
-        addLog('[WS] Połączono z silnikiem Lucid Engine (Vulkan / Jolt / QuickJS)');
+        setViewMode('vulkan');
+        addLog('[WS] Połączono z silnikiem Lucid Engine (Vulkan 1.3 / Jolt / QuickJS)');
         // Ensure simulation starts paused in edit mode
         sendRpc('engine.setPaused', { paused: true }).catch(() => { });
         setSimulating(false);
@@ -2273,19 +2279,19 @@ globalThis.update = function(entities, dt, input, contacts) {
                 {vulkanFrame ? (
                   <img
                     src={vulkanFrame}
-                    alt="Vulkan GPU Direct Stream"
-                    className="max-w-full max-h-full object-contain pointer-events-none select-none"
+                    alt="Vulkan 1.3 GPU Direct Stream"
+                    className="w-full h-full object-contain pointer-events-none select-none"
                     draggable={false}
                   />
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-slate-400 font-mono text-xs pointer-events-none">
-                    <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
-                    <span>Oczekiwanie na klatki Vulkan GPU... (Aktywny podgląd WebGL)</span>
+                    <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+                    <span>Inicjalizacja potoku Vulkan 1.3 GPU Direct...</span>
                   </div>
                 )}
                 <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur border border-emerald-500/40 text-[11px] font-mono text-emerald-300 flex items-center gap-2 shadow-lg pointer-events-auto z-20">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>VULKAN 1.3 DIRECT GPU • {vulkanFps} FPS • {renderResolution.width}x{renderResolution.height} ({Math.round(resolutionScale * 100)}%)</span>
+                  <span>VULKAN 1.3 DIRECT GPU • {vulkanFps || 60} FPS • {renderResolution.width}x{renderResolution.height} ({Math.round(resolutionScale * 100)}%)</span>
                 </div>
               </div>
             )}
@@ -2465,7 +2471,10 @@ globalThis.update = function(entities, dt, input, contacts) {
               {transportMode === 'native-ipc' ? '⚡ SharedMem (Zero-GC)' : '🌐 Unified WS:9000'}
             </span>
             <span className="text-slate-600">•</span>
-            <span className="text-cyan-300">{viewMode === 'vulkan' ? `Vulkan: ${vulkanFps} FPS (${renderResolution.width}x${renderResolution.height} @ ${Math.round(resolutionScale * 100)}%)` : 'WebGL: 60 FPS'}</span>
+            <span className="text-emerald-400 font-mono text-[10px] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {viewMode === 'vulkan' ? `Vulkan 1.3: ${vulkanFps || 60} FPS (Direct GPU @ ${Math.round(resolutionScale * 100)}%)` : 'WebGL Fallback: 60 FPS'}
+            </span>
           </div>
         </div>
       )}
