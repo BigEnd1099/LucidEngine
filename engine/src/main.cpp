@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
     bool standaloneGame = false;
     bool enableRemote = true;
     bool launchStudio = false;
+    bool noStudio = false;
     std::string projectPath = "";
     std::string playPreset = "";
 
@@ -60,6 +61,8 @@ int main(int argc, char** argv) {
             headless = true;
         } else if (arg == "--studio" || arg == "--web-ui") {
             launchStudio = true;
+        } else if (arg == "--no-studio" || arg == "--no-ui") {
+            noStudio = true;
         } else if (arg == "--no-remote" || arg == "--local-only") {
             enableRemote = false;
         } else if (arg == "--game" || arg == "--standalone") {
@@ -76,6 +79,11 @@ int main(int argc, char** argv) {
     if (!standaloneGame && std::filesystem::exists("game.json")) {
         standaloneGame = true;
         projectPath = "game.json";
+    }
+
+    // Default: In desktop editor mode, launch the unified 1:1 Studio UI Shell
+    if (!headless && !standaloneGame && !noStudio) {
+        launchStudio = true;
     }
 
     // Clear previous log
@@ -104,11 +112,12 @@ int main(int argc, char** argv) {
 
         if (launchStudio) {
 #ifdef _WIN32
-            const char* chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-            const char* edgePath = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-            if (std::filesystem::exists(chromePath)) {
+            // 1. Prefer local Electron runner if installed (full desktop experience)
+            if (std::filesystem::exists("node_modules\\electron\\dist\\electron.exe")) {
+                std::system("start \"\" \"node_modules\\electron\\dist\\electron.exe\" .");
+            } else if (std::filesystem::exists("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")) {
                 std::system("start \"\" \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
-            } else if (std::filesystem::exists(edgePath)) {
+            } else if (std::filesystem::exists("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe")) {
                 std::system("start \"\" \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
             } else {
                 std::system("start http://127.0.0.1:9000");

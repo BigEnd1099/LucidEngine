@@ -2,6 +2,8 @@
 #include "network/EmbeddedAssets.hpp"
 #include "core/Logger.hpp"
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 
 namespace engine::network {
 
@@ -17,8 +19,51 @@ SinglePortUnifiedServer::SinglePortUnifiedServer(
     , m_legacyQueue(legacyQueue)
     , m_httpServer(port, "0.0.0.0")
 {
-    // 1. Handle HTTP Requests (Embedded web assets on single port)
+    // 1. Handle HTTP Requests (Embedded web assets with disk hot-reload on single port)
     m_httpServer.setOnConnectionCallback([this](const ix::HttpRequestPtr& req, std::shared_ptr<ix::ConnectionState> connState) -> ix::HttpResponsePtr {
+        // A. Priority 1: Check live 'dist/' folder on disk for instant hot-reload when src/App.tsx is edited
+        std::string reqPath = req->uri;
+        size_t queryPos = reqPath.find('?');
+        if (queryPos != std::string::npos) {
+            reqPath = reqPath.substr(0, queryPos);
+        }
+        if (reqPath.empty() || reqPath == "/") {
+            reqPath = "/index.html";
+        }
+
+        std::vector<std::filesystem::path> diskCandidates = {
+            std::filesystem::path("dist") / reqPath.substr(1),
+            std::filesystem::path("../dist") / reqPath.substr(1),
+            std::filesystem::path("../../dist") / reqPath.substr(1)
+        };
+
+        for (const auto& diskPath : diskCandidates) {
+            if (std::filesystem::exists(diskPath) && !std::filesystem::is_directory(diskPath)) {
+                std::ifstream f(diskPath, std::ios::binary);
+                if (f) {
+                    std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    ix::WebSocketHttpHeaders headers;
+                    std::string ext = diskPath.extension().string();
+                    if (ext == ".html") headers["Content-Type"] = "text/html; charset=utf-8";
+                    else if (ext == ".js" || ext == ".mjs") headers["Content-Type"] = "application/javascript; charset=utf-8";
+                    else if (ext == ".css") headers["Content-Type"] = "text/css; charset=utf-8";
+                    else if (ext == ".json") headers["Content-Type"] = "application/json";
+                    else if (ext == ".svg") headers["Content-Type"] = "image/svg+xml";
+                    else if (ext == ".png") headers["Content-Type"] = "image/png";
+                    else if (ext == ".jpg" || ext == ".jpeg") headers["Content-Type"] = "image/jpeg";
+                    else if (ext == ".ico") headers["Content-Type"] = "image/x-icon";
+                    else if (ext == ".woff2") headers["Content-Type"] = "font/woff2";
+                    else headers["Content-Type"] = "application/octet-stream";
+
+                    headers["Access-Control-Allow-Origin"] = "*";
+                    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+                    headers["Cache-Control"] = "no-cache";
+                    return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, headers, body);
+                }
+            }
+        }
+
+        // B. Priority 2: Fallback to baked-in embedded assets (EmbeddedAssets.hpp)
         const uint8_t* assetData = nullptr;
         size_t assetSize = 0;
         const char* assetMime = nullptr;
