@@ -21,7 +21,7 @@ namespace engine::renderer {
             }
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
             glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-            m_window = glfwCreateWindow(1920, 1080, "Lucid Engine 3.8 - Vulkan Native", nullptr, nullptr);
+            m_window = glfwCreateWindow(1920, 1080, "Lucid Engine - Vulkan Native", nullptr, nullptr);
             if (!m_window) {
                 throw std::runtime_error("glfwCreateWindow failed!");
             }

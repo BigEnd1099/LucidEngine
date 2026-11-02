@@ -70,32 +70,32 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
   const entityTag = selectedEntity?.tag || (selectedEntity ? `Entity_${selectedEntity.id}` : 'None');
 
   return (
-    <div className="flex-1 flex flex-col bg-[#111119] border-t border-white/[0.08] select-none overflow-hidden h-full">
+    <div className="flex-1 flex flex-col bg-[#161616] border-t border-[#242424] select-none overflow-hidden h-full">
       {/* 1. Header Tabs: Details | World Settings (Exact UE5) */}
-      <div className="h-7 bg-[#0b0b10] border-b border-white/[0.08] flex items-center justify-between px-2 text-[11px] font-sans shrink-0">
+      <div className="h-7 bg-[#121212] border-b border-[#242424] flex items-center justify-between px-2 text-[11px] font-sans shrink-0">
         <div className="flex items-center gap-1">
           <div
             onClick={() => setActiveTab('details')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-t-sm cursor-pointer transition-colors ${
               activeTab === 'details'
-                ? 'bg-[#181824] text-white border-t-2 border-cyan-400 font-semibold'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1e1e1e] text-white border-t-2 border-[#0078d4] font-semibold'
+                : 'text-neutral-400 hover:text-white'
             }`}
           >
-            <Sliders className="w-3 h-3 text-cyan-400" />
+            <Sliders className="w-3 h-3 text-[#0078d4]" />
             <span>Details</span>
-            <span className="text-[10px] text-slate-500 hover:text-white ml-1">✕</span>
+            <span className="text-[10px] text-neutral-500 hover:text-white ml-1">✕</span>
           </div>
 
           <div
             onClick={() => setActiveTab('world')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-t-sm cursor-pointer transition-colors ${
               activeTab === 'world'
-                ? 'bg-[#181824] text-white border-t-2 border-cyan-400 font-semibold'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1e1e1e] text-white border-t-2 border-[#0078d4] font-semibold'
+                : 'text-neutral-400 hover:text-white'
             }`}
           >
-            <Globe className="w-3 h-3 text-indigo-400" />
+            <Globe className="w-3 h-3 text-sky-400" />
             <span>World Settings</span>
           </div>
         </div>
@@ -107,11 +107,11 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
           {selectedEntity ? (
             <div className="p-2 space-y-2">
               {/* Actor Header Card */}
-              <div className="p-2 rounded bg-[#161622] border border-white/[0.08] space-y-1.5">
+              <div className="p-2 rounded bg-[#1c1c1c] border border-[#282828] space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 flex-1 truncate">
                     <span className="text-[11px] font-bold text-white truncate">{entityTag}</span>
-                    <span className="text-[9px] font-mono text-cyan-400">#{selectedEntity.id}</span>
+                    <span className="text-[9px] font-mono text-sky-400">#{selectedEntity.id}</span>
                   </div>
 
                   <div className="relative shrink-0">
@@ -243,27 +243,27 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
               </div>
 
               {/* Search details */}
-              <div className="flex items-center gap-1.5 bg-[#07070c] border border-white/10 rounded px-2 py-0.5">
-                <Search className="w-3 h-3 text-slate-500" />
+              <div className="flex items-center gap-1.5 bg-[#121212] border border-[#2b2b2b] rounded px-2 py-0.5">
+                <Search className="w-3 h-3 text-neutral-500" />
                 <input
                   type="text"
                   placeholder="Search Details..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  className="w-full bg-transparent text-[11px] text-white focus:outline-none placeholder-slate-600 font-sans"
+                  className="w-full bg-transparent text-[11px] text-neutral-200 focus:outline-none placeholder-neutral-500 font-sans"
                 />
               </div>
 
               {/* Category Filter Pills (Exact UE5: General | Actor | LOD | Misc | Physics | Rendering | Streaming | All) */}
-              <div className="flex items-center gap-1 overflow-x-auto py-0.5 text-[9px] font-medium text-slate-400 scrollbar-none">
+              <div className="flex items-center gap-1 overflow-x-auto py-0.5 text-[9px] font-medium text-neutral-400 scrollbar-none">
                 {(['General', 'Actor', 'LOD', 'Misc', 'Physics', 'Rendering', 'Streaming', 'All'] as const).map(cat => (
                   <button
                     key={cat}
                     onClick={() => setFilterCategory(cat)}
                     className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
                       filterCategory === cat
-                        ? 'bg-[#005fb8] text-white font-semibold shadow-sm'
-                        : 'bg-[#181822] hover:bg-white/10 text-slate-400'
+                        ? 'bg-[#0078d4] text-white font-semibold shadow-sm'
+                        : 'bg-[#181818] hover:bg-white/10 text-neutral-400'
                     }`}
                   >
                     {cat}
@@ -272,10 +272,10 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
               </div>
 
               {/* ── 1. TRANSFORM SECTION ── */}
-              <div className="rounded bg-[#161622] border border-white/[0.08] overflow-hidden">
+              <div className="rounded bg-[#1c1c1c] border border-[#282828] overflow-hidden">
                 <div
                   onClick={() => toggleSection('transform')}
-                  className="px-2.5 py-1 bg-[#1c1c2b] flex items-center justify-between cursor-pointer text-[11px] font-semibold text-slate-200"
+                  className="px-2.5 py-1 bg-[#181818] flex items-center justify-between cursor-pointer text-[11px] font-semibold text-neutral-200"
                 >
                   <div className="flex items-center gap-1">
                     {openSections.transform ? <ChevronDown className="w-3 h-3 text-slate-400" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}

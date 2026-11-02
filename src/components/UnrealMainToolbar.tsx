@@ -62,33 +62,33 @@ export const UnrealMainToolbar: React.FC<UnrealMainToolbarProps> = ({
   };
 
   return (
-    <div className="h-10 bg-[#13131c] border-b border-white/[0.08] px-3 flex items-center justify-between z-20 shrink-0 select-none">
+    <div className="h-10 bg-[#141414] border-b border-[#242424] px-3 flex items-center justify-between z-20 shrink-0 select-none">
       {/* ── Left side: Selection Mode & Quick Add ── */}
       <div className="flex items-center gap-2">
         {/* Selection Mode Dropdown */}
         <div className="relative">
           <button
             onClick={() => setShowModeMenu(!showModeMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1c1c2b] hover:bg-[#252538] border border-white/10 text-xs font-medium text-slate-200 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1c1c1c] hover:bg-[#252525] border border-[#2c2c2c] text-xs font-medium text-neutral-200 transition-colors shadow-sm"
           >
-            <div className="w-2 h-2 rounded-sm bg-cyan-400" />
+            <div className="w-2 h-2 rounded-sm bg-[#0078d4]" />
             <span>{selectionMode} Mode</span>
-            <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
+            <ChevronDown className="w-3 h-3 text-neutral-400 ml-0.5" />
           </button>
 
           {showModeMenu && (
             <div
-              className="absolute top-full left-0 mt-1 w-44 bg-[#181824] border border-white/15 rounded-md shadow-2xl py-1 z-50"
+              className="absolute top-full left-0 mt-1 w-44 bg-[#181818] border border-[#2c2c2c] rounded-md shadow-2xl py-1 z-50"
               onMouseLeave={() => setShowModeMenu(false)}
             >
               {['Select', 'Landscape', 'Foliage', 'Modeling', 'Animation'].map(m => (
                 <button
                   key={m}
                   onClick={() => { setSelectionMode(m); setShowModeMenu(false); }}
-                  className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-500/20 hover:text-cyan-300 flex items-center justify-between"
+                  className="w-full px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[#0078d4]/20 hover:text-white flex items-center justify-between"
                 >
                   <span>{m} Mode</span>
-                  {selectionMode === m && <Check className="w-3 h-3 text-cyan-400" />}
+                  {selectionMode === m && <Check className="w-3 h-3 text-[#0078d4]" />}
                 </button>
               ))}
             </div>
@@ -98,7 +98,7 @@ export const UnrealMainToolbar: React.FC<UnrealMainToolbarProps> = ({
         {/* Save Button */}
         <button
           onClick={onSave}
-          className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+          className="p-1.5 rounded hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
           title="Save Level (Ctrl+S)"
         >
           <Save className="w-4 h-4" />
@@ -108,12 +108,12 @@ export const UnrealMainToolbar: React.FC<UnrealMainToolbarProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowAddMenu(!showAddMenu)}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-[#1c1c2b] hover:bg-[#252538] border border-white/10 text-xs font-semibold text-cyan-300 transition-colors shadow-sm"
+            className="flex items-center gap-1 px-2 py-1 rounded bg-[#1c1c1c] hover:bg-[#252525] border border-[#2c2c2c] text-xs font-semibold text-neutral-200 transition-colors shadow-sm"
             title="Quickly add to project (Actor, Shapes, Lights, VFX)"
           >
-            <Plus className="w-3.5 h-3.5 text-cyan-400" />
+            <Plus className="w-3.5 h-3.5 text-[#0078d4]" />
             <span className="text-[11px]">Add</span>
-            <ChevronDown className="w-3 h-3 text-slate-400" />
+            <ChevronDown className="w-3 h-3 text-neutral-400" />
           </button>
 
           {showAddMenu && (
@@ -207,8 +207,8 @@ export const UnrealMainToolbar: React.FC<UnrealMainToolbarProps> = ({
         )}
       </div>
 
-      {/* ── Center: Exact Unreal Engine 5 Transport Bar ── */}
-      <div className="flex items-center gap-1 bg-[#1a1a27] border border-white/10 rounded-md p-0.5 shadow-inner">
+      {/* ── Center: Exact Unreal Engine Transport Bar ── */}
+      <div className="flex items-center gap-1 bg-[#1a1a1a] border border-[#2b2b2b] rounded-md p-0.5 shadow-inner">
         {/* Play Button (Green UE5 icon) */}
         <button
           onClick={onPlay}

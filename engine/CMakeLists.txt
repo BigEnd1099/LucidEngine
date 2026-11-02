@@ -162,6 +162,13 @@ foreach(SPV_FILE ${SPV_FILES})
     )
 endforeach()
 
+# Copy fonts next to the executable
+add_custom_command(TARGET engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts
+    $<TARGET_FILE_DIR:engine>/assets/fonts
+)
+
 target_include_directories(engine PRIVATE include)
 target_include_directories(engine PRIVATE ${vma_SOURCE_DIR}/include)
 target_include_directories(engine PRIVATE ${jolt_SOURCE_DIR})

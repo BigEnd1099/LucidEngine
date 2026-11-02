@@ -55,29 +55,29 @@ export default function App() {
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
 
   // Engine state
-  const [connected, setConnected]           = useState(false);
-  const [simulating, setSimulating]         = useState(false); // physics PAUSED by default in edit mode
-  const [entities, setEntities]             = useState<EntityData[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [simulating, setSimulating] = useState(false); // physics PAUSED by default in edit mode
+  const [entities, setEntities] = useState<EntityData[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
-  const [aiPrompt, setAiPrompt]             = useState('');
-  const [aiLoading, setAiLoading]           = useState(false);
-  const [logs, setLogs]                     = useState<string[]>([]);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
   const [lastScriptError, setLastScriptError] = useState<{ message: string; stackTrace: string } | null>(null);
-  const [consoleCmd, setConsoleCmd]         = useState('');
-  const [gameScore, setGameScore]           = useState<number>(0);
-  const [playerHealth, setPlayerHealth]     = useState<number>(100);
-  const [gameStatus, setGameStatus]         = useState<GameStatus>('PLAYING');
+  const [consoleCmd, setConsoleCmd] = useState('');
+  const [gameScore, setGameScore] = useState<number>(0);
+  const [playerHealth, setPlayerHealth] = useState<number>(100);
+  const [gameStatus, setGameStatus] = useState<GameStatus>('PLAYING');
 
   // Gameplay Camera & Audio State
-  const [cameraMode, setCameraMode]         = useState<CameraMode>('editor');
-  const [isAudioMuted, setIsAudioMuted]     = useState(false);
+  const [cameraMode, setCameraMode] = useState<CameraMode>('editor');
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isImmersivePlay, setIsImmersivePlay] = useState(false);
-  const cameraShakeRef                      = useRef<{ intensity: number; duration: number; startTime: number }>({ intensity: 0, duration: 0, startTime: 0 });
-  const cameraModeRef                       = useRef<CameraMode>('editor');
-  const simulatingRef                       = useRef<boolean>(false);
-  const isAudioMutedRef                     = useRef<boolean>(false);
-  const preSimulationSnapshotRef            = useRef<EntityData[] | null>(null);
-  const gltfCacheRef                        = useRef<Map<string, THREE.Group>>(new Map());
+  const cameraShakeRef = useRef<{ intensity: number; duration: number; startTime: number }>({ intensity: 0, duration: 0, startTime: 0 });
+  const cameraModeRef = useRef<CameraMode>('editor');
+  const simulatingRef = useRef<boolean>(false);
+  const isAudioMutedRef = useRef<boolean>(false);
+  const preSimulationSnapshotRef = useRef<EntityData[] | null>(null);
+  const gltfCacheRef = useRef<Map<string, THREE.Group>>(new Map());
 
   useEffect(() => { cameraModeRef.current = cameraMode; }, [cameraMode]);
   useEffect(() => { simulatingRef.current = simulating; }, [simulating]);
@@ -87,23 +87,23 @@ export default function App() {
   }, [isAudioMuted]);
 
   // Views & Gizmos
-  const [viewMode, setViewMode]             = useState<'three' | 'vulkan'>('three');
-  const [vulkanFrame, setVulkanFrame]       = useState<string | null>(null);
-  const [vulkanFps, setVulkanFps]           = useState(0);
-  const viewModeRef                         = useRef(viewMode);
-  const vulkanFrameRef                      = useRef(vulkanFrame);
+  const [viewMode, setViewMode] = useState<'three' | 'vulkan'>('three');
+  const [vulkanFrame, setVulkanFrame] = useState<string | null>(null);
+  const [vulkanFps, setVulkanFps] = useState(0);
+  const viewModeRef = useRef(viewMode);
+  const vulkanFrameRef = useRef(vulkanFrame);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
   useEffect(() => { vulkanFrameRef.current = vulkanFrame; }, [vulkanFrame]);
 
-  const [gizmoMode, setGizmoMode]           = useState<'translate' | 'rotate' | 'scale'>('translate');
-  const [gizmoSpace, setGizmoSpace]         = useState<'world' | 'local'>('world');
-  const [snapEnabled, setSnapEnabled]       = useState(false);
-  const [snapStep, setSnapStep]             = useState<number>(0.5);
+  const [gizmoMode, setGizmoMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+  const [gizmoSpace, setGizmoSpace] = useState<'world' | 'local'>('world');
+  const [snapEnabled, setSnapEnabled] = useState(false);
+  const [snapStep, setSnapStep] = useState<number>(0.5);
 
   // UI & Render Resolution Scaling State
-  const [uiScale, setUiScale]                       = useState<number>(() => project.settings?.uiScale || 1.0);
-  const [resolutionScale, setResolutionScale]       = useState<number>(() => project.settings?.resolutionScale || 1.0);
-  const [renderResolution, setRenderResolution]     = useState<{ width: number; height: number }>(() => project.settings?.renderResolution || { width: 1920, height: 1080 });
+  const [uiScale, setUiScale] = useState<number>(() => project.settings?.uiScale || 1.0);
+  const [resolutionScale, setResolutionScale] = useState<number>(() => project.settings?.resolutionScale || 1.0);
+  const [renderResolution, setRenderResolution] = useState<{ width: number; height: number }>(() => project.settings?.renderResolution || { width: 1920, height: 1080 });
 
   // Automatic UI Scaling based on browser window resolution relative to standard 1080p reference
   const [windowDims, setWindowDims] = useState(() => ({
@@ -129,33 +129,33 @@ export default function App() {
   }, [autoScale, uiScale]);
 
   // Three.js, Vulkan & Particle Refs
-  const viewportWrapperRef  = useRef<HTMLDivElement | null>(null);
-  const sceneRef            = useRef<THREE.Scene | null>(null);
-  const rendererRef         = useRef<THREE.WebGLRenderer | null>(null);
-  const cameraRef           = useRef<THREE.PerspectiveCamera | null>(null);
-  const meshMapRef          = useRef<Map<number, THREE.Mesh>>(new Map());
-  const boxHelperRef        = useRef<THREE.BoxHelper | null>(null);
+  const viewportWrapperRef = useRef<HTMLDivElement | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const meshMapRef = useRef<Map<number, THREE.Mesh>>(new Map());
+  const boxHelperRef = useRef<THREE.BoxHelper | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const isTransformDraggingRef = useRef(false);
-  const particleManagerRef  = useRef<ParticleManager | null>(null);
-  const ambientLightRef     = useRef<THREE.AmbientLight | null>(null);
-  const dirLightRef         = useRef<THREE.DirectionalLight | null>(null);
+  const particleManagerRef = useRef<ParticleManager | null>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
+  const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
 
   // Camera navigation refs (Blender / UE style)
   const [cameraRot, setCameraRot] = useState({ yaw: -90, pitch: -20 });
-  const cameraStateRef   = useRef({ x: 0, y: 15, z: 30, yaw: -90, pitch: -20, fov: 45 });
-  const rmbDownRef       = useRef(false);   // Right Mouse Button held
-  const mmbDownRef       = useRef(false);   // Middle Mouse Button held
-  const altOrbitDownRef  = useRef(false);   // Alt + Left Mouse Button orbit held
-  const lastMouseRef     = useRef({ x: 0, y: 0 });
-  const mouseDownPosRef  = useRef({ x: 0, y: 0 });
-  const flyKeysRef       = useRef<Record<string, boolean>>({});
-  const flyRafRef        = useRef<number>(0);
-  const wsRef            = useRef<WebSocket | null>(null);
-  const keysPressedRef   = useRef<Record<string, boolean>>({});
+  const cameraStateRef = useRef({ x: 0, y: 15, z: 30, yaw: -90, pitch: -20, fov: 45 });
+  const rmbDownRef = useRef(false);   // Right Mouse Button held
+  const mmbDownRef = useRef(false);   // Middle Mouse Button held
+  const altOrbitDownRef = useRef(false);   // Alt + Left Mouse Button orbit held
+  const lastMouseRef = useRef({ x: 0, y: 0 });
+  const mouseDownPosRef = useRef({ x: 0, y: 0 });
+  const flyKeysRef = useRef<Record<string, boolean>>({});
+  const flyRafRef = useRef<number>(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const keysPressedRef = useRef<Record<string, boolean>>({});
   const currentPresetRef = useRef<string>('breakout');
   const pendingRpcMapRef = useRef<Map<number, { resolve: (res: any) => void; reject: (err: any) => void; timer: any }>>(new Map());
-  const rpcIdCounterRef  = useRef<number>(1);
+  const rpcIdCounterRef = useRef<number>(1);
 
   // ── High Performance Central RPC Dispatcher (O(1) Message Router) ───────────
   const sendRpc = useCallback((method: string, params: any = {}): Promise<any> => {
@@ -192,7 +192,7 @@ export default function App() {
     ProjectManager.saveProject(updated);
     setAllProjects(ProjectManager.getAllProjects());
     if (updated.settings) {
-      sendRpc('engine.setEnvironment', updated.settings).catch(() => {});
+      sendRpc('engine.setEnvironment', updated.settings).catch(() => { });
     }
   }, [sendRpc]);
 
@@ -201,7 +201,7 @@ export default function App() {
     const clamped = Math.round(Math.max(0.7, Math.min(2.0, scale)) * 100) / 100;
     setUiScale(clamped);
     persistProject({ ...project, settings: { ...project.settings, uiScale: clamped } });
-    sendRpc('engine.setUiScale', { scale: clamped }).catch(() => {});
+    sendRpc('engine.setUiScale', { scale: clamped }).catch(() => { });
   }, [project, persistProject, sendRpc]);
 
   const handleSetResolutionScale = useCallback((scale: number) => {
@@ -215,17 +215,17 @@ export default function App() {
       ...project,
       settings: { ...project.settings, resolutionScale: clamped, renderResolution: { width: targetW, height: targetH } }
     });
-    sendRpc('engine.setResolutionScale', { scale: clamped }).catch(() => {});
+    sendRpc('engine.setResolutionScale', { scale: clamped }).catch(() => { });
   }, [project, persistProject, sendRpc]);
 
   const handleSetRenderResolution = useCallback((res: { width: number; height: number }) => {
     setRenderResolution(res);
     persistProject({ ...project, settings: { ...project.settings, renderResolution: res } });
-    sendRpc('engine.setRenderResolution', res).catch(() => {});
+    sendRpc('engine.setRenderResolution', res).catch(() => { });
   }, [project, persistProject, sendRpc]);
 
   useEffect(() => {
-    sendRpc('engine.setCameraMode', { mode: cameraMode }).catch(() => {});
+    sendRpc('engine.setCameraMode', { mode: cameraMode }).catch(() => { });
   }, [cameraMode, sendRpc]);
 
   // ── Undo / Redo History Stack ────────────────────────────────────────────
@@ -365,7 +365,7 @@ export default function App() {
     if (!mesh) return;
     const pos = mesh.position;
     cameraStateRef.current = { x: pos.x, y: pos.y + 6, z: pos.z + 14, yaw: -90, pitch: -20, fov: 45 };
-    sendRpc('engine.setCamera', cameraStateRef.current).catch(() => {});
+    sendRpc('engine.setCamera', cameraStateRef.current).catch(() => { });
   }, [selectedEntityId, sendRpc]);
 
   const sendCamera = useCallback(() => {
@@ -376,7 +376,7 @@ export default function App() {
       yaw: cameraStateRef.current.yaw,
       pitch: cameraStateRef.current.pitch,
       fov: cameraStateRef.current.fov,
-    }).catch(() => {});
+    }).catch(() => { });
   }, [sendRpc]);
 
   // ── Fly camera loop (RMB + WASD / QE / Shift) ────────────────────────────
@@ -390,12 +390,12 @@ export default function App() {
 
       const keys = flyKeysRef.current;
       const hasMovement = keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] ||
-                          keys['KeyQ'] || keys['KeyE'] || keys['ShiftLeft'] || keys['ShiftRight'];
+        keys['KeyQ'] || keys['KeyE'] || keys['ShiftLeft'] || keys['ShiftRight'];
 
       if (rmbDownRef.current && hasMovement) {
         const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 40 : 12;
         const { yaw, pitch } = cameraStateRef.current;
-        const radYaw   = yaw   * (Math.PI / 180);
+        const radYaw = yaw * (Math.PI / 180);
         const radPitch = pitch * (Math.PI / 180);
 
         // Forward vector
@@ -405,7 +405,7 @@ export default function App() {
 
         // True Right vector in XZ plane (Forward x Up): rightX = -sin(yaw), rightZ = cos(yaw)
         const rightX = -Math.sin(radYaw);
-        const rightZ =  Math.cos(radYaw);
+        const rightZ = Math.cos(radYaw);
 
         let dx = 0, dy = 0, dz = 0;
         if (keys['KeyW']) { dx += fwdX; dy += fwdY; dz += fwdZ; }
@@ -501,7 +501,7 @@ export default function App() {
         : e
       ));
       if (boxHelperRef.current) boxHelperRef.current.setFromObject(obj);
-      sendRpc('engine.updateEntity', { id: targetId, transform: { ...newPos, ...newRot, ...newScale } }).catch(() => {});
+      sendRpc('engine.updateEntity', { id: targetId, transform: { ...newPos, ...newRot, ...newScale } }).catch(() => { });
     });
 
     // Grid
@@ -537,7 +537,7 @@ export default function App() {
       if (e.button === 0 && (tc.dragging || tc.axis !== null)) return;
 
       mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
-      lastMouseRef.current    = { x: e.clientX, y: e.clientY };
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
 
       if (e.button === 2) {
         rmbDownRef.current = true;
@@ -557,15 +557,15 @@ export default function App() {
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
 
       if ((rmbDownRef.current || altOrbitDownRef.current) && !isTransformDraggingRef.current) {
-        cameraStateRef.current.yaw   += dx * 0.25;
-        cameraStateRef.current.pitch  = Math.max(-89, Math.min(89, cameraStateRef.current.pitch - dy * 0.25));
+        cameraStateRef.current.yaw += dx * 0.25;
+        cameraStateRef.current.pitch = Math.max(-89, Math.min(89, cameraStateRef.current.pitch - dy * 0.25));
         setCameraRot({ yaw: cameraStateRef.current.yaw, pitch: cameraStateRef.current.pitch });
         sendCamera();
       } else if (mmbDownRef.current && !isTransformDraggingRef.current) {
         const { yaw } = cameraStateRef.current;
         const radYaw = yaw * (Math.PI / 180);
         const rightX = -Math.sin(radYaw);
-        const rightZ =  Math.cos(radYaw);
+        const rightZ = Math.cos(radYaw);
         const panSpeed = 0.04;
         cameraStateRef.current.x -= dx * panSpeed * rightX;
         cameraStateRef.current.z -= dx * panSpeed * rightZ;
@@ -586,8 +586,8 @@ export default function App() {
           const dist = Math.hypot(e.clientX - mouseDownPosRef.current.x, e.clientY - mouseDownPosRef.current.y);
           if (dist < 8) {
             const rect = dom.getBoundingClientRect();
-            mouseCoord.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-            mouseCoord.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+            mouseCoord.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouseCoord.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouseCoord, camera);
             const meshes = Array.from(meshMapRef.current.values());
             const hits = raycaster.intersectObjects(meshes, true);
@@ -622,7 +622,7 @@ export default function App() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { yaw, pitch } = cameraStateRef.current;
-      const radYaw   = yaw   * (Math.PI / 180);
+      const radYaw = yaw * (Math.PI / 180);
       const radPitch = pitch * (Math.PI / 180);
       const fwdX = Math.cos(radYaw) * Math.cos(radPitch);
       const fwdY = Math.sin(radPitch);
@@ -634,9 +634,9 @@ export default function App() {
       sendCamera();
     };
 
-    targetDom.addEventListener('mousedown',  onMouseDown as EventListener);
+    targetDom.addEventListener('mousedown', onMouseDown as EventListener);
     window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup',   onMouseUp);
+    window.addEventListener('mouseup', onMouseUp);
     targetDom.addEventListener('wheel', onWheel as EventListener, { passive: false });
 
     // Render loop with particle updates
@@ -717,7 +717,7 @@ export default function App() {
       const { x, y, z, yaw, pitch, fov } = cameraStateRef.current;
       camera.fov = fov;
       camera.updateProjectionMatrix();
-      const radYaw   = yaw   * (Math.PI / 180);
+      const radYaw = yaw * (Math.PI / 180);
       const radPitch = pitch * (Math.PI / 180);
       const fX = Math.cos(radYaw) * Math.cos(radPitch);
       const fY = Math.sin(radPitch);
@@ -828,8 +828,8 @@ export default function App() {
 
       if (!rmbDownRef.current) {
         if (e.code === 'KeyW' && !simulating) { setGizmoMode('translate'); return; }
-        if (e.code === 'KeyE' && !simulating) { setGizmoMode('rotate');    return; }
-        if (e.code === 'KeyR' && !simulating) { setGizmoMode('scale');     return; }
+        if (e.code === 'KeyE' && !simulating) { setGizmoMode('rotate'); return; }
+        if (e.code === 'KeyR' && !simulating) { setGizmoMode('scale'); return; }
         if (e.code === 'KeyQ' && !simulating) { setGizmoSpace(p => p === 'world' ? 'local' : 'world'); return; }
         if (e.code === 'KeyF') { focusOnSelectedEntity(); return; }
         if (e.code === 'Escape') {
@@ -853,19 +853,19 @@ export default function App() {
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
-      flyKeysRef.current[e.code]   = false;
+      flyKeysRef.current[e.code] = false;
       keysPressedRef.current[e.code] = false;
     };
 
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup',   onKeyUp);
+    window.addEventListener('keyup', onKeyUp);
 
     let lastSentKeysJson = '';
     const inputTimer = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         const currentJson = JSON.stringify(keysPressedRef.current);
         if (currentJson !== lastSentKeysJson) {
-          sendRpc('engine.sendInput', { keys: keysPressedRef.current }).catch(() => {});
+          sendRpc('engine.sendInput', { keys: keysPressedRef.current }).catch(() => { });
           lastSentKeysJson = currentJson;
         }
       }
@@ -873,7 +873,7 @@ export default function App() {
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup',   onKeyUp);
+      window.removeEventListener('keyup', onKeyUp);
       clearInterval(inputTimer);
     };
   }, [selectedEntityId, entities, sendRpc, focusOnSelectedEntity, handleDeleteEntity, handleDuplicateEntity]);
@@ -921,10 +921,10 @@ export default function App() {
       let mesh = mm.get(ent.id);
 
       if (!mesh) {
-        const isPlane   = ent.mesh?.meshId === 1 || ent.tag === 'GroundPlane' || ent.tag === 'Ground';
+        const isPlane = ent.mesh?.meshId === 1 || ent.tag === 'GroundPlane' || ent.tag === 'Ground';
         const isCapsule = ent.rigidBody?.shapeType === 2;
-        const isSphere  = ent.rigidBody?.shapeType === 1 || ent.tag === 'Sun' || ent.tag === 'Earth' || ent.tag === 'Ball' || ent.tag === 'Coin';
-        
+        const isSphere = ent.rigidBody?.shapeType === 1 || ent.tag === 'Sun' || ent.tag === 'Earth' || ent.tag === 'Ball' || ent.tag === 'Coin';
+
         let glbPath: string | null = null;
         if (ent.tag?.includes('SportsCar')) glbPath = '/assets/models/SM_SportsCar.glb';
         else if (ent.tag?.includes('ChamferCube')) glbPath = '/assets/models/1M_Cube_Chamfer.glb';
@@ -936,10 +936,10 @@ export default function App() {
         else if (ent.tag?.includes('RotationHandle')) glbPath = '/assets/models/RotationHandle.glb';
 
         const isCylinder = ent.tag?.toLowerCase().includes('cylinder');
-        const isCone     = ent.tag?.toLowerCase().includes('cone');
-        const isLight    = ent.tag?.toLowerCase().includes('light') || !!ent.light;
-        const isCamera   = ent.tag?.toLowerCase().includes('camera');
-        const isAudio    = ent.tag?.toLowerCase().includes('audio');
+        const isCone = ent.tag?.toLowerCase().includes('cone');
+        const isLight = ent.tag?.toLowerCase().includes('light') || !!ent.light;
+        const isCamera = ent.tag?.toLowerCase().includes('camera');
+        const isAudio = ent.tag?.toLowerCase().includes('audio');
 
         let geom: THREE.BufferGeometry;
         if (isPlane) {
@@ -958,7 +958,7 @@ export default function App() {
           geom = new THREE.BoxGeometry(1, 1, 1);
         }
 
-        let color    = 0x38bdf8;
+        let color = 0x38bdf8;
         let emissive = 0x000000;
         let roughness = 0.4, metalness = 0.2;
         let transparent = false;
@@ -977,8 +977,8 @@ export default function App() {
         } else if (ent.tag === 'Sun' || ent.tag === 'Coin') { color = 0xfacc15; emissive = 0xeab308; }
         else if (ent.tag === 'Earth' || ent.tag?.includes('Player') || isCapsule) { color = 0x00f0ff; emissive = 0x0077b6; }
         else if (ent.tag === 'Paddle') color = 0x10b981;
-        else if (ent.tag === 'Ball')   { color = 0xf43f5e; emissive = 0xe11d48; }
-        else if (ent.tag === 'Brick')  color = 0xa855f7;
+        else if (ent.tag === 'Ball') { color = 0xf43f5e; emissive = 0xe11d48; }
+        else if (ent.tag === 'Brick') color = 0xa855f7;
         else if (ent.tag === 'LaserBullet') { color = 0x00ffff; emissive = 0x00ffff; }
         else if (ent.tag?.includes('KillZ')) { color = 0xef4444; emissive = 0x991b1b; transparent = true; opacity = 0.4; }
         else if (ent.tag === 'Checkpoint' || ent.tag === 'SpeedBoost') { color = 0x22c55e; emissive = 0x15803d; transparent = true; opacity = 0.6; }
@@ -1060,7 +1060,7 @@ export default function App() {
       if (isTransformDraggingRef.current && ent.id === selectedEntityId) return;
       mesh.position.set(ent.transform.x, ent.transform.y, ent.transform.z);
       if (ent.transform.qw !== undefined && ent.transform.qx !== undefined &&
-          ent.transform.qy !== undefined && ent.transform.qz !== undefined) {
+        ent.transform.qy !== undefined && ent.transform.qz !== undefined) {
         mesh.quaternion.set(
           ent.transform.qx,
           ent.transform.qy,
@@ -1116,15 +1116,15 @@ export default function App() {
           return;
         }
         setConnected(true);
-        addLog('[WS] Połączono z silnikiem Lucid Engine 5.8 (Vulkan / Jolt / QuickJS)');
+        addLog('[WS] Połączono z silnikiem Lucid Engine (Vulkan / Jolt / QuickJS)');
         // Ensure simulation starts paused in edit mode
-        sendRpc('engine.setPaused', { paused: true }).catch(() => {});
+        sendRpc('engine.setPaused', { paused: true }).catch(() => { });
         setSimulating(false);
-        sendRpc('engine.getSnapshot').then(snap => setEntities(snap || [])).catch(() => {});
-        sendRpc('engine.setEnvironment', project.settings).catch(() => {});
-        sendRpc('engine.setCameraMode', { mode: cameraModeRef.current }).catch(() => {});
-        if (project.settings?.uiScale) sendRpc('engine.setUiScale', { scale: project.settings.uiScale }).catch(() => {});
-        if (project.settings?.resolutionScale) sendRpc('engine.setResolutionScale', { scale: project.settings.resolutionScale }).catch(() => {});
+        sendRpc('engine.getSnapshot').then(snap => setEntities(snap || [])).catch(() => { });
+        sendRpc('engine.setEnvironment', project.settings).catch(() => { });
+        sendRpc('engine.setCameraMode', { mode: cameraModeRef.current }).catch(() => { });
+        if (project.settings?.uiScale) sendRpc('engine.setUiScale', { scale: project.settings.uiScale }).catch(() => { });
+        if (project.settings?.resolutionScale) sendRpc('engine.setResolutionScale', { scale: project.settings.resolutionScale }).catch(() => { });
       };
 
       ws.onmessage = (event) => {
@@ -1160,7 +1160,7 @@ export default function App() {
               startTime: performance.now(),
             };
           }
-        } catch {}
+        } catch { }
       };
 
       ws.onclose = () => {
@@ -1221,9 +1221,9 @@ export default function App() {
             if (st && typeof st.status === 'string') {
               setGameStatus(st.status as GameStatus);
             }
-          } catch {}
+          } catch { }
         }
-      } catch {}
+      } catch { }
     }, 50);
     return () => clearInterval(iv);
   }, [connected, sendRpc]);
@@ -1238,7 +1238,7 @@ export default function App() {
           cameraStateRef.current = { ...cameraStateRef.current, ...cam, fov: cam.fov || 45 };
           setCameraRot({ yaw: cameraStateRef.current.yaw, pitch: cameraStateRef.current.pitch });
         }
-      } catch {}
+      } catch { }
     }, 100);
     return () => clearInterval(iv);
   }, [connected, sendRpc]);
@@ -1268,7 +1268,7 @@ export default function App() {
               setVulkanFrame(r.frame);
               count++;
             }
-          } catch {}
+          } catch { }
           finally {
             isCapturing = false;
           }
@@ -1396,7 +1396,7 @@ globalThis.update = function(entities, dt, input, contacts) {
       const isCamera = type === 'camera_actor';
       const isAudio = type === 'audio_source';
       const isSensor = type === 'trigger' || type === 'coin' || type === 'killz_volume';
-      const isUE5Model = ['sportscar', 'chamfer_cube', 'ue5_cube', 'ue5_location', 'ue5_rotate', 'ue5_scale', 'ue5_bluecube', 'ue5_rotation'].includes(type);
+      const isPropModel = ['sportscar', 'chamfer_cube', 'ue5_cube', 'ue5_location', 'ue5_rotate', 'ue5_scale', 'ue5_bluecube', 'ue5_rotation'].includes(type);
 
       const tagMap: Record<string, string> = {
         cube: 'DynamicCube',
@@ -1416,14 +1416,14 @@ globalThis.update = function(entities, dt, input, contacts) {
         camera_actor: 'CameraActor',
         audio_source: 'AudioSourceActor',
         killz_volume: 'KillZVolume',
-        sportscar: 'UE5_SportsCar',
-        chamfer_cube: 'UE5_ChamferCube',
-        ue5_cube: 'UE5_1MCube',
-        ue5_location: 'UE5_GizmoLocation',
-        ue5_rotate: 'UE5_GizmoRotate',
-        ue5_scale: 'UE5_GizmoScale',
-        ue5_bluecube: 'UE5_BlueCube',
-        ue5_rotation: 'UE5_RotationHandle'
+        sportscar: 'SportsCar_Actor',
+        chamfer_cube: 'ChamferCube_Actor',
+        ue5_cube: 'Cube_1M_Actor',
+        ue5_location: 'Gizmo_Location_Actor',
+        ue5_rotate: 'Gizmo_Rotate_Actor',
+        ue5_scale: 'Gizmo_Scale_Actor',
+        ue5_bluecube: 'Prototype_BlueCube_Actor',
+        ue5_rotation: 'Gizmo_RotationHandle_Actor'
       };
       const massMap: Record<string, number> = {
         cube: 1.0,
@@ -1489,7 +1489,7 @@ globalThis.update = function(entities, dt, input, contacts) {
           sz: scaleVal
         },
         velocity: { vx: 0, vy: 0, vz: 0 },
-        mesh: { meshId: isUE5Model ? 10 : (type === 'plane' ? 1 : 2) },
+        mesh: { meshId: isPropModel ? 10 : (type === 'plane' ? 1 : 2) },
         rigidBody: {
           mass: massMap[type] ?? 1.0,
           shapeType,
@@ -1874,7 +1874,7 @@ globalThis.update = function(entities, dt, input, contacts) {
         }
         const code = buildScriptBundle();
         await sendRpc('engine.loadScript', { code });
-      } catch (e) {}
+      } catch (e) { }
       addLog(`Zamknięto poziom. Aktywny: "${nextActive.name}"`);
     } else {
       const emptyScene = {
@@ -2127,8 +2127,8 @@ globalThis.update = function(entities, dt, input, contacts) {
 
                   if (elem.type === 'progressBar') {
                     const rawVal = elem.bindVariable === 'health' ? playerHealth :
-                                   elem.bindVariable === 'score' ? Math.min(100, gameScore) :
-                                   (elem.value ?? 100);
+                      elem.bindVariable === 'score' ? Math.min(100, gameScore) :
+                        (elem.value ?? 100);
                     const val = Math.max(0, Math.min(100, rawVal));
                     return (
                       <div
@@ -2375,34 +2375,32 @@ globalThis.update = function(entities, dt, input, contacts) {
 
       {/* ═══ 4. BOTTOM BAR (Exact UE5 Bottom Dock) ═══════════════════════ */}
       {!isImmersivePlay && (
-        <div style={{ zoom: effectiveUiScale }} className="h-7 bg-[#0b0b12] border-t border-white/10 flex items-center justify-between px-2 text-[11px] font-sans text-slate-300 z-30 select-none shrink-0">
+        <div style={{ zoom: effectiveUiScale }} className="h-7 bg-[#0e0e0e] border-t border-[#242424] flex items-center justify-between px-2 text-[11px] font-sans text-neutral-300 z-30 select-none shrink-0">
           {/* Left: Content Drawer & Output Log Buttons */}
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setIsContentDrawerOpen(prev => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                isContentDrawerOpen
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'text-slate-300 hover:bg-white/5 hover:text-white'
-              }`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${isContentDrawerOpen
+                  ? 'bg-[#0078d4]/20 text-white border border-[#0078d4]/40'
+                  : 'text-neutral-300 hover:bg-white/5 hover:text-white'
+                }`}
               title="Toggle Content Drawer (Ctrl + Space)"
             >
-              <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+              <FolderOpen className="w-3.5 h-3.5 text-neutral-400" />
               <span>Content Drawer</span>
             </button>
 
-            <div className="h-3.5 w-px bg-white/10" />
+            <div className="h-3.5 w-px bg-[#262626]" />
 
             <button
               onClick={() => setIsOutputLogOpen(prev => !prev)}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                isOutputLogOpen
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
-              }`}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${isOutputLogOpen
+                  ? 'bg-[#0078d4]/20 text-white border border-[#0078d4]/40'
+                  : 'text-neutral-400 hover:bg-white/5 hover:text-white'
+                }`}
               title="Toggle Output Log"
             >
-              <Terminal className="w-3.5 h-3.5 text-slate-400" />
+              <Terminal className="w-3.5 h-3.5 text-neutral-400" />
               <span>Output Log</span>
             </button>
           </div>
@@ -2411,17 +2409,17 @@ globalThis.update = function(entities, dt, input, contacts) {
           <div className="flex-1 max-w-md mx-4">
             <form
               onSubmit={(e) => { e.preventDefault(); handleExecuteConsoleCmd(consoleCmd); }}
-              className="flex items-center bg-[#07070a] border border-white/10 rounded px-2 py-0.5 text-xs text-slate-300 focus-within:border-cyan-500/50"
+              className="flex items-center bg-[#121212] border border-[#2b2b2b] rounded px-2 py-0.5 text-xs text-neutral-300 focus-within:border-[#0078d4]"
             >
-              <span className="text-[10px] font-mono text-cyan-400 mr-1.5">Cmd ▾</span>
+              <span className="text-[10px] font-sans font-medium text-neutral-400 mr-1.5">Cmd ▾</span>
               <input
                 type="text"
                 value={consoleCmd}
                 onChange={(e) => setConsoleCmd(e.target.value)}
-                placeholder="Enter Console Command (np. 'reset breakout', 'play', 'help')..."
-                className="w-full bg-transparent text-[11px] font-mono text-white placeholder-slate-600 focus:outline-none"
+                placeholder="Enter Console Command..."
+                className="w-full bg-transparent text-[11px] font-sans text-white placeholder-neutral-500 focus:outline-none"
               />
-              <button type="submit" className="text-slate-500 hover:text-cyan-400 ml-1">
+              <button type="submit" className="text-neutral-500 hover:text-white ml-1">
                 <Send className="w-3 h-3" />
               </button>
             </form>
@@ -2436,8 +2434,8 @@ globalThis.update = function(entities, dt, input, contacts) {
               Zen Server
             </span>
             <span className="text-slate-600">•</span>
-            <span className="text-slate-400 flex items-center gap-1">
-              <Check className="w-3 h-3 text-cyan-400" />
+            <span className="text-neutral-400 flex items-center gap-1">
+              <Check className="w-3 h-3 text-[#0078d4]" />
               All Saved
             </span>
             <span className="text-slate-600">•</span>
@@ -2616,9 +2614,9 @@ globalThis.update = function(entities, dt, input, contacts) {
           setAllProjects(ProjectManager.getAllProjects());
 
           const preset = template === 'breakout' ? 'breakout' :
-                         template === 'shooter' ? 'shooter' :
-                         template === 'racer' ? 'racer' :
-                         template === 'platformer' ? 'platformer' : 'empty';
+            template === 'shooter' ? 'shooter' :
+              template === 'racer' ? 'racer' :
+                template === 'platformer' ? 'platformer' : 'empty';
           currentPresetRef.current = preset;
 
           if (template === 'platformer' || template === 'racer') {

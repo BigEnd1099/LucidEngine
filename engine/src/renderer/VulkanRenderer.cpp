@@ -1776,61 +1776,61 @@ namespace engine::renderer {
         ImGuiStyle& style = ImGui::GetStyle();
         ImVec4* colors = style.Colors;
 
-        // Window & Panels (Obsidian Dark like #07070c, #0b0b12 and #0e0e16)
-        colors[ImGuiCol_WindowBg]             = ImVec4(0.043f, 0.043f, 0.067f, 1.00f); // #0b0b11
-        colors[ImGuiCol_ChildBg]              = ImVec4(0.055f, 0.055f, 0.086f, 1.00f); // #0e0e16
-        colors[ImGuiCol_PopupBg]              = ImVec4(0.078f, 0.078f, 0.122f, 0.98f); // #14141f
-        colors[ImGuiCol_Border]               = ImVec4(1.00f, 1.00f, 1.00f, 0.08f);    // subtle white alpha border
-        colors[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        // Window & Panels (Unreal Engine 5 Graphite Charcoal)
+        colors[ImGuiCol_WindowBg]             = ImVec4(0.070f, 0.070f, 0.070f, 1.00f); // #121212
+        colors[ImGuiCol_ChildBg]              = ImVec4(0.086f, 0.086f, 0.086f, 1.00f); // #161616
+        colors[ImGuiCol_PopupBg]              = ImVec4(0.110f, 0.110f, 0.110f, 0.98f); // #1c1c1c
+        colors[ImGuiCol_Border]               = ImVec4(0.160f, 0.160f, 0.160f, 1.00f); // #292929
+        colors[ImGuiCol_BorderShadow]         = ImVec4(0.000f, 0.000f, 0.000f, 0.00f);
 
-        // Headers & Titles (like #0a0a10)
-        colors[ImGuiCol_TitleBg]              = ImVec4(0.035f, 0.035f, 0.055f, 1.00f); // #09090e
-        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.051f, 0.055f, 0.090f, 1.00f);
-        colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.035f, 0.035f, 0.055f, 0.75f);
-        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.043f, 0.043f, 0.067f, 1.00f); // #0b0b11
+        // Headers & Titles (Unreal Title / Menu)
+        colors[ImGuiCol_TitleBg]              = ImVec4(0.055f, 0.055f, 0.055f, 1.00f); // #0e0e0e
+        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.070f, 0.070f, 0.070f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.055f, 0.055f, 0.055f, 0.75f);
+        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.055f, 0.055f, 0.055f, 1.00f); // #0e0e0e
 
-        // Text & Labels (slate-200 and slate-400)
-        colors[ImGuiCol_Text]                 = ImVec4(0.92f, 0.95f, 0.98f, 1.00f); // #e2e8f0
-        colors[ImGuiCol_TextDisabled]         = ImVec4(0.48f, 0.52f, 0.60f, 1.00f); // #7b8499
+        // Text & Labels (Unreal Engine Crisp Neutral White / Grey)
+        colors[ImGuiCol_Text]                 = ImVec4(0.900f, 0.900f, 0.900f, 1.00f); // #e6e6e6
+        colors[ImGuiCol_TextDisabled]         = ImVec4(0.480f, 0.480f, 0.480f, 1.00f); // #7a7a7a
 
-        // Frames & Inputs (like #101018)
-        colors[ImGuiCol_FrameBg]              = ImVec4(0.045f, 0.045f, 0.070f, 1.00f); // #0c0c12
-        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.090f, 0.095f, 0.150f, 1.00f);
-        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.120f, 0.130f, 0.200f, 1.00f);
+        // Frames & Inputs (Dark Charcoal Inset)
+        colors[ImGuiCol_FrameBg]              = ImVec4(0.095f, 0.095f, 0.095f, 1.00f); // #181818
+        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.145f, 0.145f, 0.145f, 1.00f); // #252525
+        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.180f, 0.180f, 0.180f, 1.00f); // #2e2e2e
 
-        // Buttons (like #161626, hover #202036, active Cyan #00b4d8)
-        colors[ImGuiCol_Button]               = ImVec4(0.086f, 0.086f, 0.149f, 1.00f); // #161626
-        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.133f, 0.141f, 0.224f, 1.00f); // #222439
-        colors[ImGuiCol_ButtonActive]         = ImVec4(0.000f, 0.706f, 0.847f, 1.00f); // Cyan accent
+        // Buttons (Charcoal Button, Hover, Active Unreal Blue)
+        colors[ImGuiCol_Button]               = ImVec4(0.118f, 0.118f, 0.118f, 1.00f); // #1e1e1e
+        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.165f, 0.165f, 0.165f, 1.00f); // #2a2a2a
+        colors[ImGuiCol_ButtonActive]         = ImVec4(0.000f, 0.470f, 0.831f, 1.00f); // #0078d4 Unreal Blue
 
-        // Headers & Selection (UE5 blue selection)
-        colors[ImGuiCol_Header]               = ImVec4(0.000f, 0.373f, 0.722f, 0.75f); // #005fb8
-        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.000f, 0.450f, 0.820f, 0.85f);
-        colors[ImGuiCol_HeaderActive]         = ImVec4(0.000f, 0.500f, 0.900f, 1.00f);
+        // Headers & Selection (UE5 blue selection #0078d4)
+        colors[ImGuiCol_Header]               = ImVec4(0.000f, 0.470f, 0.831f, 0.85f);
+        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.000f, 0.520f, 0.920f, 0.95f);
+        colors[ImGuiCol_HeaderActive]         = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
 
         // Tabs (UE5 style tabs)
-        colors[ImGuiCol_Tab]                  = ImVec4(0.055f, 0.055f, 0.086f, 1.00f);
-        colors[ImGuiCol_TabHovered]           = ImVec4(0.133f, 0.141f, 0.224f, 1.00f);
-        colors[ImGuiCol_TabActive]            = ImVec4(0.094f, 0.102f, 0.165f, 1.00f);
-        colors[ImGuiCol_TabUnfocused]         = ImVec4(0.039f, 0.039f, 0.063f, 1.00f);
-        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.071f, 0.071f, 0.118f, 1.00f);
+        colors[ImGuiCol_Tab]                  = ImVec4(0.075f, 0.075f, 0.075f, 1.00f);
+        colors[ImGuiCol_TabHovered]           = ImVec4(0.140f, 0.140f, 0.140f, 1.00f);
+        colors[ImGuiCol_TabActive]            = ImVec4(0.118f, 0.118f, 0.118f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]         = ImVec4(0.055f, 0.055f, 0.055f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.095f, 0.095f, 0.095f, 1.00f);
 
         // Scrollbars & Grabs
-        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.039f, 0.039f, 0.063f, 0.60f);
-        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.165f, 0.176f, 0.267f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.224f, 0.239f, 0.353f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.000f, 0.706f, 0.847f, 1.00f);
-        colors[ImGuiCol_CheckMark]            = ImVec4(0.000f, 0.847f, 0.678f, 1.00f); // Emerald/Cyan
-        colors[ImGuiCol_SliderGrab]           = ImVec4(0.000f, 0.706f, 0.847f, 1.00f);
-        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.000f, 0.847f, 1.000f, 1.00f);
-        colors[ImGuiCol_Separator]            = ImVec4(1.00f, 1.00f, 1.00f, 0.08f);
-        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.000f, 0.706f, 0.847f, 0.78f);
-        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.000f, 0.706f, 0.847f, 1.00f);
-        colors[ImGuiCol_ResizeGrip]           = ImVec4(0.165f, 0.176f, 0.267f, 0.30f);
-        colors[ImGuiCol_ResizeGripHovered]    = ImVec4(0.000f, 0.706f, 0.847f, 0.67f);
-        colors[ImGuiCol_ResizeGripActive]     = ImVec4(0.000f, 0.706f, 0.847f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.070f, 0.070f, 0.070f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.180f, 0.180f, 0.180f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.240f, 0.240f, 0.240f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
+        colors[ImGuiCol_CheckMark]            = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
+        colors[ImGuiCol_SliderGrab]           = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.150f, 0.600f, 1.000f, 1.00f);
+        colors[ImGuiCol_Separator]            = ImVec4(0.160f, 0.160f, 0.160f, 1.00f);
+        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.000f, 0.470f, 0.831f, 0.78f);
+        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
+        colors[ImGuiCol_ResizeGrip]           = ImVec4(0.200f, 0.200f, 0.200f, 0.30f);
+        colors[ImGuiCol_ResizeGripHovered]    = ImVec4(0.000f, 0.470f, 0.831f, 0.67f);
+        colors[ImGuiCol_ResizeGripActive]     = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
 
-        // Flat docked windows, subtle roundings on frames and popups
+        // Sleek rounded corners matching Linear & Unreal Engine
         style.WindowRounding    = 0.0f;
         style.ChildRounding     = 4.0f;
         style.FrameRounding     = 4.0f;
@@ -1845,10 +1845,47 @@ namespace engine::renderer {
         style.FrameBorderSize   = 1.0f;
 
         style.WindowPadding     = ImVec2(8.0f, 6.0f);
-        style.FramePadding      = ImVec2(6.0f, 3.5f);
+        style.FramePadding      = ImVec2(6.0f, 4.0f);
         style.ItemSpacing       = ImVec2(6.0f, 4.0f);
         style.ItemInnerSpacing  = ImVec2(4.0f, 4.0f);
     }
+
+    static void loadUnrealFont(ImGuiIO& io) {
+        const std::vector<std::string> fontCandidates = {
+            "assets/fonts/Roboto-Medium.ttf",
+            "engine/assets/fonts/Roboto-Medium.ttf",
+            "../assets/fonts/Roboto-Medium.ttf",
+            "../../engine/assets/fonts/Roboto-Medium.ttf",
+            "../../assets/fonts/Roboto-Medium.ttf",
+            "../../../assets/fonts/Roboto-Medium.ttf",
+            "public/fonts/Roboto-Medium.ttf",
+            "../public/fonts/Roboto-Medium.ttf",
+            "../../public/fonts/Roboto-Medium.ttf",
+            "dist/fonts/Roboto-Medium.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/segoeuib.ttf",
+            "C:/Windows/Fonts/arial.ttf"
+        };
+
+        ImFont* loadedFont = nullptr;
+        for (const auto& path : fontCandidates) {
+            if (std::filesystem::exists(path)) {
+                ImFontConfig config;
+                config.OversampleH = 3;
+                config.OversampleV = 2;
+                config.RasterizerMultiply = 1.15f;
+                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f, &config);
+                if (loadedFont) {
+                    engine::core::Logger::info("Loaded crisp TrueType UI font: " + path);
+                    break;
+                }
+            }
+        }
+        if (!loadedFont) {
+            io.Fonts->AddFontDefault();
+        }
+    }
+
     void VulkanRenderer::initImGui() {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -1856,12 +1893,8 @@ namespace engine::renderer {
         io.IniFilename = nullptr; // Responsive auto-layout per resolution; do not lock to stale 4K ini coordinates
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-        // Load authentic Unreal Engine 5 Roboto Font
-        if (std::filesystem::exists("engine/assets/fonts/Roboto-Medium.ttf")) {
-            io.Fonts->AddFontFromFileTTF("engine/assets/fonts/Roboto-Medium.ttf", 15.0f);
-        } else if (std::filesystem::exists("engine/assets/fonts/Roboto-Regular.ttf")) {
-            io.Fonts->AddFontFromFileTTF("engine/assets/fonts/Roboto-Regular.ttf", 15.0f);
-        }
+        // Load authentic Unreal Engine TrueType Font
+        loadUnrealFont(io);
         
         applyUnrealWebTheme();
 
@@ -2032,7 +2065,8 @@ namespace engine::renderer {
 
         // Effective UI Scale: Auto-Scale * user modifier (m_uiScale)
         float s_uiScale = autoScale * m_uiScale;
-        ImGui::GetIO().FontGlobalScale = s_uiScale;
+        // Keep FontGlobalScale at 1.0f for razor-sharp TrueType font rendering
+        ImGui::GetIO().FontGlobalScale = 1.0f;
 
         // 3-Tier Top Header matching Unreal Engine 5 Web Studio
         float topTitleBarH = 28.0f * s_uiScale;
@@ -2089,7 +2123,7 @@ namespace engine::renderer {
         static bool s_snapEnabled = false;
         static float s_snapStep = 0.5f;
         static int s_cameraSpeed = 4;
-        static int s_placeActorCategory = 3; // Default 3 = Basic (0: Fav, 1: UE5.8, 2: Rec, 3: Basic, 4: Lights, 5: Shapes, 6: VFX, 7: Volumes)
+        static int s_placeActorCategory = 3; // Default 3 = Basic (0: Fav, 1: Props, 2: Rec, 3: Basic, 4: Lights, 5: Shapes, 6: VFX, 7: Volumes)
         static int s_detailsTab = 0; // 0=Details, 1=World Settings
         static int s_detailsFilterCat = 0; // 0=All, 1=General, 2=Actor, 3=Physics, 4=Rendering
 
@@ -2126,22 +2160,24 @@ namespace engine::renderer {
         }
 
         // ══════════════════════════════════════════════════════════════════════════
-        // ═══ 1. TOP TITLE BAR (UNREAL ENGINE 5 WINDOW TITLE BAR & MENUS) ═════════
+        // ═══ 1. TOP TITLE BAR (UNREAL ENGINE WINDOW TITLE BAR & MENUS) ═══════════
         // ══════════════════════════════════════════════════════════════════════════
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(screenW, topTitleBarH), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.043f, 0.063f, 1.0f)); // #0b0b10
-        ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.043f, 0.043f, 0.063f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.055f, 1.0f)); // #0e0e0e
+        ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.055f, 0.055f, 0.055f, 1.0f));
         ImGuiWindowFlags titleWindowFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("TopTitleBar", nullptr, titleWindowFlags);
 
         if (ImGui::BeginMenuBar()) {
-            // UE5 Cyan/Indigo Brand Badge
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.48f, 0.85f, 1.0f));
+            // Lucid Engine Brand Badge (Circular L Logo)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            ImGui::Button(" U  LUCID 5.8 ");
+            ImGui::Button(" L ");
             ImGui::PopStyleColor(2);
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "LUCID");
             ImGui::SameLine();
 
             // Menu: File
@@ -2274,11 +2310,11 @@ namespace engine::renderer {
             }
             ImGui::TextColored(ImVec4(0.45f, 0.52f, 0.65f, 1.0f), "Project:");
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.25f, 0.85f, 1.0f, 1.0f), "moj projekt gry");
+            ImGui::TextColored(ImVec4(0.0f, 0.70f, 1.0f, 1.0f), "moj projekt gry");
             ImGui::SameLine();
             ImGui::TextDisabled("|");
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.6f, 0.65f, 0.75f, 1.0f), "UE 5.8 / Linear Hybrid | Vulkan 1.3");
+            ImGui::TextColored(ImVec4(0.6f, 0.65f, 0.75f, 1.0f), "Lucid Studio 2026 | Vulkan 1.3");
 
             // Right-aligned window controls & Prototype label
             float rightButtonsW = 150.0f * s_uiScale;
@@ -2300,12 +2336,12 @@ namespace engine::renderer {
         ImGui::PopStyleVar();
 
         // ══════════════════════════════════════════════════════════════════════════
-        // ═══ 2. LEVEL TABS STRIP (UNREAL ENGINE 5 ACTIVE LEVEL TABS) ══════════════
+        // ═══ 2. LEVEL TABS STRIP (UNREAL ENGINE ACTIVE LEVEL TABS) ════════════════
         // ══════════════════════════════════════════════════════════════════════════
         ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.063f, 0.063f, 0.090f, 1.0f)); // #101017
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.065f, 0.065f, 0.065f, 1.0f)); // #101010
         ImGuiWindowFlags levelTabsFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("LevelTabsStrip", nullptr, levelTabsFlags);
 
@@ -2314,14 +2350,14 @@ namespace engine::renderer {
         auto renderLevelTab = [&](const char* label, const char* presetName, bool isPersistent) {
             bool isActive = (curPreset == presetName);
             if (isActive) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.094f, 0.094f, 0.145f, 1.0f)); // #181824
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.85f, 1.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f)); // #1e1e1e
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.070f, 0.070f, 0.110f, 1.0f)); // #12121c
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.65f, 0.75f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.08f, 0.08f, 1.0f)); // #141414
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.60f, 0.60f, 1.0f));
             }
 
-            std::string btnText = std::string(isActive ? "^ " : "* ") + label + (isPersistent ? " (Persistent)  x" : "  x");
+            std::string btnText = std::string(isActive ? "[*] " : "   ") + label + (isPersistent ? " (Persistent)  x" : "  x");
             if (ImGui::Button(btnText.c_str())) {
                 if (engine) {
                     selectedEnt = entt::null;
@@ -2392,13 +2428,13 @@ namespace engine::renderer {
         ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH + topLevelTabsH), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(screenW, topToolbarH), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 5));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.075f, 0.075f, 0.110f, 1.0f)); // #13131c
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.080f, 0.080f, 0.080f, 1.0f)); // #141414
         ImGuiWindowFlags mainToolbarFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("MainToolbar", nullptr, mainToolbarFlags);
 
         // Selection Mode Pill
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.11f, 0.11f, 0.17f, 1.0f));
-        if (ImGui::Button("[#] Select Mode v")) { ImGui::OpenPopup("SelectModePopup"); }
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        if (ImGui::Button("Selection Mode v")) { ImGui::OpenPopup("SelectModePopup"); }
         if (ImGui::BeginPopup("SelectModePopup")) {
             if (ImGui::Selectable("Select Mode", true)) {}
             if (ImGui::Selectable("Landscape Mode")) {}
@@ -2410,7 +2446,7 @@ namespace engine::renderer {
         ImGui::SameLine();
 
         // Save Button
-        if (ImGui::Button(" [S] Save ")) {
+        if (ImGui::Button(" Save ")) {
             engine::core::Logger::info("Stan sceny zapisany.");
         }
         ImGui::SameLine();
@@ -2486,16 +2522,16 @@ namespace engine::renderer {
         ImGui::SameLine();
 
         // Blueprints / Scripts Button
-        if (ImGui::Button("</> Blueprints / Scripts")) { s_showScriptStudio = !s_showScriptStudio; }
+        if (ImGui::Button("Blueprints")) { s_showScriptStudio = !s_showScriptStudio; }
         ImGui::SameLine();
-        if (ImGui::Button("* Cinematics & VFX")) { s_showEffectsPanel = !s_showEffectsPanel; }
+        if (ImGui::Button("Cinematics")) { s_showEffectsPanel = !s_showEffectsPanel; }
         ImGui::SameLine();
 
-        // Compile Game .exe in Emerald Pill
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.38f, 0.22f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.08f, 0.52f, 0.30f, 1.0f));
+        // Compile Game .exe in Subtle Pill
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.06f, 0.32f, 0.18f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.09f, 0.45f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.7f, 1.0f));
-        if (ImGui::Button(" [v] Kompiluj gre (.exe) ")) {
+        if (ImGui::Button("Package .exe")) {
             if (engine) {
                 engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame");
                 engine::core::Logger::info("Game packaged to Build/Windows/MyLucidGame/MyLucidGame.exe");
@@ -2504,34 +2540,34 @@ namespace engine::renderer {
         ImGui::PopStyleColor(3);
         ImGui::PopStyleColor(); // pop mode button style
 
-        // Center Transport Pill Bar
-        float transportOffset = screenW * 0.46f;
+        // Center Transport Pod (Sleek Dark Capsule matching Image 2)
+        float transportOffset = screenW * 0.45f;
         if (ImGui::GetCursorPosX() < transportOffset) {
             ImGui::SameLine(transportOffset);
         }
 
         bool isPaused = engine ? engine->isPaused() : true;
         if (isPaused) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.06f, 0.72f, 0.38f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.10f, 0.85f, 0.45f, 1.0f));
-            if (ImGui::Button(" > Play ")) { if (engine) engine->playSimulation(); }
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.65f, 0.28f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.78f, 0.35f, 1.0f));
+            if (ImGui::Button("  Play  ")) { if (engine) engine->playSimulation(); }
             ImGui::PopStyleColor(2);
         } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.90f, 0.65f, 0.10f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.75f, 0.20f, 1.0f));
-            if (ImGui::Button(" || Pause ")) { if (engine) engine->setPaused(true); }
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.60f, 0.10f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.70f, 0.15f, 1.0f));
+            if (ImGui::Button("  Pause  ")) { if (engine) engine->setPaused(true); }
             ImGui::PopStyleColor(2);
         }
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
-        if (ImGui::Button(" # Stop ")) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.82f, 0.20f, 0.20f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.92f, 0.28f, 0.28f, 1.0f));
+        if (ImGui::Button("  Stop  ")) {
             if (engine) engine->stopSimulation();
         }
         ImGui::PopStyleColor(2);
 
         ImGui::SameLine();
-        if (ImGui::Button(" >| Step ")) {
+        if (ImGui::Button("  Step  ")) {
             if (engine) engine->stepSimulation(1, 0.016f);
         }
 
@@ -2565,13 +2601,13 @@ namespace engine::renderer {
         // ══════════════════════════════════════════════════════════════════════════
         ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(leftPanelW, contentH), ImGuiCond_Always);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.071f, 0.071f, 0.098f, 1.0f)); // #121218
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.086f, 0.086f, 0.086f, 1.0f)); // #161616
         ImGui::Begin("Place Actors", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        // Header Tab with Cyan Line
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "--- PLACE ACTORS ---");
-        ImGui::SameLine(leftPanelW - 70 * s_uiScale);
-        ImGui::TextDisabled("PALETTE");
+        // Header Tab
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Place Actors");
+        ImGui::SameLine(leftPanelW - 30 * s_uiScale);
+        ImGui::TextDisabled("x");
 
         // Search Classes
         static char classSearch[64] = "";
@@ -2580,19 +2616,19 @@ namespace engine::renderer {
 
         // Two-column Category Rail + Item Cards
         ImGui::Columns(2, "PlaceActorColumns", false);
-        float railWidth = 46.0f * s_uiScale;
+        float railWidth = 48.0f * s_uiScale;
         ImGui::SetColumnWidth(0, railWidth);
 
         // Left Rail Category Buttons
-        const char* catNames[] = { "Fav", "UE5", "Rec", "Basic", "Lights", "Shapes", "VFX", "Vol" };
+        const char* catNames[] = { "Fav", "Props", "Rec", "Basic", "Lights", "Shapes", "VFX", "Vol" };
         for (int i = 0; i < 8; ++i) {
             bool isCatActive = (s_placeActorCategory == i);
             if (isCatActive) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.85f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f)); // #0078d4
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.55f, 0.65f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.07f, 0.07f, 0.07f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
             }
             if (ImGui::Button(catNames[i], ImVec2(railWidth - 8, 26 * s_uiScale))) {
                 s_placeActorCategory = i;
@@ -2613,10 +2649,11 @@ namespace engine::renderer {
             }
 
             ImGui::PushID(title);
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.090f, 0.090f, 0.133f, 1.0f)); // #171722
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.125f, 0.125f, 0.180f, 1.0f)); // #20202e
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f)); // #1e1e1e
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.16f, 0.16f, 1.0f)); // #282828
 
-            if (ImGui::Button(title, ImVec2(-1, 26 * s_uiScale))) {
+            std::string btnText = std::string(title) + "  ::";
+            if (ImGui::Button(btnText.c_str(), ImVec2(-1, 26 * s_uiScale))) {
                 auto entity = registry.createEntity();
                 ecs::MeshComponent dynMesh; dynMesh.meshId = 2;
                 registry.get().emplace<ecs::MeshComponent>(entity, dynMesh);
@@ -2660,31 +2697,31 @@ namespace engine::renderer {
                 } else if (typeIdx == 7) { // Player Start
                     registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PlayerStart"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 1.0f, 0.0f));
-                } else if (typeIdx == 8) { // UE5 Sports Car
-                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"UE5_SportsCar"});
+                } else if (typeIdx == 8) { // Sports Car
+                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"SportsCar_Actor"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 2.0f, 0.0f));
                     ecs::RigidBodyComponent dynRb; dynRb.mass = 1200.0f; dynRb.shapeType = 0;
                     dynRb.halfExtents = glm::vec3(1.2f, 0.6f, 2.5f);
                     registry.get().emplace<ecs::RigidBodyComponent>(entity, dynRb);
-                } else if (typeIdx == 9) { // UE5 Chamfer Cube
-                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"UE5_ChamferCube"});
+                } else if (typeIdx == 9) { // Chamfer Cube
+                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"ChamferCube_Actor"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 4.0f, 0.0f));
                     ecs::RigidBodyComponent dynRb; dynRb.mass = 1.0f; dynRb.shapeType = 0;
                     dynRb.halfExtents = glm::vec3(0.5f, 0.5f, 0.5f);
                     registry.get().emplace<ecs::RigidBodyComponent>(entity, dynRb);
-                } else if (typeIdx == 10) { // UE5 Location Gizmo
-                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"UE5_GizmoLocation"});
+                } else if (typeIdx == 10) { // Location Gizmo
+                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"GizmoLocation_Actor"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 2.0f, 0.0f));
-                } else if (typeIdx == 11) { // UE5 Blue Cube
-                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"UE5_BlueCube"});
+                } else if (typeIdx == 11) { // Blue Cube
+                    registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"BlueCube_Actor"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 3.0f, 0.0f));
                     ecs::RigidBodyComponent dynRb; dynRb.mass = 1.0f; dynRb.shapeType = 0;
                     registry.get().emplace<ecs::RigidBodyComponent>(entity, dynRb);
-                } else if (typeIdx == 12) { // Niagara Fire VFX
+                } else if (typeIdx == 12) { // Fire VFX
                     registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"FireVFX"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 1.0f, 0.0f));
                     registry.get().emplace<ecs::ParticleEmitterComponent>(entity, ecs::ParticleEmitterComponent{"fire", glm::vec3(1.0f, 0.4f, 0.0f), 200, 3.0f, 0.4f});
-                } else if (typeIdx == 13) { // Portal Vortex VFX
+                } else if (typeIdx == 13) { // Portal VFX
                     registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PortalVFX"});
                     registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(0.0f, 2.0f, 0.0f));
                     registry.get().emplace<ecs::ParticleEmitterComponent>(entity, ecs::ParticleEmitterComponent{"portal", glm::vec3(0.1f, 0.8f, 1.0f), 300, 4.0f, 0.3f});
@@ -2702,24 +2739,24 @@ namespace engine::renderer {
 
         ImGui::BeginChild("PlaceActorCardsChild", ImVec2(0, 0), false);
         // Basic Actors
-        spawnCard("Actor (StaticMesh)", "Empty actor container (Cube)", 0, 3);
-        spawnCard("Character (Player)", "WASD controllable player pawn", 1, 3);
+        spawnCard("Actor", "Empty actor container (Cube)", 0, 3);
+        spawnCard("Character", "WASD controllable player pawn", 1, 3);
         spawnCard("Capsule Pawn", "Dynamic Jolt capsule character", 2, 3);
-        spawnCard("Coin (Trigger)", "Pickable sensor trigger item", 3, 3);
+        spawnCard("Coin Trigger", "Pickable sensor trigger item", 3, 3);
         spawnCard("Trigger Zone", "Overlap sensor volume", 4, 3);
         spawnCard("Pawn (Sphere)", "Dynamic physics rigid body", 5, 3);
         spawnCard("Point Light", "Omni-directional light source", 6, 4);
         spawnCard("Directional Light", "Sunlight with cascades", 6, 4);
         spawnCard("Player Start", "Initial spawn transform", 7, 3);
 
-        // UE 5.8 Content
-        spawnCard("Sports Car (UE 5.8)", "Unreal 5.8 Sports Car FBX Model", 8, 1);
-        spawnCard("1M Chamfer Cube (UE 5.8)", "Unreal 5.8 Chamfered Box", 9, 1);
-        spawnCard("Location Gizmo (UE 5.8)", "Unreal 5.8 Transform 3D Gizmo", 10, 1);
-        spawnCard("Blue Cube (UE 5.8)", "Unreal 5.8 Blue Cube FBX", 11, 1);
+        // Props Content (clean names, no foreign engine strings)
+        spawnCard("Sports Car", "High-poly Sports Car Model", 8, 1);
+        spawnCard("Chamfer Cube", "1M Standard Chamfer Box", 9, 1);
+        spawnCard("Transform Gizmo", "Transform 3D Gizmo Asset", 10, 1);
+        spawnCard("Blue Prototype Cube", "Blue Prototype Box Mesh", 11, 1);
 
         // VFX
-        spawnCard("Fire Emitter (Niagara)", "Rising burning flame particles", 12, 6);
+        spawnCard("Fire Emitter", "Rising burning flame particles", 12, 6);
         spawnCard("Portal Vortex", "Swirling quantum portal effect", 13, 6);
         ImGui::EndChild();
 
@@ -3272,29 +3309,29 @@ namespace engine::renderer {
 
         // ── Viewport Floating Pill 1 (Top-Left): Gizmo tools, Snapping, Camera Speed
         ImGui::SetCursorPos(ImVec2(10, 10));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.063f, 0.063f, 0.094f, 0.90f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.086f, 0.086f, 0.086f, 0.92f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 4));
         ImGui::BeginChild("ViewportPillLeft", ImVec2(390 * s_uiScale, 32 * s_uiScale), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         
         // Translate (W)
-        if (s_gizmoMode == NativeGizmoMode::TRANSLATE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.55f, 0.85f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.18f, 1.0f));
-        if (ImGui::Button(" [W] ")) s_gizmoMode = NativeGizmoMode::TRANSLATE;
+        if (s_gizmoMode == NativeGizmoMode::TRANSLATE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        if (ImGui::Button(" [+] Trans ")) s_gizmoMode = NativeGizmoMode::TRANSLATE;
         ImGui::PopStyleColor();
         ImGui::SameLine();
 
         // Rotate (E)
-        if (s_gizmoMode == NativeGizmoMode::ROTATE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.38f, 0.25f, 0.85f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.18f, 1.0f));
-        if (ImGui::Button(" [E] ")) s_gizmoMode = NativeGizmoMode::ROTATE;
+        if (s_gizmoMode == NativeGizmoMode::ROTATE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        if (ImGui::Button(" [O] Rot ")) s_gizmoMode = NativeGizmoMode::ROTATE;
         ImGui::PopStyleColor();
         ImGui::SameLine();
 
         // Scale (R)
-        if (s_gizmoMode == NativeGizmoMode::SCALE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.70f, 0.40f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.18f, 1.0f));
-        if (ImGui::Button(" [R] ")) s_gizmoMode = NativeGizmoMode::SCALE;
+        if (s_gizmoMode == NativeGizmoMode::SCALE) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        if (ImGui::Button(" [<>] Scale ")) s_gizmoMode = NativeGizmoMode::SCALE;
         ImGui::PopStyleColor();
         ImGui::SameLine();
 
@@ -3311,9 +3348,9 @@ namespace engine::renderer {
         ImGui::SameLine();
 
         // Snapping Button
-        if (s_snapEnabled) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.55f, 0.10f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.18f, 1.0f));
-        std::string snapStr = s_snapEnabled ? (std::to_string(s_snapStep).substr(0, 3) + "m") : "Snap: Off";
+        if (s_snapEnabled) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        std::string snapStr = s_snapEnabled ? (std::to_string(s_snapStep).substr(0, 3) + "m") : "Snap: 10";
         if (ImGui::Button(snapStr.c_str())) {
             s_snapEnabled = !s_snapEnabled;
         }
@@ -3321,9 +3358,9 @@ namespace engine::renderer {
         ImGui::SameLine();
 
         // Cam Speed
-        ImGui::TextColored(ImVec4(0.2f, 0.85f, 1.0f, 1.0f), "Speed: %d", s_cameraSpeed);
+        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Cam: %d", s_cameraSpeed);
         ImGui::SameLine();
-        if (ImGui::Button(" F ")) {
+        if (ImGui::Button(" Focus ")) {
             if (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt) && engine) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                 glm::vec3 newCamPos = t.position - front * 8.0f;
@@ -3337,15 +3374,19 @@ namespace engine::renderer {
 
         // ── Viewport Floating Pill 2 (Top-Right): Perspective, Shading
         ImGui::SetCursorPos(ImVec2(centerViewportW - 240 * s_uiScale, 10));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.063f, 0.063f, 0.094f, 0.90f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.086f, 0.086f, 0.086f, 0.92f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 4));
         ImGui::BeginChild("ViewportPillRight", ImVec2(230 * s_uiScale, 32 * s_uiScale), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::TextColored(ImVec4(0.85f, 0.9f, 0.95f, 1.0f), "Perspective");
+        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Perspective v");
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "Lit (Vulkan 1.3)");
+        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Lit v");
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Show v");
         ImGui::EndChild();
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor();
@@ -3416,29 +3457,34 @@ namespace engine::renderer {
         // ══════════════════════════════════════════════════════════════════════════
         ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, topTotalH), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(rightPanelW, contentH * 0.45f), ImGuiCond_Always);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f)); // #0e0e16
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.086f, 0.086f, 0.086f, 1.0f)); // #161616
         ImGui::Begin("Outliner", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "--- OUTLINER ---");
-        ImGui::SameLine(rightPanelW - 65 * s_uiScale);
-        ImGui::TextDisabled("LEVEL");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Outliner");
+        ImGui::SameLine(rightPanelW - 30 * s_uiScale);
+        ImGui::TextDisabled("x");
 
         static char outlinerFilter[64] = "";
         ImGui::InputTextWithHint("##OutlinerFilter", "Search...", outlinerFilter, sizeof(outlinerFilter));
         ImGui::Separator();
 
-        ImGui::Columns(2, "OutlinerColumns");
-        ImGui::SetColumnWidth(0, rightPanelW * 0.68f);
-        ImGui::TextColored(ImVec4(0.6f, 0.65f, 0.75f, 1.0f), "ITEM LABEL");
+        ImGui::Columns(3, "OutlinerColumns");
+        ImGui::SetColumnWidth(0, 24.0f * s_uiScale);
+        ImGui::SetColumnWidth(1, rightPanelW * 0.60f);
+        ImGui::TextDisabled("V");
         ImGui::NextColumn();
-        ImGui::TextColored(ImVec4(0.6f, 0.65f, 0.75f, 1.0f), "TYPE");
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Item Label");
+        ImGui::NextColumn();
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Type");
         ImGui::NextColumn();
         ImGui::Separator();
 
         ImGui::BeginChild("OutlinerTree", ImVec2(0, 0), false);
         if (ImGui::TreeNodeEx("Lvl_MainLevel (Editor)", ImGuiTreeNodeFlags_DefaultOpen)) {
             if (ImGui::TreeNodeEx("Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::TextColored(ImVec4(0.0f, 0.470f, 0.831f, 1.0f), " * "); ImGui::NextColumn();
                 ImGui::Selectable("DirectionalLight (Sun)"); ImGui::NextColumn(); ImGui::TextDisabled("DirectionalLight"); ImGui::NextColumn();
+                ImGui::TextColored(ImVec4(0.0f, 0.470f, 0.831f, 1.0f), " * "); ImGui::NextColumn();
                 ImGui::Selectable("SkyLight (Ambient)"); ImGui::NextColumn(); ImGui::TextDisabled("SkyLight"); ImGui::NextColumn();
                 ImGui::TreePop();
             }
@@ -3447,7 +3493,7 @@ namespace engine::renderer {
                 auto view = registry.get().view<ecs::TransformComponent>();
                 for (auto entity : view) {
                     std::string label = "Entity_" + std::to_string(static_cast<uint32_t>(entity));
-                    std::string typeName = "Actor";
+                    std::string typeName = "StaticMeshActor";
                     if (registry.get().all_of<ecs::TagComponent>(entity)) {
                         label = registry.get().get<ecs::TagComponent>(entity).name;
                     }
@@ -3459,15 +3505,20 @@ namespace engine::renderer {
                     if (outlinerFilter[0] != '\0' && label.find(outlinerFilter) == std::string::npos) continue;
 
                     bool isSelected = (selectedEnt == entity);
+                    ImGui::TextColored(ImVec4(0.0f, 0.470f, 0.831f, 1.0f), " * ");
+                    ImGui::NextColumn();
+                    if (isSelected) {
+                        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.470f, 0.831f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                    }
                     if (ImGui::Selectable(label.c_str(), isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
                         selectedEnt = entity;
                         if (engine) engine->setSelectedEntity(selectedEnt);
                     }
-                    ImGui::NextColumn();
-                    if (registry.get().all_of<ecs::RigidBodyComponent>(entity)) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "[PHYS] ");
-                        ImGui::SameLine();
+                    if (isSelected) {
+                        ImGui::PopStyleColor(2);
                     }
+                    ImGui::NextColumn();
                     ImGui::TextDisabled("%s", typeName.c_str());
                     ImGui::NextColumn();
                 }
@@ -3794,15 +3845,15 @@ namespace engine::renderer {
         ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomStatusH), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(screenW, bottomStatusH), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 4));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.043f, 0.070f, 1.0f)); // #0b0b12
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.055f, 1.0f)); // #0e0e0e
         ImGuiWindowFlags bottomBarFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("BottomStatusRail", nullptr, bottomBarFlags);
 
         // Content Drawer Toggle Button
-        if (s_showContentDrawer) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.55f, 0.10f, 0.35f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.08f, 0.12f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.96f, 0.70f, 0.20f, 1.0f));
-        if (ImGui::Button(" [FOLDER] Content Drawer ")) {
+        if (s_showContentDrawer) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 0.5f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.95f, 0.95f, 1.0f));
+        if (ImGui::Button("  Content Drawer  ")) {
             s_showContentDrawer = !s_showContentDrawer;
             if (s_showContentDrawer) s_showOutputLog = false;
         }
@@ -3812,10 +3863,10 @@ namespace engine::renderer {
         ImGui::SameLine();
 
         // Output Log Toggle Button
-        if (s_showOutputLog) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.55f, 0.85f, 0.35f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.08f, 0.12f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.85f, 1.0f, 1.0f));
-        if (ImGui::Button(" >_ Output Log ")) {
+        if (s_showOutputLog) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.470f, 0.831f, 0.5f));
+        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+        if (ImGui::Button("  Output Log  ")) {
             s_showOutputLog = !s_showOutputLog;
             if (s_showOutputLog) s_showContentDrawer = false;
         }
@@ -3829,11 +3880,11 @@ namespace engine::renderer {
             ImGui::SameLine(consoleOffset);
         }
 
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "Cmd v");
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Cmd v");
         ImGui::SameLine();
         static char cmdInput[256] = "";
         ImGui::SetNextItemWidth(consoleW - 60 * s_uiScale);
-        if (ImGui::InputTextWithHint("##ConsoleCmdNative", "Enter Console Command (np. reset breakout, play)...", cmdInput, sizeof(cmdInput), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (ImGui::InputTextWithHint("##ConsoleCmdNative", "Enter Console Command...", cmdInput, sizeof(cmdInput), ImGuiInputTextFlags_EnterReturnsTrue)) {
             std::string cmdStr = cmdInput;
             cmdInput[0] = '\0';
             if (!cmdStr.empty() && engine) {
@@ -3856,15 +3907,15 @@ namespace engine::renderer {
         // Right Status Indicators (Exact UE5 bottom-right rail)
         float statusRightW = 380.0f * s_uiScale;
         ImGui::SameLine(screenW - statusRightW);
-        ImGui::TextDisabled("Diagnostics *");
+        ImGui::TextDisabled("Diagnostics 0");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f), "O Zen Server");
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f), "Zen Server [v]");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.0f, 0.85f, 1.0f, 1.0f), "[v] All Saved");
+        ImGui::TextColored(ImVec4(0.0f, 0.70f, 1.0f, 1.0f), "All Saved");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.9f, 1.0f), "UI: %.0f%%", s_uiScale * 100.0f);
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "UI: %.0f%%", s_uiScale * 100.0f);
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.5f, 1.0f), "Vulkan: %.0f FPS", ImGui::GetIO().Framerate);
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.5f, 1.0f), "%.0f FPS", ImGui::GetIO().Framerate);
 
         ImGui::End();
         ImGui::PopStyleColor();

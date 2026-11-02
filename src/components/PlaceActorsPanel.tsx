@@ -25,18 +25,18 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
   onSpawnEmitter,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<
-    'favorites' | 'recent' | 'ue5' | 'basic' | 'lights' | 'shapes' | 'cinematic' | 'media' | 'vfx' | 'geometry' | 'volumes' | 'all'
+    'favorites' | 'recent' | 'props' | 'basic' | 'lights' | 'shapes' | 'cinematic' | 'media' | 'vfx' | 'geometry' | 'volumes' | 'all'
   >('basic');
   const [search, setSearch] = useState('');
 
   if (!isOpen) return null;
 
-  // Rail categories matching Unreal Engine 5.8 Place Actors pane
+  // Rail categories matching Unreal Engine Place Actors pane
   const categories = [
     { id: 'favorites' as const, label: 'Favorites', icon: <Star className="w-3.5 h-3.5" /> },
-    { id: 'ue5' as const,       label: 'UE 5.8',    icon: <span className="text-[10px] font-extrabold text-cyan-400">UE5</span> },
     { id: 'recent' as const,    label: 'Recent',    icon: <Clock className="w-3.5 h-3.5" /> },
     { id: 'basic' as const,     label: 'Basic',     icon: <Box className="w-3.5 h-3.5" /> },
+    { id: 'props' as const,     label: 'Props',     icon: <Layers className="w-3.5 h-3.5 text-cyan-400" /> },
     { id: 'lights' as const,    label: 'Lights',    icon: <Sun className="w-3.5 h-3.5" /> },
     { id: 'shapes' as const,    label: 'Shapes',    icon: <Shapes className="w-3.5 h-3.5" /> },
     { id: 'cinematic' as const, label: 'Cinematic', icon: <Film className="w-3.5 h-3.5" /> },
@@ -49,24 +49,24 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
 
   const itemsByCategory: Record<string, Array<{ name: string; desc: string; icon: any; action: () => void }>> = {
     favorites: [
-      { name: 'Sports Car (UE 5.8)', desc: 'Unreal Engine 5.8 Sports Car FBX Model', icon: <Box className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('sportscar') },
-      { name: '1M Chamfer Cube (UE 5.8)', desc: 'Unreal Engine 5.8 Standard Chamfer Box', icon: <Box className="w-3.5 h-3.5 text-indigo-400" />, action: () => onSpawnEntity('chamfer_cube') },
-      { name: 'Location Gizmo (UE 5.8)', desc: 'Unreal Engine 5.8 Transform 3D Gizmo', icon: <Compass className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('ue5_location') },
+      { name: 'Sports Car', desc: 'High-fidelity sports car model', icon: <Box className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('sportscar') },
+      { name: 'Chamfer Cube', desc: '1M Standard chamfered box mesh', icon: <Box className="w-3.5 h-3.5 text-indigo-400" />, action: () => onSpawnEntity('chamfer_cube') },
+      { name: 'Transform Gizmo', desc: 'Translate 3D coordinate widget', icon: <Compass className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('ue5_location') },
       { name: 'Character (Player)', desc: 'WASD controllable character', icon: <User className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('player') },
       { name: 'Capsule Character', desc: 'Jolt upright capsule pawn', icon: <User className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('capsule') },
       { name: 'Coin (Sensor Trigger)', desc: 'Collectible trigger volume', icon: <Star className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('coin') },
       { name: 'Trigger Zone', desc: 'Invisible event sensor volume', icon: <Box className="w-3.5 h-3.5 text-amber-500" />, action: () => onSpawnEntity('trigger') },
       { name: 'Fire Emitter (Niagara)', desc: 'Rising burning flame particles', icon: <Flame className="w-3.5 h-3.5 text-orange-400" />, action: () => onSpawnEmitter('fire') },
     ],
-    ue5: [
-      { name: 'Sports Car (UE 5.8)', desc: 'D:\\UE_5.8 Vehicles\\Content\\SportsCar\\SM_SportsCar.FBX', icon: <Box className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('sportscar') },
-      { name: '1M Chamfer Cube (UE 5.8)', desc: 'D:\\UE_5.8 Standard 1M Chamfered Cube FBX', icon: <Box className="w-3.5 h-3.5 text-indigo-400" />, action: () => onSpawnEntity('chamfer_cube') },
-      { name: '1M Standard Cube (UE 5.8)', desc: 'D:\\UE_5.8 TemplateResources Standard 1M_Cube.FBX', icon: <Box className="w-3.5 h-3.5 text-blue-400" />, action: () => onSpawnEntity('ue5_cube') },
-      { name: 'Location Gizmo (UE 5.8)', desc: 'D:\\UE_5.8 SM_Gizmo_Location.fbx Model', icon: <Compass className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('ue5_location') },
-      { name: 'Rotate Gizmo (UE 5.8)', desc: 'D:\\UE_5.8 SM_Gizmo_Rotate.fbx Model', icon: <Compass className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('ue5_rotate') },
-      { name: 'Scale Gizmo (UE 5.8)', desc: 'D:\\UE_5.8 SM_Gizmo_Scale.fbx Model', icon: <Compass className="w-3.5 h-3.5 text-rose-400" />, action: () => onSpawnEntity('ue5_scale') },
-      { name: 'Blue Cube (UE 5.8)', desc: 'D:\\UE_5.8 FbxEditorAutomation Cube_Blue.fbx', icon: <Box className="w-3.5 h-3.5 text-sky-400" />, action: () => onSpawnEntity('ue5_bluecube') },
-      { name: 'Rotation Handle (UE 5.8)', desc: 'D:\\UE_5.8 VREditor RotationHandle.fbx', icon: <Circle className="w-3.5 h-3.5 text-violet-400" />, action: () => onSpawnEntity('ue5_rotation') },
+    props: [
+      { name: 'Sports Car', desc: 'Detailed sports car model asset', icon: <Box className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('sportscar') },
+      { name: 'Chamfer Cube', desc: 'Standard 1M chamfered cube mesh', icon: <Box className="w-3.5 h-3.5 text-indigo-400" />, action: () => onSpawnEntity('chamfer_cube') },
+      { name: 'Standard 1M Cube', desc: 'Modular 1-meter prototype cube', icon: <Box className="w-3.5 h-3.5 text-blue-400" />, action: () => onSpawnEntity('ue5_cube') },
+      { name: 'Transform Gizmo', desc: 'Coordinate translation gizmo', icon: <Compass className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('ue5_location') },
+      { name: 'Rotate Gizmo', desc: 'Coordinate rotation axis gizmo', icon: <Compass className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('ue5_rotate') },
+      { name: 'Scale Gizmo', desc: 'Coordinate scale axis gizmo', icon: <Compass className="w-3.5 h-3.5 text-rose-400" />, action: () => onSpawnEntity('ue5_scale') },
+      { name: 'Blue Prototype Cube', desc: 'Calibrated blue material cube', icon: <Box className="w-3.5 h-3.5 text-sky-400" />, action: () => onSpawnEntity('ue5_bluecube') },
+      { name: 'Rotation Handle', desc: 'Spherical rotation ring handle', icon: <Circle className="w-3.5 h-3.5 text-violet-400" />, action: () => onSpawnEntity('ue5_rotation') },
     ],
     recent: [
       { name: 'Capsule Character', desc: 'Upright character collider', icon: <User className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('capsule') },
@@ -76,15 +76,13 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
       { name: 'Portal Vortex', desc: 'Swirling quantum portal effect', icon: <Sparkles className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEmitter('portal') },
     ],
     basic: [
-      { name: 'Actor (StaticMesh)', desc: 'Empty actor container (Cube)', icon: <Box className="w-3.5 h-3.5 text-slate-400" />, action: () => onSpawnEntity('cube') },
-      { name: 'Character (Player)', desc: 'WASD controllable player pawn', icon: <User className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('player') },
-      { name: 'Capsule Pawn', desc: 'Upright Jolt capsule character', icon: <User className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('capsule') },
+      { name: 'Actor', desc: 'Empty actor container (Cube)', icon: <Box className="w-3.5 h-3.5 text-slate-400" />, action: () => onSpawnEntity('cube') },
+      { name: 'Character', desc: 'WASD controllable player pawn', icon: <User className="w-3.5 h-3.5 text-emerald-400" />, action: () => onSpawnEntity('player') },
+      { name: 'Pawn', desc: 'Upright Jolt capsule character', icon: <User className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('capsule') },
       { name: 'Point Light', desc: 'Omnidirectional point light', icon: <Sun className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('point_light') },
-      { name: 'Directional Light', desc: 'Main sunlight source', icon: <Sun className="w-3.5 h-3.5 text-yellow-300" />, action: () => onSpawnEntity('dir_light') },
-      { name: 'Coin (Trigger)', desc: 'Pickable sensor item', icon: <Star className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('coin') },
-      { name: 'Trigger Zone', desc: 'Overlap sensor volume', icon: <Box className="w-3.5 h-3.5 text-amber-500" />, action: () => onSpawnEntity('trigger') },
-      { name: 'Pawn (Sphere)', desc: 'Dynamic physics rigid body pawn', icon: <Circle className="w-3.5 h-3.5 text-cyan-400" />, action: () => onSpawnEntity('sphere') },
       { name: 'Player Start', desc: 'Initial player spawn transform', icon: <User className="w-3.5 h-3.5 text-indigo-400" />, action: () => onSpawnEntity('player') },
+      { name: 'Trigger Box', desc: 'Box overlap trigger volume', icon: <Box className="w-3.5 h-3.5 text-amber-500" />, action: () => onSpawnEntity('trigger') },
+      { name: 'Trigger Sphere', desc: 'Spherical overlap trigger volume', icon: <Circle className="w-3.5 h-3.5 text-amber-400" />, action: () => onSpawnEntity('trigger') },
     ],
     lights: [
       { name: 'Directional Light', desc: 'Sunlight with cascaded shadows', icon: <Sun className="w-3.5 h-3.5 text-yellow-300" />, action: () => onSpawnEntity('dir_light') },
@@ -139,33 +137,33 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
   );
 
   return (
-    <div className="w-64 bg-[#121218] border-r border-white/[0.08] flex flex-col z-10 shrink-0 select-none">
+    <div className="w-64 bg-[#161616] border-r border-[#242424] flex flex-col z-10 shrink-0 select-none">
       {/* 1. Header Tab: Exact Unreal Engine "Place Actors" Tab */}
-      <div className="h-7 bg-[#0d0d12] border-b border-white/[0.08] flex items-center justify-between px-2 text-[11px] font-sans">
-        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#181822] border-t-2 border-cyan-400 rounded-t-sm text-slate-200 font-semibold shadow-sm">
+      <div className="h-7 bg-[#121212] border-b border-[#242424] flex items-center justify-between px-2 text-[11px] font-sans">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1e1e1e] border-t-2 border-[#0078d4] rounded-t-sm text-white font-medium shadow-sm">
           <span>Place Actors</span>
           {onClose && (
-            <button onClick={onClose} className="p-0.5 text-slate-500 hover:text-white ml-1">
+            <button onClick={onClose} className="p-0.5 text-neutral-400 hover:text-white ml-1">
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
-        <span className="text-[9px] font-mono text-slate-600 uppercase">Palette</span>
+        <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">Palette</span>
       </div>
 
       {/* 2. Search Classes Bar */}
-      <div className="p-2 border-b border-white/[0.06] bg-[#101016]">
-        <div className="flex items-center gap-1.5 bg-[#09090e] border border-white/10 rounded px-2 py-1 focus-within:border-cyan-500/60">
-          <Search className="w-3 h-3 text-slate-500" />
+      <div className="p-2 border-b border-[#222222] bg-[#161616]">
+        <div className="flex items-center gap-1.5 bg-[#121212] border border-[#2b2b2b] rounded px-2 py-1 focus-within:border-[#0078d4]">
+          <Search className="w-3 h-3 text-neutral-500" />
           <input
             type="text"
             placeholder="Search Classes..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full bg-transparent text-[11px] text-white focus:outline-none placeholder-slate-600 font-sans"
+            className="w-full bg-transparent text-[11px] text-neutral-200 focus:outline-none placeholder-neutral-500 font-sans"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white">
+            <button onClick={() => setSearch('')} className="text-neutral-500 hover:text-white">
               <X className="w-3 h-3" />
             </button>
           )}
@@ -175,15 +173,15 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
       {/* 3. Main Area: Left Rail Icons + Right Item List */}
       <div className="flex-1 flex overflow-hidden">
         {/* Exact UE5 Left Category Rail */}
-        <div className="w-11 bg-[#0a0a0f] border-r border-white/[0.06] py-1 flex flex-col items-center gap-0.5 shrink-0 overflow-y-auto">
+        <div className="w-10 bg-[#121212] border-r border-[#222222] py-1 flex flex-col items-center gap-1 shrink-0 overflow-y-auto">
           {categories.map(cat => (
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className={`w-8 h-8 rounded flex flex-col items-center justify-center transition-all ${
+              className={`w-7 h-7 rounded flex flex-col items-center justify-center transition-all ${
                 selectedCategory === cat.id
-                  ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+                  ? 'bg-[#0078d4] text-white shadow-sm font-semibold'
+                  : 'text-neutral-400 hover:text-white hover:bg-[#222222]'
               }`}
               title={cat.label}
             >
@@ -193,49 +191,49 @@ export const PlaceActorsPanel: React.FC<PlaceActorsPanelProps> = ({
         </div>
 
         {/* Item List (Right) */}
-        <div className="flex-1 overflow-y-auto p-1.5 space-y-1 bg-[#12121a]">
-          <div className="px-1.5 py-0.5 text-[9px] font-mono text-slate-500 uppercase tracking-wider flex items-center justify-between">
+        <div className="flex-1 overflow-y-auto p-1.5 space-y-1 bg-[#181818]">
+          <div className="px-1 py-0.5 text-[9px] font-sans font-semibold text-neutral-400 uppercase tracking-wider flex items-center justify-between">
             <span>{categories.find(c => c.id === selectedCategory)?.label}</span>
-            <span className="text-[9px] text-slate-600">({activeList.length})</span>
+            <span className="text-[9px] text-neutral-500">({activeList.length})</span>
           </div>
 
           {activeList.map((item, idx) => (
             <div
               key={idx}
               onClick={item.action}
-              className="p-1.5 rounded bg-[#171722] hover:bg-[#20202e] border border-white/[0.04] hover:border-cyan-500/40 cursor-pointer transition-all flex items-center justify-between group shadow-sm"
+              className="p-1.5 rounded bg-[#1e1e1e] hover:bg-[#262626] border border-[#272727] hover:border-[#383838] cursor-pointer transition-all flex items-center justify-between group shadow-sm"
               title={`Kliknij, aby umieścić ${item.name} w scenie`}
             >
               <div className="flex items-center gap-2 truncate">
-                <div className="p-1 rounded bg-[#0c0c12] border border-white/5">
+                <div className="p-1 rounded bg-[#141414] border border-[#242424] text-neutral-300">
                   {item.icon}
                 </div>
                 <div className="truncate">
-                  <div className="text-[11px] font-medium text-slate-200 group-hover:text-cyan-300 truncate">
+                  <div className="text-[11px] font-medium text-neutral-200 group-hover:text-white truncate">
                     {item.name}
                   </div>
-                  <div className="text-[9px] text-slate-500 truncate">
+                  <div className="text-[9px] text-neutral-400 truncate">
                     {item.desc}
                   </div>
                 </div>
               </div>
 
-              {/* Drag / Spawn Handle */}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {/* Grip / Spawn Handle matching Unreal Engine */}
+              <div className="flex items-center gap-1">
                 <button
                   onClick={(e) => { e.stopPropagation(); item.action(); }}
-                  className="p-1 rounded bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-300 transition-colors"
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded bg-[#0078d4]/30 hover:bg-[#0078d4] text-white transition-all"
                   title="Spawn"
                 >
                   <Plus className="w-3 h-3" />
                 </button>
-                <GripVertical className="w-3 h-3 text-slate-500 cursor-grab" />
+                <GripVertical className="w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-300 cursor-grab" />
               </div>
             </div>
           ))}
 
           {activeList.length === 0 && (
-            <div className="text-center py-8 text-slate-600 text-[11px]">
+            <div className="text-center py-8 text-neutral-500 text-[11px]">
               Brak pasujących klas.
             </div>
           )}

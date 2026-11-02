@@ -100,8 +100,8 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           indent ? 'pl-6' : 'pl-2'
         } ${
           isSelected
-            ? 'bg-[#005fb8] text-white font-medium shadow-sm'
-            : 'hover:bg-white/5 text-slate-300'
+            ? 'bg-[#0078d4] text-white font-medium shadow-sm'
+            : 'hover:bg-[#202020] text-neutral-300'
         }`}
       >
         {/* Eye Visibility */}
@@ -148,13 +148,13 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
   return (
     <div className="flex-1 flex flex-col bg-[#111119] select-none overflow-hidden h-full">
       {/* 1. Header: Outliner + Settings Gear + Search */}
-      <div className="p-2 border-b border-white/[0.08] space-y-1.5 bg-[#0e0e15] shrink-0">
+      <div className="p-2 border-b border-[#242424] space-y-1.5 bg-[#161616] shrink-0">
         <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5 font-bold text-white tracking-wide">
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+          <div className="flex items-center gap-1.5 font-semibold text-white tracking-wide">
+            <Layers className="w-3.5 h-3.5 text-[#0078d4]" />
             <span>Outliner</span>
           </div>
-          <div className="flex items-center gap-1.5 text-slate-400">
+          <div className="flex items-center gap-1.5 text-neutral-400">
             <button className="p-1 rounded hover:bg-white/10 hover:text-white" title="Filter Classes">
               <Filter className="w-3 h-3" />
             </button>
@@ -165,20 +165,20 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
         </div>
 
         {/* Search */}
-        <div className="flex items-center gap-1.5 bg-[#07070c] border border-white/10 rounded px-2 py-0.5 focus-within:border-cyan-500/50">
-          <Search className="w-3 h-3 text-slate-500" />
+        <div className="flex items-center gap-1.5 bg-[#121212] border border-[#2c2c2c] rounded px-2 py-0.5 focus-within:border-[#0078d4]">
+          <Search className="w-3 h-3 text-neutral-500" />
           <input
             type="text"
             placeholder="Search..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full bg-transparent text-[11px] text-white focus:outline-none placeholder-slate-600 font-sans"
+            className="w-full bg-transparent text-[11px] text-neutral-200 focus:outline-none placeholder-neutral-500 font-sans"
           />
         </div>
       </div>
 
       {/* 2. Table Column Headers: 👁 📌 Item Label | Type */}
-      <div className="h-6 bg-[#0a0a0f] border-b border-white/[0.06] flex items-center px-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0">
+      <div className="h-6 bg-[#141414] border-b border-[#242424] flex items-center px-2 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider shrink-0">
         <span className="w-5 text-center">👁</span>
         <span className="w-3 text-center">📌</span>
         <span className="flex-1 pl-1">Item Label</span>
@@ -286,7 +286,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
       </div>
 
       {/* 4. Exact UE5 Footer: '2 751 actors (1 selected)' */}
-      <div className="h-6 bg-[#09090f] border-t border-white/[0.06] px-2.5 flex items-center justify-between text-[10px] font-mono text-slate-500 shrink-0">
+      <div className="h-6 bg-[#121212] border-t border-[#242424] px-2.5 flex items-center justify-between text-[10px] font-sans text-neutral-400 shrink-0">
         <span>{entities.length} actors</span>
         <span>{selectedEntityId !== null ? `(1 selected)` : '(0 selected)'}</span>
       </div>

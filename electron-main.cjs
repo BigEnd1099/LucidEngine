@@ -8,7 +8,7 @@ const logFile = path.join(__dirname, 'electron.log');
 function log(msg) {
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
+  } catch { }
   console.log(msg);
 }
 
@@ -97,7 +97,7 @@ async function createWindow() {
     height: 950,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Lucid Engine 3.8',
+    title: 'Lucid Engine',
     backgroundColor: '#0a0a0f',
     icon: path.join(__dirname, 'public', 'favicon.ico'),
     autoHideMenuBar: true,
@@ -136,7 +136,7 @@ app.on('window-all-closed', () => {
     console.log('[Electron] Terminating native engine child process...');
     try {
       engineProcess.kill('SIGINT');
-    } catch {}
+    } catch { }
   }
   if (process.platform !== 'darwin') {
     app.quit();

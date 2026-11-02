@@ -14,7 +14,7 @@ export async function runAaaFeaturesTest(existingEngine = null) {
       if (process.platform === 'win32') {
         execSync('powershell -Command "Stop-Process -Name engine -Force -ErrorAction SilentlyContinue"');
       }
-    } catch (e) {}
+    } catch (e) { }
 
     engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
       stdio: ['pipe', 'pipe', 'inherit']
@@ -44,7 +44,7 @@ export async function runAaaFeaturesTest(existingEngine = null) {
             if (msg.error) reject(new Error(msg.error.message || 'RPC Error'));
             else resolve(msg.result);
           }
-        } catch (e) {}
+        } catch (e) { }
       };
 
       ws.on('message', onMessage);
@@ -57,7 +57,7 @@ export async function runAaaFeaturesTest(existingEngine = null) {
     ws.on('error', reject);
   });
 
-  console.log('Connected to Lucid Engine 5.8 AAA Vulkan Runtime via WebSocket JSON-RPC.\n');
+  console.log('Connected to Lucid Engine AAA Vulkan Runtime via WebSocket JSON-RPC.\n');
   let passCount = 0;
 
   try {

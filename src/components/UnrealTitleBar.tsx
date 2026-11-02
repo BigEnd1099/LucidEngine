@@ -93,7 +93,7 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
         { label: 'Open Project...', shortcut: 'Ctrl+O', action: onOpenProjectModal, icon: <FolderOpen className="w-3.5 h-3.5 text-amber-400" /> },
         { label: 'Save Level / Project', shortcut: 'Ctrl+S', action: onSaveProject, icon: <Save className="w-3.5 h-3.5 text-emerald-400" /> },
         { divider: true },
-        { label: 'Kompiluj pełną grę (.exe)', shortcut: 'Ctrl+Shift+P', action: onPackageGame || (() => {}), icon: <Download className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'Kompiluj pełną grę (.exe)', shortcut: 'Ctrl+Shift+P', action: onPackageGame || (() => { }), icon: <Download className="w-3.5 h-3.5 text-emerald-400" /> },
         { label: 'Export Project (.lucidproject)', action: onExportProject, icon: <Download className="w-3.5 h-3.5 text-indigo-400" /> },
         { label: 'Import Project (.lucidproject)', action: onImportProjectClick, icon: <Upload className="w-3.5 h-3.5 text-indigo-400" /> },
         { label: 'Import 3D Mesh (.glb)', action: onImportGlbClick, icon: <Box className="w-3.5 h-3.5 text-rose-400" /> },
@@ -101,8 +101,8 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
     },
     {
       id: 'edit', label: 'Edit', items: [
-        { label: 'Undo', shortcut: 'Ctrl+Z', action: onUndo || (() => {}), icon: <FileText className="w-3.5 h-3.5 text-slate-400" /> },
-        { label: 'Redo', shortcut: 'Ctrl+Y', action: onRedo || (() => {}), icon: <FileText className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Undo', shortcut: 'Ctrl+Z', action: onUndo || (() => { }), icon: <FileText className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Redo', shortcut: 'Ctrl+Y', action: onRedo || (() => { }), icon: <FileText className="w-3.5 h-3.5 text-slate-400" /> },
         { divider: true },
         { label: 'Project Settings...', action: onOpenSettings, icon: <Settings className="w-3.5 h-3.5 text-cyan-400" /> },
         { label: 'Editor Preferences...', action: onOpenSettings, icon: <Settings className="w-3.5 h-3.5 text-indigo-400" /> },
@@ -110,48 +110,48 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
     },
     {
       id: 'window', label: 'Window', items: [
-        { label: 'Place Actors', action: onTogglePlaceActors || (() => {}), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Outliner', action: onToggleOutliner || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Details', action: onToggleDetails || (() => {}), icon: <FileText className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Content Drawer', shortcut: 'Ctrl+Space', action: onToggleContentDrawer || (() => {}), icon: <FolderOpen className="w-3.5 h-3.5 text-amber-400" /> },
-        { label: 'Output Log', action: onToggleOutputLog || (() => {}), icon: <Terminal className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Place Actors', action: onTogglePlaceActors || (() => { }), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Outliner', action: onToggleOutliner || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Details', action: onToggleDetails || (() => { }), icon: <FileText className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Content Drawer', shortcut: 'Ctrl+Space', action: onToggleContentDrawer || (() => { }), icon: <FolderOpen className="w-3.5 h-3.5 text-amber-400" /> },
+        { label: 'Output Log', action: onToggleOutputLog || (() => { }), icon: <Terminal className="w-3.5 h-3.5 text-slate-400" /> },
       ]
     },
     {
       id: 'tools', label: 'Tools', items: [
-        { label: 'Execute QuickJS Script', action: onExecuteScript || (() => {}), icon: <Terminal className="w-3.5 h-3.5 text-indigo-400" /> },
-        { label: 'Jolt Physics Diagnostics', action: onPhysicsDiagnostics || (() => {}), icon: <Cpu className="w-3.5 h-3.5 text-amber-400" /> },
-        { label: 'Vulkan Shader Profiler', action: onVulkanProfiler || (() => {}), icon: <Cpu className="w-3.5 h-3.5 text-emerald-400" /> },
-        { label: 'Export TypeScript Definitions (.d.ts)', action: onExportTypes || (() => {}), icon: <FileText className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Execute QuickJS Script', action: onExecuteScript || (() => { }), icon: <Terminal className="w-3.5 h-3.5 text-indigo-400" /> },
+        { label: 'Jolt Physics Diagnostics', action: onPhysicsDiagnostics || (() => { }), icon: <Cpu className="w-3.5 h-3.5 text-amber-400" /> },
+        { label: 'Vulkan Shader Profiler', action: onVulkanProfiler || (() => { }), icon: <Cpu className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'Export TypeScript Definitions (.d.ts)', action: onExportTypes || (() => { }), icon: <FileText className="w-3.5 h-3.5 text-cyan-400" /> },
       ]
     },
     {
       id: 'build', label: 'Build', items: [
-        { label: 'Build All Levels', shortcut: 'Ctrl+Shift+B', action: onBuildAllLevels || (() => {}), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Build Lighting & Shadows', action: onBuildLighting || (() => {}), icon: <Box className="w-3.5 h-3.5 text-yellow-400" /> },
-        { label: 'Build Jolt Collision Meshes', action: onBuildCollisionMeshes || (() => {}), icon: <Box className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'Build All Levels', shortcut: 'Ctrl+Shift+B', action: onBuildAllLevels || (() => { }), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Build Lighting & Shadows', action: onBuildLighting || (() => { }), icon: <Box className="w-3.5 h-3.5 text-yellow-400" /> },
+        { label: 'Build Jolt Collision Meshes', action: onBuildCollisionMeshes || (() => { }), icon: <Box className="w-3.5 h-3.5 text-emerald-400" /> },
       ]
     },
     {
       id: 'platforms', label: 'Platforms', items: [
-        { label: 'Windows (x86_64 Vulkan 1.3)', action: onPackageGame || (() => {}), icon: <Check className="w-3.5 h-3.5 text-emerald-400" /> },
-        { label: 'WebAssembly (WebGL2)', action: () => {}, icon: <Check className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Package Windows Release Build (.exe)...', action: onPackageGame || (() => {}), icon: <Download className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'Windows (x86_64 Vulkan 1.3)', action: onPackageGame || (() => { }), icon: <Check className="w-3.5 h-3.5 text-emerald-400" /> },
+        { label: 'WebAssembly (WebGL2)', action: () => { }, icon: <Check className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Package Windows Release Build (.exe)...', action: onPackageGame || (() => { }), icon: <Download className="w-3.5 h-3.5 text-emerald-400" /> },
       ]
     },
     {
       id: 'select', label: 'Select', items: [
-        { label: 'Select All', shortcut: 'Ctrl+A', action: onSelectAll || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
-        { label: 'Deselect', shortcut: 'Esc', action: onDeselect || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
-        { label: 'Invert Selection', shortcut: 'Ctrl+I', action: onInvertSelection || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
-        { label: 'Focus Selected Actor', shortcut: 'F', action: onFocusSelected || (() => {}), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Select All', shortcut: 'Ctrl+A', action: onSelectAll || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Deselect', shortcut: 'Esc', action: onDeselect || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Invert Selection', shortcut: 'Ctrl+I', action: onInvertSelection || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-slate-400" /> },
+        { label: 'Focus Selected Actor', shortcut: 'F', action: onFocusSelected || (() => { }), icon: <Box className="w-3.5 h-3.5 text-cyan-400" /> },
       ]
     },
     {
       id: 'actor', label: 'Actor', items: [
-        { label: 'Duplicate Actor', shortcut: 'Ctrl+D', action: onDuplicateSelected || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-cyan-400" /> },
-        { label: 'Delete Actor', shortcut: 'Del', action: onDeleteSelected || (() => {}), icon: <Layers className="w-3.5 h-3.5 text-rose-400" /> },
-        { label: 'Attach QuickJS Script', action: onAttachScript || (() => {}), icon: <FileText className="w-3.5 h-3.5 text-indigo-400" /> },
+        { label: 'Duplicate Actor', shortcut: 'Ctrl+D', action: onDuplicateSelected || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-cyan-400" /> },
+        { label: 'Delete Actor', shortcut: 'Del', action: onDeleteSelected || (() => { }), icon: <Layers className="w-3.5 h-3.5 text-rose-400" /> },
+        { label: 'Attach QuickJS Script', action: onAttachScript || (() => { }), icon: <FileText className="w-3.5 h-3.5 text-indigo-400" /> },
       ]
     },
     {
@@ -164,15 +164,15 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
 
   return (
     <div className="bg-[#0b0b10] border-b border-white/[0.08] select-none z-30 shrink-0">
-      {/* 1. Top Window Bar: UE Icon, Menus, Prototype Badge, Window Controls */}
-      <div className="h-7 px-2.5 flex items-center justify-between text-[11px] font-sans text-slate-300">
+      {/* 1. Top Window Bar: Logo, Menus, Project Info, Controls */}
+      <div className="h-7 px-2.5 flex items-center justify-between text-[11px] font-sans text-neutral-300 bg-[#0e0e0e]">
         <div className="flex items-center gap-1">
-          {/* Unreal Engine Brand Badge */}
-          <div className="flex items-center gap-1.5 mr-2 pr-2 border-r border-white/10">
-            <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center font-bold text-[9px] text-white shadow-sm shadow-cyan-500/30">
-              U
+          {/* Lucid Engine Brand Badge */}
+          <div className="flex items-center gap-1.5 mr-2 pr-2 border-r border-[#262626]">
+            <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-[9px] text-white shadow-sm shadow-sky-500/30">
+              L
             </div>
-            <span className="font-semibold text-white tracking-wider text-[11px]">LUCID 5.8</span>
+            <span className="font-semibold text-white tracking-wider text-[11px]">LUCID</span>
           </div>
 
           {/* Menus */}
@@ -180,31 +180,30 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
             <div key={menu.id} className="relative">
               <button
                 onClick={() => setActiveMenu(activeMenu === menu.id ? null : menu.id)}
-                className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
-                  activeMenu === menu.id ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-slate-300'
-                }`}
+                className={`px-2 py-0.5 rounded text-[11px] transition-colors ${activeMenu === menu.id ? 'bg-[#2a2a2a] text-white' : 'hover:bg-[#202020] text-neutral-300'
+                  }`}
               >
                 {menu.label}
               </button>
 
               {activeMenu === menu.id && menu.items.length > 0 && (
                 <div
-                  className="absolute top-full left-0 mt-0.5 w-60 bg-[#14141f] border border-white/15 rounded-md shadow-2xl py-1 z-50 backdrop-blur-2xl"
+                  className="absolute top-full left-0 mt-0.5 w-60 bg-[#161616] border border-[#2e2e2e] rounded-md shadow-2xl py-1 z-50 backdrop-blur-2xl"
                   onMouseLeave={() => setActiveMenu(null)}
                 >
                   {menu.items.map((item: any, idx: number) => {
-                    if (item.divider) return <div key={idx} className="h-px bg-white/10 my-1" />;
+                    if (item.divider) return <div key={idx} className="h-px bg-[#262626] my-1" />;
                     return (
                       <button
                         key={idx}
                         onClick={() => { item.action?.(); setActiveMenu(null); }}
-                        className="w-full px-3 py-1.5 text-left text-[11px] flex items-center justify-between hover:bg-cyan-500/20 hover:text-cyan-200 text-slate-200 transition-colors"
+                        className="w-full px-3 py-1.5 text-left text-[11px] flex items-center justify-between hover:bg-[#0078d4]/20 hover:text-white text-neutral-200 transition-colors"
                       >
                         <div className="flex items-center gap-2">
                           {item.icon}
                           <span>{item.label}</span>
                         </div>
-                        {item.shortcut && <span className="text-[9px] font-mono text-slate-500">{item.shortcut}</span>}
+                        {item.shortcut && <span className="text-[9px] font-mono text-neutral-500">{item.shortcut}</span>}
                       </button>
                     );
                   })}
@@ -215,17 +214,17 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
         </div>
 
         {/* Center Project Indicator */}
-        <div className="flex items-center gap-2 text-slate-400 font-mono text-[10px]">
-          <span className="text-slate-500 font-sans">Project:</span>
-          <span className="text-cyan-300 font-semibold">{project.name}</span>
-          <span className="text-slate-600">|</span>
-          <span className="text-slate-400">UE 5.8 / Linear Hybrid</span>
+        <div className="flex items-center gap-2 text-neutral-400 font-sans text-[10px]">
+          <span className="text-neutral-500">Project:</span>
+          <span className="text-sky-400 font-semibold">{project.name}</span>
+          <span className="text-neutral-600">|</span>
+          <span className="text-neutral-400">Lucid Studio 2026</span>
         </div>
 
         {/* Window controls (Prototype + Min/Max/Close matching Screenshot) */}
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-slate-500 font-sans tracking-wide">Prototype</span>
-          <div className="flex items-center gap-2 text-slate-400">
+          <span className="text-[10px] text-neutral-500 font-sans tracking-wide">Prototype</span>
+          <div className="flex items-center gap-2 text-neutral-400">
             <button className="hover:text-white p-0.5"><Minus className="w-3 h-3" /></button>
             <button className="hover:text-white p-0.5"><Maximize2 className="w-2.5 h-2.5" /></button>
             <button className="hover:text-rose-400 p-0.5"><X className="w-3 h-3" /></button>
@@ -241,11 +240,10 @@ export const UnrealTitleBar: React.FC<UnrealTitleBarProps> = ({
             <div
               key={sc.id}
               onClick={() => onSelectScene?.(sc.id)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-t-sm text-[11px] font-medium transition-all cursor-pointer select-none ${
-                isActive
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-t-sm text-[11px] font-medium transition-all cursor-pointer select-none ${isActive
                   ? 'bg-[#181824] border-t-2 border-cyan-400 text-white shadow-sm'
                   : 'bg-[#12121c] hover:bg-[#151522] text-slate-400 hover:text-slate-200'
-              }`}
+                }`}
             >
               <span className="text-amber-400 text-xs font-bold">▲</span>
               <span>{sc.name}</span>

@@ -18,6 +18,7 @@ engine/build/
 *.idb
 *.VC.db
 .vs/
+.vscode/
 *.vcxproj.user
 CMakeSettings.json
 CMakeUserPresets.json

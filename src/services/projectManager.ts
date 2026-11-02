@@ -570,7 +570,7 @@ const DEFAULT_EMITTERS: ParticleEmitterConfig[] = [
 
 export function createEmptyProject(name: string = 'Czysty Projekt', folderPath?: string): Project {
   const id = 'proj_' + Date.now();
-  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'D:/UE_5.8/Projects';
+  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'projects';
   return {
     id,
     name,
@@ -623,7 +623,7 @@ export function createEmptyProject(name: string = 'Czysty Projekt', folderPath?:
 export function createPlatformerProject(name: string = 'Platformer 3D (Coin Runner)', folderPath?: string): Project {
   const id = 'proj_' + Date.now();
   const script = DEFAULT_SCRIPTS.find(s => s.name === 'BP_PlatformerController.js') || DEFAULT_SCRIPTS[0];
-  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'D:/UE_5.8/Projects';
+  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'projects';
   return {
     id,
     name,
@@ -677,7 +677,7 @@ export function createPlatformerProject(name: string = 'Platformer 3D (Coin Runn
 export function createBreakoutProject(name: string = 'Breakout 3D Extended', folderPath?: string): Project {
   const id = 'proj_' + Date.now();
   const breakoutScript = DEFAULT_SCRIPTS.find(s => s.name === 'BP_BreakoutController.js') || DEFAULT_SCRIPTS[1];
-  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'D:/UE_5.8/Projects';
+  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'projects';
   
   const bricks: any[] = [];
   let bId = 10;
@@ -737,7 +737,7 @@ export function createBreakoutProject(name: string = 'Breakout 3D Extended', fol
 export function createSpaceShooterProject(name: string = 'Retro Space Shooter 3D', folderPath?: string): Project {
   const id = 'proj_' + Date.now();
   const script = DEFAULT_SCRIPTS.find(s => s.name === 'BP_SpaceShooterController.js') || DEFAULT_SCRIPTS[2];
-  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'D:/UE_5.8/Projects';
+  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'projects';
   
   const meteors: any[] = [];
   for (let i = 0; i < 6; ++i) {
@@ -792,7 +792,7 @@ export function createSpaceShooterProject(name: string = 'Retro Space Shooter 3D
 export function createHoverRacerProject(name: string = 'Arcade Hover Racer', folderPath?: string): Project {
   const id = 'proj_' + Date.now();
   const script = DEFAULT_SCRIPTS.find(s => s.name === 'BP_HoverRacerController.js') || DEFAULT_SCRIPTS[3];
-  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'D:/UE_5.8/Projects';
+  const defaultLoc = (typeof localStorage !== 'undefined' && localStorage.getItem('lucid_project_location')) || 'projects';
   return {
     id,
     name,

@@ -1674,7 +1674,7 @@ function update(entities, dt, input, contacts) {
             std::string projName = projectData.value("name", dir.filename().string());
             if (projName.empty()) projName = "MyProject";
 
-            // 1. Create Professional Unreal Engine 5.8 Folder Hierarchy
+            // 1. Create Professional Unreal Engine Folder Hierarchy
             std::filesystem::create_directories(dir / "Config");
             std::filesystem::create_directories(dir / "Content" / "Maps");
             std::filesystem::create_directories(dir / "Content" / "Blueprints");
@@ -1690,12 +1690,12 @@ function update(entities, dt, input, contacts) {
             std::filesystem::create_directories(dir / "scripts");
             std::filesystem::create_directories(dir / "materials");
 
-            // 2. Save <ProjectName>.uproject (Unreal Engine 5.8 Standard Descriptor)
+            // 2. Save <ProjectName>.uproject (Unreal Engine Standard Descriptor)
             nlohmann::json uproject = {
                 {"FileVersion", 3},
-                {"EngineAssociation", "5.8"},
+                {"EngineAssociation", "0.1"},
                 {"Category", ""},
-                {"Description", projectData.value("description", "Lucid Engine 5.8 Project")},
+                {"Description", projectData.value("description", "Lucid Engine Project")},
                 {"Modules", nlohmann::json::array({
                     {
                         {"Name", projName},
@@ -1959,7 +1959,7 @@ function update(entities, dt, input, contacts) {
                 std::filesystem::copy_file("engine/build/Release/pbr.frag.spv", gameDir / "pbr.frag.spv", std::filesystem::copy_options::overwrite_existing);
             }
 
-            // 3. Copy 3D Models (UE 5.8 converted assets)
+            // 3. Copy 3D Models (Prop and mesh assets)
             std::filesystem::path modelsSrc = "public/assets/models";
             if (std::filesystem::exists(modelsSrc)) {
                 for (const auto& f : std::filesystem::directory_iterator(modelsSrc)) {
@@ -1972,7 +1972,7 @@ function update(entities, dt, input, contacts) {
             // 4. Save game project package descriptor (game.json)
             nlohmann::json gamePackage = {
                 {"name", gameName},
-                {"engineAssociation", "Lucid 5.8 Native Vulkan Runtime"},
+                {"engineAssociation", "Lucid Native Vulkan Runtime"},
                 {"preset", m_currentPreset},
                 {"entities", getSnapshotJson()},
                 {"script", m_currentScriptCode.empty() ? getDefaultScript(m_currentPreset) : m_currentScriptCode},
@@ -1994,7 +1994,7 @@ function update(entities, dt, input, contacts) {
             std::ofstream batFile(gameDir / "RunGame.bat");
             if (batFile.is_open()) {
                 batFile << "@echo off\n"
-                        << "title " << gameName << " - Lucid Engine 5.8 (Vulkan 1.3 PC Game)\n"
+                        << "title " << gameName << " - Lucid Engine (Vulkan 1.3 PC Game)\n"
                         << "start \"\" \"%~dp0" << gameName << ".exe\" --game game.json\n";
                 batFile.close();
             }

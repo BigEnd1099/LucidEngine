@@ -35,9 +35,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [newDesc, setNewDesc] = useState('');
   const [template, setTemplate] = useState<ProjectTemplate>('empty');
   
-  // Project location on ANY drive or directory (like Unreal Engine 5.8)
+  // Project location (default relative 'projects' directory)
   const [projectLocation, setProjectLocation] = useState<string>(() => {
-    return localStorage.getItem(DEFAULT_LOCATION_KEY) || 'D:\\UE_5.8\\Projects';
+    return localStorage.getItem(DEFAULT_LOCATION_KEY) || 'projects';
   });
 
   if (!isOpen) return null;
@@ -71,10 +71,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     setTemplate('empty');
   };
 
-  // Compute full target path exactly like Unreal Engine 5
-  const cleanLoc = (projectLocation || 'D:\\UE_5.8\\Projects').trim().replace(/[\\/]+$/, '');
+  // Compute full target path
+  const cleanLoc = (projectLocation || 'projects').trim().replace(/[\\/]+$/, '');
   const cleanName = (newName || 'MyProject').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-  const fullTargetPath = `${cleanLoc}\\${cleanName}`;
+  const fullTargetPath = `${cleanLoc}/${cleanName}`;
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,8 +94,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           <div className="flex items-center gap-2">
             <Folder className="w-5 h-5 text-amber-400" />
             <div>
-              <h2 className="text-sm font-bold text-white tracking-wide">Menedżer Projektów (Unreal Engine 5.8 Style)</h2>
-              <p className="text-[10px] text-slate-400">Dowolna lokalizacja na dysku (np. D:\UE_5.8) & szablony od zera</p>
+              <h2 className="text-sm font-bold text-white tracking-wide">Menedżer Projektów Lucid Engine</h2>
+              <p className="text-[10px] text-slate-400">Wybór folderu na dysku & szablony startowe</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 rounded text-slate-400 hover:text-white transition-colors">
@@ -112,7 +112,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               className="w-full py-2.5 px-4 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-sm"
             >
               <FolderPlus className="w-4 h-4" />
-              <span>+ Utwórz Nowy Projekt (Wybór folderu na dowolnym dysku & Szablonu)</span>
+              <span>+ Utwórz Nowy Projekt (Wybór folderu & Szablonu)</span>
             </button>
           ) : (
             <form onSubmit={handleCreate} className="p-3.5 bg-[#151522] border border-cyan-500/30 rounded-lg space-y-3.5">
@@ -120,14 +120,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wide flex items-center gap-1.5">
                   <FolderPlus className="w-4 h-4 text-cyan-400" /> Utwórz Nowy Projekt Gry
                 </h3>
-                <span className="text-[10px] text-amber-400/90 font-mono font-semibold">UE 5.8 Project Browser</span>
+                <span className="text-[10px] text-amber-400/90 font-mono font-semibold">Lucid Project Hub</span>
               </div>
 
-              {/* 1. Project Location (Any Drive / Folder like Unreal Engine) */}
+              {/* 1. Project Location */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-                    <HardDrive className="w-3.5 h-3.5 text-amber-400" /> Lokalizacja Projektu (Dowolny folder na dysku):
+                    <HardDrive className="w-3.5 h-3.5 text-amber-400" /> Lokalizacja Projektu:
                   </label>
                   <button
                     type="button"
@@ -142,7 +142,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   required
                   value={projectLocation}
                   onChange={(e) => handleLocationChange(e.target.value)}
-                  placeholder="np. D:\UE_5.8 lub D:\UE_5.8\Projects lub C:\Gry"
+                  placeholder="np. projects lub C:/Gry/MojeProjekty"
                   className="w-full bg-black/60 border border-white/20 rounded px-2.5 py-1.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-400 font-mono"
                 />
 
@@ -151,31 +151,24 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <span className="text-slate-500">Szybki wybór:</span>
                   <button
                     type="button"
-                    onClick={() => handleLocationChange('D:\\UE_5.8')}
-                    className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 hover:text-amber-300 border border-white/10 transition-colors font-mono"
-                  >
-                    D:\UE_5.8
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleLocationChange('D:\\UE_5.8\\Projects')}
+                    onClick={() => handleLocationChange('projects')}
                     className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 hover:text-cyan-300 border border-white/10 transition-colors font-mono"
                   >
-                    D:\UE_5.8\Projects
+                    projects
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleLocationChange('D:\\Lucid Engine\\projects')}
+                    onClick={() => handleLocationChange('./projects/games')}
                     className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 hover:text-cyan-300 border border-white/10 transition-colors font-mono"
                   >
-                    D:\Lucid Engine\projects
+                    ./projects/games
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleLocationChange('C:\\Projects')}
+                    onClick={() => handleLocationChange('./workspace')}
                     className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 hover:text-slate-200 border border-white/10 transition-colors font-mono"
                   >
-                    C:\Projects
+                    ./workspace
                   </button>
                 </div>
               </div>
@@ -366,7 +359,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                       </div>
                       <p className="text-[11px] text-slate-400 line-clamp-1">{p.description || 'Brak opisu'}</p>
                       <div className="flex items-center gap-3 text-[10px] font-mono text-slate-500 mt-1">
-                        <span className="text-amber-400/90 font-mono font-medium">{p.folderPath || 'D:\\UE_5.8\\' + p.name}</span>
+                        <span className="text-cyan-400/90 font-mono font-medium">{p.folderPath || 'projects/' + p.name}</span>
                         <span>•</span>
                         <span>{p.scenes?.length || 1} scen</span>
                         <span>•</span>

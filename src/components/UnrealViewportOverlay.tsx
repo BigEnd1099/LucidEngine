@@ -51,14 +51,14 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
   return (
     <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between pointer-events-none select-none">
       {/* ── Left Viewport Controls: Gizmo Tools, Coordinate Space, Snapping ── */}
-      <div className="flex items-center gap-1 bg-[#101018]/90 backdrop-blur-md border border-white/10 rounded-md p-0.5 shadow-xl pointer-events-auto text-[11px] font-mono">
+      <div className="flex items-center gap-1 bg-[#161616]/95 backdrop-blur-md border border-[#2c2c2c] rounded-md p-0.5 shadow-xl pointer-events-auto text-[11px] font-sans">
         {/* Transform: Translate (W) */}
         <button
           onClick={() => setGizmoMode('translate')}
           className={`p-1.5 rounded transition-all ${
             gizmoMode === 'translate'
-              ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-white'
+              ? 'bg-[#0078d4] text-white shadow-sm'
+              : 'text-neutral-400 hover:text-white'
           }`}
           title="Select and Translate Objects (W)"
         >
@@ -70,8 +70,8 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
           onClick={() => setGizmoMode('rotate')}
           className={`p-1.5 rounded transition-all ${
             gizmoMode === 'rotate'
-              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-white'
+              ? 'bg-[#0078d4] text-white shadow-sm'
+              : 'text-neutral-400 hover:text-white'
           }`}
           title="Select and Rotate Objects (E)"
         >
@@ -83,8 +83,8 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
           onClick={() => setGizmoMode('scale')}
           className={`p-1.5 rounded transition-all ${
             gizmoMode === 'scale'
-              ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-white'
+              ? 'bg-[#0078d4] text-white shadow-sm'
+              : 'text-neutral-400 hover:text-white'
           }`}
           title="Select and Scale Objects (R)"
         >
@@ -187,7 +187,7 @@ export const UnrealViewportOverlay: React.FC<UnrealViewportOverlayProps> = ({
       </div>
 
       {/* ── Right Viewport Controls: Perspective, Lit Mode, Vulkan toggle ── */}
-      <div className="flex items-center gap-1 bg-[#101018]/90 backdrop-blur-md border border-white/10 rounded-md p-0.5 shadow-xl pointer-events-auto text-[11px] font-sans">
+      <div className="flex items-center gap-1 bg-[#161616]/95 backdrop-blur-md border border-[#2c2c2c] rounded-md p-0.5 shadow-xl pointer-events-auto text-[11px] font-sans">
         {/* Perspective Mode Button */}
         <div className="px-2 py-1 text-slate-300 text-[10px] font-medium flex items-center gap-1">
           <span>Perspective</span>
