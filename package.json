@@ -9,6 +9,7 @@
     "app": "electron .",
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc && vite build",
+    "build:engine": "build_engine.bat",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "engine": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue; .\\engine\\build\\Release\\engine.exe\"",
