@@ -1922,7 +1922,12 @@ namespace engine::renderer {
         Globe,
         Camera,
         Speaker,
-        Wand
+        Wand,
+        Pointer,
+        Mountain,
+        Leaf,
+        Brush,
+        Gear
     };
 
     static void drawVectorIcon(ImDrawList* dl, ImVec2 center, float r, VectorIconType type, ImU32 col) {
@@ -2068,6 +2073,51 @@ namespace engine::renderer {
             case VectorIconType::Wand: {
                 dl->AddLine(ImVec2(center.x - r * 0.75f, center.y + r * 0.75f), ImVec2(center.x + r * 0.55f, center.y - r * 0.55f), col, 1.8f);
                 dl->AddCircleFilled(ImVec2(center.x + r * 0.65f, center.y - r * 0.65f), r * 0.22f, col);
+                break;
+            }
+            case VectorIconType::Pointer: {
+                ImVec2 p0(center.x - r * 0.6f, center.y - r * 0.8f);
+                ImVec2 p1(center.x - r * 0.6f, center.y + r * 0.6f);
+                ImVec2 p2(center.x - r * 0.1f, center.y + r * 0.2f);
+                ImVec2 p3(center.x + r * 0.5f, center.y + r * 0.7f);
+                dl->AddTriangleFilled(p0, p1, p2, col);
+                dl->AddLine(p2, p3, col, 1.6f);
+                break;
+            }
+            case VectorIconType::Mountain: {
+                ImVec2 p0(center.x - r * 0.8f, center.y + r * 0.6f);
+                ImVec2 p1(center.x - r * 0.2f, center.y - r * 0.5f);
+                ImVec2 p2(center.x + r * 0.4f, center.y + r * 0.6f);
+                dl->AddTriangle(p0, p1, p2, col, 1.4f);
+                ImVec2 q0(center.x + r * 0.1f, center.y + r * 0.6f);
+                ImVec2 q1(center.x + r * 0.5f, center.y - r * 0.2f);
+                ImVec2 q2(center.x + r * 0.9f, center.y + r * 0.6f);
+                dl->AddTriangle(q0, q1, q2, col, 1.4f);
+                break;
+            }
+            case VectorIconType::Leaf: {
+                dl->PathArcTo(ImVec2(center.x - r * 0.2f, center.y), r * 0.6f, -1.57f, 1.57f, 8);
+                dl->PathStroke(col, 0, 1.4f);
+                dl->PathArcTo(ImVec2(center.x + r * 0.2f, center.y), r * 0.6f, 1.57f, 4.71f, 8);
+                dl->PathStroke(col, 0, 1.4f);
+                dl->AddLine(ImVec2(center.x, center.y - r * 0.6f), ImVec2(center.x, center.y + r * 0.7f), col, 1.2f);
+                break;
+            }
+            case VectorIconType::Brush: {
+                dl->AddLine(ImVec2(center.x + r * 0.6f, center.y - r * 0.6f), ImVec2(center.x - r * 0.1f, center.y + r * 0.1f), col, 2.0f);
+                dl->AddTriangleFilled(ImVec2(center.x - r * 0.4f, center.y + r * 0.2f), ImVec2(center.x - r * 0.1f, center.y + r * 0.5f), ImVec2(center.x - r * 0.6f, center.y + r * 0.7f), col);
+                break;
+            }
+            case VectorIconType::Gear: {
+                dl->AddCircle(center, r * 0.45f, col, 12, 1.5f);
+                for (int i = 0; i < 6; ++i) {
+                    float a = i * 1.047197f;
+                    dl->AddLine(
+                        ImVec2(center.x + cosf(a) * r * 0.45f, center.y + sinf(a) * r * 0.45f),
+                        ImVec2(center.x + cosf(a) * r * 0.85f, center.y + sinf(a) * r * 0.85f),
+                        col, 2.0f
+                    );
+                }
                 break;
             }
         }
@@ -2643,29 +2693,112 @@ namespace engine::renderer {
             }
             ImGui::SameLine(0.0f, 6.0f * s_uiScale);
 
-            // Green WS status badge matching Image B
+            // Green WS status badge matching Image 4
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.04f, 0.24f, 0.15f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.10f, 0.72f, 0.42f, 0.65f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.32f, 0.96f, 0.62f, 1.0f));
-            ImGui::Button("  WS: 9000 (OK) ", ImVec2(0, btnH));
+            if (ImGui::Button("  WS: 9000 (OK) ", ImVec2(0, btnH))) {
+#ifdef _WIN32
+                std::system("start http://127.0.0.1:9000");
+#endif
+            }
             ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Polaczenie WebSocket aktywne (port 9000). Kliknij, aby otworzyc Studio w przegladarce.");
+
+            ImGui::SameLine(0.0f, 6.0f * s_uiScale);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.44f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.08f, 0.52f, 0.98f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            if (ImGui::Button(" [>] Web Studio (1:1) ", ImVec2(0, btnH))) {
+#ifdef _WIN32
+                std::system("start http://127.0.0.1:9000");
+#endif
+            }
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Otworz identyczna powloke React / Web Studio (1:1 pixel-for-pixel)");
 
             ImGui::End();
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
             // ══════════════════════════════════════════════════════════════════════
-            // 4. LEFT PANEL: PLACE ACTORS (Exact Image B Palette + Icon Rail)
+            // 4A. FAR-LEFT TOOL DOCK (Exact Image B & UE5 Outer Mode Rail)
             // ══════════════════════════════════════════════════════════════════════
+            float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (42.0f * s_uiScale) : 0.0f;
             if (!s_immersivePlay && s_showPlaceActors) {
                 ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(leftPanelW, contentH), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(toolDockW, contentH), ImGuiCond_Always);
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.038f, 0.038f, 0.055f, 1.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f * s_uiScale, 6.0f * s_uiScale));
+                ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+                static int s_activeToolMode = 1; // 0: Select, 1: Place Actors, 2: Landscape, 3: Foliage, 4: Paint, 5: Fracture, 6: Animation
+                struct ToolDockItem { VectorIconType icon; const char* tooltip; };
+                const ToolDockItem dockItems[7] = {
+                    { VectorIconType::Pointer,   "Selection Mode (Q)" },
+                    { VectorIconType::Cube,      "Place Actors Mode (1)" },
+                    { VectorIconType::Mountain,  "Landscape Tool (2)" },
+                    { VectorIconType::Leaf,      "Foliage Foliage Mode (3)" },
+                    { VectorIconType::Brush,     "Mesh Paint Mode (4)" },
+                    { VectorIconType::Shapes,    "Fracture & Destruction (5)" },
+                    { VectorIconType::Character, "Animation Sequence (6)" }
+                };
+
+                float itemSz = 32.0f * s_uiScale;
+                for (int i = 0; i < 7; ++i) {
+                    ImGui::PushID(100 + i);
+                    bool active = (s_activeToolMode == i);
+                    ImVec2 p = ImGui::GetCursorScreenPos();
+                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.000f, 0.440f, 0.950f, 1.0f) : ImVec4(0.050f, 0.050f, 0.075f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.080f, 0.500f, 0.980f, 1.0f));
+                    if (ImGui::Button("##DockToolBtn", ImVec2(itemSz, itemSz))) {
+                        s_activeToolMode = i;
+                    }
+                    ImGui::PopStyleColor(2);
+                    drawVectorIcon(
+                        ImGui::GetWindowDrawList(),
+                        ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f),
+                        7.0f * s_uiScale,
+                        dockItems[i].icon,
+                        active ? IM_COL32(255, 255, 255, 255) : IM_COL32(148, 163, 184, 230)
+                    );
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", dockItems[i].tooltip);
+                    ImGui::PopID();
+                    ImGui::Spacing();
+                }
+
+                // Bottom Settings Gear Icon
+                float bottomGearY = contentH - itemSz - 12.0f * s_uiScale;
+                if (ImGui::GetCursorPosY() < bottomGearY) {
+                    ImGui::SetCursorPosY(bottomGearY);
+                }
+                ImVec2 gp = ImGui::GetCursorScreenPos();
+                if (ImGui::Button("##SettingsGearBtn", ImVec2(itemSz, itemSz))) {
+                    s_detailsTab = 1;
+                    s_showDetails = true;
+                }
+                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gp.x + itemSz * 0.5f, gp.y + itemSz * 0.5f), 6.5f * s_uiScale, VectorIconType::Gear, IM_COL32(148, 163, 184, 220));
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("World & Project Settings");
+
+                ImGui::End();
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
+            }
+
+            // ══════════════════════════════════════════════════════════════════════
+            // 4B. LEFT PANEL: PLACE ACTORS PALETTE (Offset by Far-Left Tool Dock)
+            // ══════════════════════════════════════════════════════════════════════
+            if (!s_immersivePlay && s_showPlaceActors) {
+                float placePanelX = toolDockW;
+                float placePanelW = leftPanelW - toolDockW;
+                ImGui::SetNextWindowPos(ImVec2(placePanelX, topTotalH), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
                 // Clean single header: Place Actors | PALETTE
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
-                ImGui::SameLine(leftPanelW - 64.0f * s_uiScale);
+                ImGui::SameLine(placePanelW - 64.0f * s_uiScale);
                 ImGui::TextDisabled("PALETTE");
 
                 static char classSearch[64] = "";
@@ -2674,53 +2807,40 @@ namespace engine::renderer {
                 ImGui::Separator();
 
                 ImGui::Columns(2, "PlaceActorsRailCols", false);
-                float railW = 36.0f * s_uiScale;
+                float railW = 56.0f * s_uiScale;
                 ImGui::SetColumnWidth(0, railW);
 
-                // Vertical Icon Rail matching Image B
-                struct CatRailItem { VectorIconType icon; const char* tooltip; };
-                const CatRailItem railItems[7] = {
-                    { VectorIconType::Star,     "Favorites" },
-                    { VectorIconType::Clock,    "Recently Placed" },
-                    { VectorIconType::Cube,     "Basic" },
-                    { VectorIconType::Light,    "Lights" },
-                    { VectorIconType::Shapes,   "Shapes" },
-                    { VectorIconType::Sparkles, "Visual Effects" },
-                    { VectorIconType::Globe,    "Props & Volumes" }
-                };
-
-                for (int i = 0; i < 7; ++i) {
+                // Vertical Category Rail matching Image 4
+                const char* catRailNames[9] = { "Fav", "Recent", "Basic", "Lights", "Shapes", "Cinematic", "VFX", "Volumes", "All" };
+                for (int i = 0; i < 9; ++i) {
                     ImGui::PushID(i);
                     bool active = (s_placeActorCategory == i);
-                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.47f, 0.83f, 1.0f) : ImVec4(0.06f, 0.06f, 0.09f, 1.0f));
-                    ImVec2 bPos = ImGui::GetCursorScreenPos();
-                    float bSz = 26.0f * s_uiScale;
-                    if (ImGui::Button("##RailIconBtn", ImVec2(bSz, bSz))) {
+                    float tabH = 22.0f * s_uiScale;
+                    if (active) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.000f, 0.440f, 0.950f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.055f, 0.055f, 0.086f, 0.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.58f, 0.68f, 1.0f));
+                    }
+                    if (ImGui::Button(catRailNames[i], ImVec2(railW - 6.0f * s_uiScale, tabH))) {
                         s_placeActorCategory = i;
                     }
-                    ImGui::PopStyleColor();
-                    drawVectorIcon(
-                        ImGui::GetWindowDrawList(),
-                        ImVec2(bPos.x + bSz * 0.5f, bPos.y + bSz * 0.5f),
-                        6.0f * s_uiScale,
-                        railItems[i].icon,
-                        active ? IM_COL32(255, 255, 255, 255) : IM_COL32(140, 150, 175, 220)
-                    );
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", railItems[i].tooltip);
+                    ImGui::PopStyleColor(2);
                     ImGui::PopID();
                 }
 
                 ImGui::NextColumn();
 
-                const char* catHeaders[7] = { "FAVORITES", "RECENT", "BASIC", "LIGHTS", "SHAPES", "VFX", "PROPS" };
-                ImGui::TextDisabled("%s", catHeaders[s_placeActorCategory]);
+                const char* catHeaders[9] = { "FAVORITES", "RECENT", "BASIC", "LIGHTS", "SHAPES", "CINEMATIC", "VFX", "VOLUMES", "ALL" };
+                ImGui::TextColored(ImVec4(0.85f, 0.88f, 0.95f, 1.0f), "%s", catHeaders[s_placeActorCategory]);
                 if (s_placeActorCategory == 2) {
-                    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 20.0f * s_uiScale);
+                    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 22.0f * s_uiScale);
                     ImGui::TextDisabled("(7)");
                 }
 
                 auto spawnCard = [&](const char* title, const char* desc, int spawnType, int catIdx, VectorIconType iconType, ImU32 iconCol) {
-                    if (s_placeActorCategory != catIdx && s_placeActorCategory != 0 && s_placeActorCategory != 1) return;
+                    if (s_placeActorCategory != catIdx && s_placeActorCategory != 0 && s_placeActorCategory != 1 && s_placeActorCategory != 8) return;
                     if (classSearch[0] != '\0') {
                         std::string tLower = title, sLower = classSearch;
                         std::transform(tLower.begin(), tLower.end(), tLower.begin(), ::tolower);
@@ -2729,30 +2849,41 @@ namespace engine::renderer {
                     }
 
                     ImGui::PushID(title);
-                    float cardH = 44.0f * s_uiScale;
-                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.078f, 0.078f, 0.115f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.145f, 0.145f, 0.205f, 1.0f));
-                    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f * s_uiScale, 5.0f * s_uiScale));
+                    float cardH = 46.0f * s_uiScale;
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.065f, 0.065f, 0.095f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.18f, 0.18f, 0.25f, 0.85f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f * s_uiScale, 4.0f * s_uiScale));
 
                     ImGui::BeginChild(title, ImVec2(0, cardH), true, ImGuiWindowFlags_NoScrollbar);
                     ImDrawList* cdl = ImGui::GetWindowDrawList();
                     ImVec2 cPos = ImGui::GetWindowPos();
-                    float iconCx = cPos.x + 15.0f * s_uiScale;
-                    float iconCy = cPos.y + cardH * 0.5f;
-                    drawVectorIcon(cdl, ImVec2(iconCx, iconCy), 6.5f * s_uiScale, iconType, iconCol);
+                    float w = ImGui::GetWindowWidth();
 
-                    ImGui::SetCursorPosX(28.0f * s_uiScale);
-                    ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "%s", title);
+                    // Left icon container (dark rounded square tile matching Image 4)
+                    float tileSz = 30.0f * s_uiScale;
+                    ImVec2 tileMin(cPos.x + 6.0f * s_uiScale, cPos.y + (cardH - tileSz) * 0.5f);
+                    ImVec2 tileMax(tileMin.x + tileSz, tileMin.y + tileSz);
+                    cdl->AddRectFilled(tileMin, tileMax, IM_COL32(18, 22, 30, 255), 5.0f * s_uiScale);
+                    cdl->AddRect(tileMin, tileMax, IM_COL32(40, 48, 64, 200), 5.0f * s_uiScale);
+                    drawVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
 
-                    // Grip dots on right matching Image B
-                    float dotsX = cPos.x + ImGui::GetWindowWidth() - 10.0f * s_uiScale;
+                    // Title & Description (crisp non-overlapping layout matching Image 4)
+                    float textX = 42.0f * s_uiScale;
+                    ImGui::SetCursorPos(ImVec2(textX, 5.0f * s_uiScale));
+                    ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", title);
+
+                    ImGui::SetCursorPos(ImVec2(textX, 22.0f * s_uiScale));
+                    ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.68f, 1.0f), "%s", desc);
+
+                    // Six drag handle dots (:::) on right matching Image 4
+                    float dotsX = cPos.x + w - 16.0f * s_uiScale;
+                    float dotsY = cPos.y + cardH * 0.5f;
                     for (int d = -1; d <= 1; ++d) {
-                        cdl->AddCircleFilled(ImVec2(dotsX, iconCy + d * 4.0f * s_uiScale), 1.2f * s_uiScale, IM_COL32(110, 120, 145, 180));
+                        cdl->AddCircleFilled(ImVec2(dotsX, dotsY + d * 5.0f * s_uiScale), 1.3f * s_uiScale, IM_COL32(100, 115, 140, 180));
+                        cdl->AddCircleFilled(ImVec2(dotsX + 4.5f * s_uiScale, dotsY + d * 5.0f * s_uiScale), 1.3f * s_uiScale, IM_COL32(100, 115, 140, 180));
                     }
 
-                    ImGui::SetCursorPosX(28.0f * s_uiScale);
-                    ImGui::TextDisabled("%s", desc);
                     ImGui::EndChild();
 
                     bool clicked = ImGui::IsItemClicked();
@@ -3407,24 +3538,28 @@ namespace engine::renderer {
 
                         ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
                         ImVec2 rowP = ImGui::GetCursorScreenPos();
+                        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.000f, 0.440f, 0.950f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.080f, 0.500f, 0.980f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.000f, 0.440f, 0.950f, 1.0f));
                         if (ImGui::Selectable("##ActorRowSel", isSelected, ImGuiSelectableFlags_SpanAllColumns, ImVec2(0, 20.0f * s_uiScale))) {
                             selectedEnt = entity;
                             if (engine) engine->setSelectedEntity(selectedEnt);
                         }
-                        drawVectorIcon(odl, ImVec2(rowP.x + 5.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.2f * s_uiScale, VectorIconType::Eye, IM_COL32(148, 163, 184, 200));
-                        drawVectorIcon(odl, ImVec2(rowP.x + 19.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.8f * s_uiScale, VectorIconType::Cube, IM_COL32(56, 189, 248, 255));
+                        ImGui::PopStyleColor(3);
+                        drawVectorIcon(odl, ImVec2(rowP.x + 5.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.2f * s_uiScale, VectorIconType::Eye, isSelected ? IM_COL32(255, 255, 255, 255) : IM_COL32(148, 163, 184, 200));
+                        drawVectorIcon(odl, ImVec2(rowP.x + 19.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.8f * s_uiScale, VectorIconType::Cube, isSelected ? IM_COL32(255, 255, 255, 255) : IM_COL32(56, 189, 248, 255));
 
                         std::string shortName = label.size() > 16 ? (label.substr(0, 14) + "..") : label;
-                        odl->AddText(ImVec2(rowP.x + 29.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), IM_COL32(230, 236, 248, 255), shortName.c_str());
+                        odl->AddText(ImVec2(rowP.x + 29.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), isSelected ? IM_COL32(255, 255, 255, 255) : IM_COL32(230, 236, 248, 255), shortName.c_str());
 
                         if (isDynamic) {
                             ImVec2 badgeMin(rowP.x + 130.0f * s_uiScale, rowP.y + 2.5f * s_uiScale);
                             ImVec2 badgeMax(rowP.x + 162.0f * s_uiScale, rowP.y + 17.0f * s_uiScale);
-                            odl->AddRectFilled(badgeMin, badgeMax, IM_COL32(120, 65, 10, 140), 3.0f);
+                            odl->AddRectFilled(badgeMin, badgeMax, IM_COL32(120, 65, 10, 180), 3.0f);
                             odl->AddText(ImVec2(badgeMin.x + 3.0f * s_uiScale, badgeMin.y + 0.5f * s_uiScale), IM_COL32(251, 191, 36, 255), "PHYS");
                         }
 
-                        odl->AddText(ImVec2(rowP.x + rightPanelW - 118.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), IM_COL32(115, 125, 148, 255), typeStr);
+                        odl->AddText(ImVec2(rowP.x + rightPanelW - 118.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), isSelected ? IM_COL32(220, 235, 255, 255) : IM_COL32(115, 125, 148, 255), typeStr);
                         ImGui::PopID();
                     }
                     ImGui::TreePop();
@@ -3480,25 +3615,54 @@ namespace engine::renderer {
 
                 if (s_detailsTab == 0) {
                     if (selectedEnt == entt::null || !registry.get().valid(selectedEnt)) {
-                        // Centered Empty State matching Image B
+                        // Centered Empty State matching Image 4
                         float availH = ImGui::GetContentRegionAvail().y;
-                        ImGui::Dummy(ImVec2(0, std::max(10.0f, availH * 0.24f)));
+                        ImGui::Dummy(ImVec2(0, std::max(12.0f, availH * 0.18f)));
 
                         float winW = ImGui::GetWindowWidth();
                         ImVec2 curScreen = ImGui::GetCursorScreenPos();
-                        drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(curScreen.x + winW * 0.5f, curScreen.y + 18.0f * s_uiScale), 18.0f * s_uiScale, VectorIconType::Cube, IM_COL32(95, 105, 130, 180));
-                        ImGui::Dummy(ImVec2(winW, 44.0f * s_uiScale));
+                        ImDrawList* ddl = ImGui::GetWindowDrawList();
+                        float cubeCx = curScreen.x + winW * 0.5f;
+                        float cubeCy = curScreen.y + 36.0f * s_uiScale;
+                        float r = 26.0f * s_uiScale;
+
+                        // Isometric 3D wireframe cube illustration matching Image 4
+                        ImVec2 vTop(cubeCx, cubeCy - r);
+                        ImVec2 vTR(cubeCx + r * 0.866f, cubeCy - r * 0.5f);
+                        ImVec2 vBR(cubeCx + r * 0.866f, cubeCy + r * 0.5f);
+                        ImVec2 vBot(cubeCx, cubeCy + r);
+                        ImVec2 vBL(cubeCx - r * 0.866f, cubeCy + r * 0.5f);
+                        ImVec2 vTL(cubeCx - r * 0.866f, cubeCy - r * 0.5f);
+                        ImVec2 vCen(cubeCx, cubeCy);
+
+                        ImU32 cubeCol = IM_COL32(0, 180, 255, 230);
+                        ImU32 innerCol = IM_COL32(0, 140, 220, 160);
+                        float th = 1.6f * s_uiScale;
+
+                        // Outer hexagon
+                        ddl->AddLine(vTop, vTR, cubeCol, th);
+                        ddl->AddLine(vTR, vBR, cubeCol, th);
+                        ddl->AddLine(vBR, vBot, cubeCol, th);
+                        ddl->AddLine(vBot, vBL, cubeCol, th);
+                        ddl->AddLine(vBL, vTL, cubeCol, th);
+                        ddl->AddLine(vTL, vTop, cubeCol, th);
+                        // Inner Y-edges
+                        ddl->AddLine(vCen, vTop, innerCol, th);
+                        ddl->AddLine(vCen, vBR, innerCol, th);
+                        ddl->AddLine(vCen, vBL, innerCol, th);
+
+                        ImGui::Dummy(ImVec2(winW, 78.0f * s_uiScale));
 
                         const char* emptyTitle = "Brak zaznaczonego aktora";
                         float tw = ImGui::CalcTextSize(emptyTitle).x;
                         ImGui::SetCursorPosX((winW - tw) * 0.5f);
-                        ImGui::TextColored(ImVec4(0.86f, 0.89f, 0.95f, 1.0f), "%s", emptyTitle);
+                        ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", emptyTitle);
 
                         ImGui::Spacing();
-                        ImGui::PushTextWrapPos(winW - 22.0f * s_uiScale);
-                        ImGui::SetCursorPosX(22.0f * s_uiScale);
-                        ImGui::TextColored(ImVec4(0.46f, 0.50f, 0.58f, 1.0f),
-                            "Kliknij dowolny obiekt w Viewporcie lub wybierz go z Outlinera, aby edytowac parametry Transform, Jolt Physics, Materialy i Skrypty.");
+                        ImGui::PushTextWrapPos(winW - 20.0f * s_uiScale);
+                        ImGui::SetCursorPosX(20.0f * s_uiScale);
+                        ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.68f, 1.0f),
+                            "Kliknij dowolny obiekt w Viewporcie lub wybierz go z Outlinera, aby edytowac parametry: transform, Jolt Physics, Materialy i Skrypty.");
                         ImGui::PopTextWrapPos();
                     } else {
                         std::string tagStr = "Actor";

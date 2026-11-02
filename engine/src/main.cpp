@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
     bool headless = false;
     bool standaloneGame = false;
     bool enableRemote = true;
+    bool launchStudio = false;
     std::string projectPath = "";
     std::string playPreset = "";
 
@@ -57,6 +58,8 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--headless") {
             headless = true;
+        } else if (arg == "--studio" || arg == "--web-ui") {
+            launchStudio = true;
         } else if (arg == "--no-remote" || arg == "--local-only") {
             enableRemote = false;
         } else if (arg == "--game" || arg == "--standalone") {
@@ -98,6 +101,12 @@ int main(int argc, char** argv) {
 
         logCrash("STEP 2: Exporting type definitions...");
         eng.exportTypeDefinitions();
+
+        if (launchStudio) {
+#ifdef _WIN32
+            std::system("start http://127.0.0.1:9000");
+#endif
+        }
         
         logCrash("STEP 3: Running engine...");
         eng.run();

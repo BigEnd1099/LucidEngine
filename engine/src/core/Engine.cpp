@@ -1875,11 +1875,11 @@ function update(entities, dt, input, contacts) {
             // 7. Save Saved/Logs/Execution.log
             std::ofstream logFile(dir / "Saved" / "Logs" / "Execution.log", std::ios::app);
             if (logFile.is_open()) {
-                logFile << "LogInit: Lucid Engine 5.8 Project saved successfully at: " << folderPath << "\n";
+                logFile << "LogInit: Lucid Engine Project saved successfully at: " << folderPath << "\n";
                 logFile.close();
             }
 
-            core::Logger::info("Unreal Engine 5.8 project structure successfully saved to disk: " + folderPath);
+            core::Logger::info("Lucid Engine project structure successfully saved to disk: " + folderPath);
             return true;
         } catch (const std::exception& e) {
             core::Logger::error("Failed to save project to disk: " + std::string(e.what()));
