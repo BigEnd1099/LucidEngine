@@ -1792,49 +1792,49 @@ namespace engine::renderer {
         ImGuiStyle& style = ImGui::GetStyle();
         ImVec4* colors = style.Colors;
 
-        // Deep slate-charcoal palette matching App.tsx (#07070c / #0e0e16 / #101018)
-        colors[ImGuiCol_WindowBg]             = ImVec4(0.055f, 0.055f, 0.086f, 1.00f); // #0e0e16
-        colors[ImGuiCol_ChildBg]              = ImVec4(0.063f, 0.063f, 0.094f, 1.00f); // #101018
-        colors[ImGuiCol_PopupBg]              = ImVec4(0.070f, 0.070f, 0.105f, 0.98f); // #12121b
-        colors[ImGuiCol_Border]               = ImVec4(0.145f, 0.145f, 0.195f, 1.00f); // #252532
+        // High-contrast, modern Linear.app & UE5 theme matching Image 4
+        colors[ImGuiCol_WindowBg]             = ImVec4(0.051f, 0.067f, 0.090f, 1.00f); // #0d1117
+        colors[ImGuiCol_ChildBg]              = ImVec4(0.086f, 0.106f, 0.133f, 1.00f); // #161b22
+        colors[ImGuiCol_PopupBg]              = ImVec4(0.086f, 0.106f, 0.133f, 0.98f); // #161b22
+        colors[ImGuiCol_Border]               = ImVec4(0.188f, 0.212f, 0.239f, 1.00f); // #30363d
         colors[ImGuiCol_BorderShadow]         = ImVec4(0.000f, 0.000f, 0.000f, 0.00f);
 
-        colors[ImGuiCol_TitleBg]              = ImVec4(0.043f, 0.043f, 0.067f, 1.00f);
-        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.055f, 0.055f, 0.086f, 1.00f);
-        colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.043f, 0.043f, 0.067f, 0.75f);
-        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.055f, 0.055f, 0.055f, 1.00f); // #0e0e0e
+        colors[ImGuiCol_TitleBg]              = ImVec4(0.043f, 0.055f, 0.075f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.051f, 0.067f, 0.090f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.043f, 0.055f, 0.075f, 0.75f);
+        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.043f, 0.055f, 0.075f, 1.00f); // #0b0e13
 
-        colors[ImGuiCol_Text]                 = ImVec4(0.910f, 0.925f, 0.955f, 1.00f); // Slate-200
-        colors[ImGuiCol_TextDisabled]         = ImVec4(0.455f, 0.485f, 0.560f, 1.00f); // Slate-500
+        colors[ImGuiCol_Text]                 = ImVec4(0.945f, 0.960f, 0.980f, 1.00f); // High-contrast white (#f1f5f9)
+        colors[ImGuiCol_TextDisabled]         = ImVec4(0.580f, 0.635f, 0.720f, 1.00f); // Slate-400 (#94a3b8)
 
-        colors[ImGuiCol_FrameBg]              = ImVec4(0.045f, 0.045f, 0.070f, 1.00f); // #0b0b12
-        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.090f, 0.090f, 0.135f, 1.00f);
-        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.115f, 0.115f, 0.175f, 1.00f);
+        colors[ImGuiCol_FrameBg]              = ImVec4(0.086f, 0.106f, 0.133f, 1.00f); // #161b22
+        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.129f, 0.149f, 0.176f, 1.00f); // #21262d
+        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
 
-        colors[ImGuiCol_Button]               = ImVec4(0.094f, 0.094f, 0.133f, 1.00f); // #181822
-        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.145f, 0.145f, 0.200f, 1.00f);
-        colors[ImGuiCol_ButtonActive]         = ImVec4(0.000f, 0.470f, 0.831f, 1.00f); // #0078d4
+        colors[ImGuiCol_Button]               = ImVec4(0.129f, 0.149f, 0.176f, 1.00f); // #21262d
+        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f); // #30363d
+        colors[ImGuiCol_ButtonActive]         = ImVec4(0.000f, 0.440f, 0.950f, 1.00f); // Electric Blue #0070f3
 
-        colors[ImGuiCol_Header]               = ImVec4(0.000f, 0.470f, 0.831f, 0.45f);
-        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.000f, 0.520f, 0.920f, 0.65f);
-        colors[ImGuiCol_HeaderActive]         = ImVec4(0.000f, 0.470f, 0.831f, 0.85f);
+        colors[ImGuiCol_Header]               = ImVec4(0.000f, 0.440f, 0.950f, 0.50f);
+        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.000f, 0.440f, 0.950f, 0.75f);
+        colors[ImGuiCol_HeaderActive]         = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
 
-        colors[ImGuiCol_Tab]                  = ImVec4(0.055f, 0.055f, 0.086f, 1.00f);
-        colors[ImGuiCol_TabHovered]           = ImVec4(0.115f, 0.115f, 0.165f, 1.00f);
-        colors[ImGuiCol_TabActive]            = ImVec4(0.094f, 0.094f, 0.133f, 1.00f);
-        colors[ImGuiCol_TabUnfocused]         = ImVec4(0.045f, 0.045f, 0.070f, 1.00f);
-        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.075f, 0.075f, 0.110f, 1.00f);
+        colors[ImGuiCol_Tab]                  = ImVec4(0.051f, 0.067f, 0.090f, 1.00f);
+        colors[ImGuiCol_TabHovered]           = ImVec4(0.129f, 0.149f, 0.176f, 1.00f);
+        colors[ImGuiCol_TabActive]            = ImVec4(0.086f, 0.106f, 0.133f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]         = ImVec4(0.043f, 0.055f, 0.075f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.065f, 0.080f, 0.105f, 1.00f);
 
-        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.045f, 0.045f, 0.070f, 0.50f);
-        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.165f, 0.165f, 0.220f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.230f, 0.230f, 0.300f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
-        colors[ImGuiCol_CheckMark]            = ImVec4(0.000f, 0.750f, 1.000f, 1.00f);
-        colors[ImGuiCol_SliderGrab]           = ImVec4(0.000f, 0.600f, 0.950f, 1.00f);
-        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.150f, 0.750f, 1.000f, 1.00f);
-        colors[ImGuiCol_Separator]            = ImVec4(0.145f, 0.145f, 0.195f, 1.00f);
-        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.000f, 0.470f, 0.831f, 0.78f);
-        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.000f, 0.470f, 0.831f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.051f, 0.067f, 0.090f, 0.50f);
+        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.250f, 0.280f, 0.320f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
+        colors[ImGuiCol_CheckMark]            = ImVec4(0.000f, 0.850f, 1.000f, 1.00f);
+        colors[ImGuiCol_SliderGrab]           = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.200f, 0.650f, 1.000f, 1.00f);
+        colors[ImGuiCol_Separator]            = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
+        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.000f, 0.440f, 0.950f, 0.78f);
+        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
 
         style.WindowRounding    = 0.0f;
         style.ChildRounding     = 6.0f;
@@ -1886,8 +1886,8 @@ namespace engine::renderer {
                 ImFontConfig config;
                 config.OversampleH = 3;
                 config.OversampleV = 2;
-                config.RasterizerMultiply = 1.15f;
-                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f, &config, glyphRanges);
+                config.RasterizerMultiply = 1.25f;
+                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 18.5f, &config, glyphRanges);
                 if (loadedFont) {
                     engine::core::Logger::info("Loaded crisp TrueType UI font: " + path);
                     break;
@@ -2284,8 +2284,17 @@ namespace engine::renderer {
         float screenW = mainVp->Size.x;
         float screenH = mainVp->Size.y;
 
-        float autoScale = std::clamp(std::min(screenW / 1920.0f, screenH / 1080.0f), 0.70f, 2.50f);
-        float s_uiScale = autoScale * m_uiScale;
+        float dpiScale = 1.0f;
+#ifdef USE_GLFW
+        if (m_context && m_context->getWindow()) {
+            float xsc = 1.0f, ysc = 1.0f;
+            glfwGetWindowContentScale(m_context->getWindow(), &xsc, &ysc);
+            dpiScale = std::max(1.0f, std::max(xsc, ysc));
+        }
+#endif
+        float baseScale = std::clamp(std::min(screenW / 1920.0f, screenH / 1080.0f), 0.85f, 2.50f);
+        // Generous scaling matching 1080p/1440p browser zoom
+        float s_uiScale = baseScale * dpiScale * m_uiScale * 1.15f;
         ImGui::GetIO().FontGlobalScale = 1.0f;
 
         if (m_standaloneGameMode) {
@@ -2305,7 +2314,7 @@ namespace engine::renderer {
             ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  |  %s", st.c_str());
             ImGui::End();
         } else {
-            // ── Layout metrics matching App.tsx (Image B) ────────────────────────
+            // ── Layout metrics matching App.tsx (Image 4 / UE5 proportions) ──────
             static bool s_immersivePlay = false;
             static bool s_showPlaceActors = true;
             static bool s_showOutliner = true;
@@ -2319,18 +2328,18 @@ namespace engine::renderer {
                 s_immersivePlay = !s_immersivePlay;
             }
 
-            float topTitleBarH = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
-            float topLevelTabsH = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
-            float topToolbarH = 38.0f * s_uiScale;
+            float topTitleBarH = s_immersivePlay ? 0.0f : (34.0f * s_uiScale);
+            float topLevelTabsH = s_immersivePlay ? 0.0f : (32.0f * s_uiScale);
+            float topToolbarH = 46.0f * s_uiScale;
             float topTotalH = topTitleBarH + topLevelTabsH + topToolbarH;
 
-            float bottomStatusH = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
-            float drawerH = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? std::min(220.0f * s_uiScale, screenH * 0.38f) : 0.0f;
+            float bottomStatusH = s_immersivePlay ? 0.0f : (34.0f * s_uiScale);
+            float drawerH = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? std::min(240.0f * s_uiScale, screenH * 0.38f) : 0.0f;
             float bottomTotalH = bottomStatusH + drawerH;
 
             float contentH = std::max(180.0f, screenH - topTotalH - bottomTotalH);
-            float leftPanelW = (!s_immersivePlay && s_showPlaceActors) ? std::min(256.0f * s_uiScale, screenW * 0.28f) : 0.0f;
-            float rightPanelW = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? std::min(320.0f * s_uiScale, screenW * 0.32f) : 0.0f;
+            float leftPanelW = (!s_immersivePlay && s_showPlaceActors) ? std::min(340.0f * s_uiScale, screenW * 0.35f) : 0.0f;
+            float rightPanelW = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? std::min(380.0f * s_uiScale, screenW * 0.36f) : 0.0f;
             float centerViewportW = std::max(200.0f, screenW - leftPanelW - rightPanelW);
 
             static entt::entity selectedEnt = entt::null;
@@ -2722,14 +2731,14 @@ namespace engine::renderer {
             ImGui::PopStyleVar();
 
             // ══════════════════════════════════════════════════════════════════════
-            // 4A. FAR-LEFT TOOL DOCK (Exact Image B & UE5 Outer Mode Rail)
+            // 4A. FAR-LEFT TOOL DOCK (Exact Image 4 & UE5 Outer Mode Rail)
             // ══════════════════════════════════════════════════════════════════════
-            float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (42.0f * s_uiScale) : 0.0f;
+            float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (46.0f * s_uiScale) : 0.0f;
             if (!s_immersivePlay && s_showPlaceActors) {
                 ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(toolDockW, contentH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.038f, 0.038f, 0.055f, 1.0f));
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f * s_uiScale, 6.0f * s_uiScale));
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.055f, 0.075f, 1.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * s_uiScale, 8.0f * s_uiScale));
                 ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
                 static int s_activeToolMode = 1; // 0: Select, 1: Place Actors, 2: Landscape, 3: Foliage, 4: Paint, 5: Fracture, 6: Animation
@@ -2744,12 +2753,12 @@ namespace engine::renderer {
                     { VectorIconType::Character, "Animation Sequence (6)" }
                 };
 
-                float itemSz = 32.0f * s_uiScale;
+                float itemSz = 36.0f * s_uiScale;
                 for (int i = 0; i < 7; ++i) {
                     ImGui::PushID(100 + i);
                     bool active = (s_activeToolMode == i);
                     ImVec2 p = ImGui::GetCursorScreenPos();
-                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.000f, 0.440f, 0.950f, 1.0f) : ImVec4(0.050f, 0.050f, 0.075f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.000f, 0.440f, 0.950f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.080f, 0.500f, 0.980f, 1.0f));
                     if (ImGui::Button("##DockToolBtn", ImVec2(itemSz, itemSz))) {
                         s_activeToolMode = i;
@@ -2758,7 +2767,7 @@ namespace engine::renderer {
                     drawVectorIcon(
                         ImGui::GetWindowDrawList(),
                         ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f),
-                        7.0f * s_uiScale,
+                        8.0f * s_uiScale,
                         dockItems[i].icon,
                         active ? IM_COL32(255, 255, 255, 255) : IM_COL32(148, 163, 184, 230)
                     );
@@ -2777,7 +2786,7 @@ namespace engine::renderer {
                     s_detailsTab = 1;
                     s_showDetails = true;
                 }
-                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gp.x + itemSz * 0.5f, gp.y + itemSz * 0.5f), 6.5f * s_uiScale, VectorIconType::Gear, IM_COL32(148, 163, 184, 220));
+                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gp.x + itemSz * 0.5f, gp.y + itemSz * 0.5f), 7.5f * s_uiScale, VectorIconType::Gear, IM_COL32(148, 163, 184, 220));
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("World & Project Settings");
 
                 ImGui::End();
@@ -2793,12 +2802,12 @@ namespace engine::renderer {
                 float placePanelW = leftPanelW - toolDockW;
                 ImGui::SetNextWindowPos(ImVec2(placePanelX, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
                 // Clean single header: Place Actors | PALETTE
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
-                ImGui::SameLine(placePanelW - 64.0f * s_uiScale);
+                ImGui::SameLine(placePanelW - 74.0f * s_uiScale);
                 ImGui::TextDisabled("PALETTE");
 
                 static char classSearch[64] = "";
@@ -2807,7 +2816,7 @@ namespace engine::renderer {
                 ImGui::Separator();
 
                 ImGui::Columns(2, "PlaceActorsRailCols", false);
-                float railW = 56.0f * s_uiScale;
+                float railW = 68.0f * s_uiScale;
                 ImGui::SetColumnWidth(0, railW);
 
                 // Vertical Category Rail matching Image 4
@@ -2815,13 +2824,13 @@ namespace engine::renderer {
                 for (int i = 0; i < 9; ++i) {
                     ImGui::PushID(i);
                     bool active = (s_placeActorCategory == i);
-                    float tabH = 22.0f * s_uiScale;
+                    float tabH = 24.0f * s_uiScale;
                     if (active) {
                         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.000f, 0.440f, 0.950f, 1.0f));
                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
                     } else {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.055f, 0.055f, 0.086f, 0.0f));
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.58f, 0.68f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.086f, 0.106f, 0.133f, 0.5f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
                     }
                     if (ImGui::Button(catRailNames[i], ImVec2(railW - 6.0f * s_uiScale, tabH))) {
                         s_placeActorCategory = i;
@@ -2833,9 +2842,9 @@ namespace engine::renderer {
                 ImGui::NextColumn();
 
                 const char* catHeaders[9] = { "FAVORITES", "RECENT", "BASIC", "LIGHTS", "SHAPES", "CINEMATIC", "VFX", "VOLUMES", "ALL" };
-                ImGui::TextColored(ImVec4(0.85f, 0.88f, 0.95f, 1.0f), "%s", catHeaders[s_placeActorCategory]);
+                ImGui::TextColored(ImVec4(0.90f, 0.93f, 0.98f, 1.0f), "%s", catHeaders[s_placeActorCategory]);
                 if (s_placeActorCategory == 2) {
-                    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 22.0f * s_uiScale);
+                    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 24.0f * s_uiScale);
                     ImGui::TextDisabled("(7)");
                 }
 
@@ -2849,9 +2858,9 @@ namespace engine::renderer {
                     }
 
                     ImGui::PushID(title);
-                    float cardH = 46.0f * s_uiScale;
-                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.065f, 0.065f, 0.095f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.18f, 0.18f, 0.25f, 0.85f));
+                    float cardH = 50.0f * s_uiScale;
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.188f, 0.212f, 0.239f, 0.95f));
                     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f * s_uiScale, 4.0f * s_uiScale));
 
@@ -2861,20 +2870,20 @@ namespace engine::renderer {
                     float w = ImGui::GetWindowWidth();
 
                     // Left icon container (dark rounded square tile matching Image 4)
-                    float tileSz = 30.0f * s_uiScale;
+                    float tileSz = 34.0f * s_uiScale;
                     ImVec2 tileMin(cPos.x + 6.0f * s_uiScale, cPos.y + (cardH - tileSz) * 0.5f);
                     ImVec2 tileMax(tileMin.x + tileSz, tileMin.y + tileSz);
-                    cdl->AddRectFilled(tileMin, tileMax, IM_COL32(18, 22, 30, 255), 5.0f * s_uiScale);
-                    cdl->AddRect(tileMin, tileMax, IM_COL32(40, 48, 64, 200), 5.0f * s_uiScale);
-                    drawVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
+                    cdl->AddRectFilled(tileMin, tileMax, IM_COL32(18, 24, 34, 255), 5.0f * s_uiScale);
+                    cdl->AddRect(tileMin, tileMax, IM_COL32(48, 56, 72, 220), 5.0f * s_uiScale);
+                    drawVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 7.5f * s_uiScale, iconType, iconCol);
 
                     // Title & Description (crisp non-overlapping layout matching Image 4)
-                    float textX = 42.0f * s_uiScale;
-                    ImGui::SetCursorPos(ImVec2(textX, 5.0f * s_uiScale));
+                    float textX = 46.0f * s_uiScale;
+                    ImGui::SetCursorPos(ImVec2(textX, 6.0f * s_uiScale));
                     ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", title);
 
-                    ImGui::SetCursorPos(ImVec2(textX, 22.0f * s_uiScale));
-                    ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.68f, 1.0f), "%s", desc);
+                    ImGui::SetCursorPos(ImVec2(textX, 26.0f * s_uiScale));
+                    ImGui::TextColored(ImVec4(0.58f, 0.64f, 0.74f, 1.0f), "%s", desc);
 
                     // Six drag handle dots (:::) on right matching Image 4
                     float dotsX = cPos.x + w - 16.0f * s_uiScale;
@@ -3393,31 +3402,31 @@ namespace engine::renderer {
                 ImGui::PopStyleColor(2);
 
                 // ── Bottom-Center AI Game Creator Floating Bar (Matches App.tsx Glass Bar)
-                float promptBarW = std::min(560.0f * s_uiScale, viewportPanelSize.x * 0.72f);
-                ImGui::SetCursorPos(ImVec2((viewportPanelSize.x - promptBarW) * 0.5f, viewportPanelSize.y - 44.0f * s_uiScale));
-                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.063f, 0.063f, 0.098f, 0.94f));
-                ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.05f, 0.58f, 0.78f, 0.50f));
-                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f * s_uiScale, 5.0f * s_uiScale));
-                ImGui::BeginChild("AIPromptPill", ImVec2(promptBarW, 36.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                float promptBarW = std::min(620.0f * s_uiScale, viewportPanelSize.x * 0.85f);
+                ImGui::SetCursorPos(ImVec2((viewportPanelSize.x - promptBarW) * 0.5f, viewportPanelSize.y - 50.0f * s_uiScale));
+                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.051f, 0.067f, 0.090f, 0.94f));
+                ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.00f, 0.55f, 0.85f, 0.65f));
+                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 18.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * s_uiScale, 6.0f * s_uiScale));
+                ImGui::BeginChild("AIPromptPill", ImVec2(promptBarW, 40.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
 
                 ImVec2 wPos = ImGui::GetCursorScreenPos();
-                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(wPos.x + 8.0f * s_uiScale, wPos.y + 12.0f * s_uiScale), 6.0f * s_uiScale, VectorIconType::Wand, IM_COL32(34, 211, 238, 255));
-                ImGui::Dummy(ImVec2(18.0f * s_uiScale, 20.0f * s_uiScale));
+                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(wPos.x + 10.0f * s_uiScale, wPos.y + 14.0f * s_uiScale), 7.5f * s_uiScale, VectorIconType::Wand, IM_COL32(34, 211, 238, 255));
+                ImGui::Dummy(ImVec2(22.0f * s_uiScale, 24.0f * s_uiScale));
                 ImGui::SameLine();
 
                 static char aiPromptNative[256] = "";
-                ImGui::SetNextItemWidth(promptBarW - 125.0f * s_uiScale);
+                ImGui::SetNextItemWidth(promptBarW - 145.0f * s_uiScale);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 bool submitPrompt = ImGui::InputTextWithHint("##AIPromptNative", "Napisz do AI co chcesz stworzyc (np. 'Wyscigi aut', 'Arkanoid', 'Uklad Planet')...", aiPromptNative, sizeof(aiPromptNative), ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::PopStyleColor(2);
                 ImGui::SameLine();
 
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.58f, 0.88f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.12f, 0.68f, 0.96f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.44f, 0.95f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.08f, 0.52f, 0.98f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                if (ImGui::Button(" Generuj ", ImVec2(82.0f * s_uiScale, 24.0f * s_uiScale)) || submitPrompt) {
+                if (ImGui::Button(" Generuj ", ImVec2(96.0f * s_uiScale, 28.0f * s_uiScale)) || submitPrompt) {
                     std::string pStr = aiPromptNative;
                     aiPromptNative[0] = '\0';
                     std::transform(pStr.begin(), pStr.end(), pStr.begin(), ::tolower);
@@ -3617,14 +3626,14 @@ namespace engine::renderer {
                     if (selectedEnt == entt::null || !registry.get().valid(selectedEnt)) {
                         // Centered Empty State matching Image 4
                         float availH = ImGui::GetContentRegionAvail().y;
-                        ImGui::Dummy(ImVec2(0, std::max(12.0f, availH * 0.18f)));
+                        ImGui::Dummy(ImVec2(0, std::max(12.0f, availH * 0.15f)));
 
                         float winW = ImGui::GetWindowWidth();
                         ImVec2 curScreen = ImGui::GetCursorScreenPos();
                         ImDrawList* ddl = ImGui::GetWindowDrawList();
                         float cubeCx = curScreen.x + winW * 0.5f;
-                        float cubeCy = curScreen.y + 36.0f * s_uiScale;
-                        float r = 26.0f * s_uiScale;
+                        float cubeCy = curScreen.y + 45.0f * s_uiScale;
+                        float r = 36.0f * s_uiScale;
 
                         // Isometric 3D wireframe cube illustration matching Image 4
                         ImVec2 vTop(cubeCx, cubeCy - r);
@@ -3637,7 +3646,7 @@ namespace engine::renderer {
 
                         ImU32 cubeCol = IM_COL32(0, 180, 255, 230);
                         ImU32 innerCol = IM_COL32(0, 140, 220, 160);
-                        float th = 1.6f * s_uiScale;
+                        float th = 1.8f * s_uiScale;
 
                         // Outer hexagon
                         ddl->AddLine(vTop, vTR, cubeCol, th);
@@ -3651,7 +3660,7 @@ namespace engine::renderer {
                         ddl->AddLine(vCen, vBR, innerCol, th);
                         ddl->AddLine(vCen, vBL, innerCol, th);
 
-                        ImGui::Dummy(ImVec2(winW, 78.0f * s_uiScale));
+                        ImGui::Dummy(ImVec2(winW, 95.0f * s_uiScale));
 
                         const char* emptyTitle = "Brak zaznaczonego aktora";
                         float tw = ImGui::CalcTextSize(emptyTitle).x;

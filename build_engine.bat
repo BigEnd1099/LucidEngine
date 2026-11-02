@@ -86,8 +86,8 @@ echo Plik wykonywalny: "%~dp0!EXE_PATH!"
 
 :: 8. Opcjonalne automatyczne uruchomienie po fladze run / --run
 if "!DO_RUN!"=="1" (
-    echo [INFO] Automatyczne uruchamianie silnika [!EXE_PATH!]...
-    start "" "%~dp0!EXE_PATH!"
+    echo [INFO] Automatyczne uruchamianie silnika [!EXE_PATH!] z powłoką 1:1 Studio...
+    start "" "%~dp0!EXE_PATH!" --studio
     exit /b 0
 )
 

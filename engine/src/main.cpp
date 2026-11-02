@@ -104,7 +104,15 @@ int main(int argc, char** argv) {
 
         if (launchStudio) {
 #ifdef _WIN32
-            std::system("start http://127.0.0.1:9000");
+            const char* chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+            const char* edgePath = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+            if (std::filesystem::exists(chromePath)) {
+                std::system("start \"\" \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
+            } else if (std::filesystem::exists(edgePath)) {
+                std::system("start \"\" \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
+            } else {
+                std::system("start http://127.0.0.1:9000");
+            }
 #endif
         }
         
