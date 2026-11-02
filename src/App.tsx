@@ -33,6 +33,9 @@ import { SoundCueStudio } from './components/SoundCueStudio';
 import { WidgetStudio } from './components/WidgetStudio';
 import { ProjectModal } from './components/ProjectModal';
 import { UnrealCoordinateGizmo } from './components/UnrealCoordinateGizmo';
+import { createUiTransport } from './transport/TransportFactory';
+import type { UiTransport } from './transport/UiTransport';
+import { OFF_CPU_FRAME_MS, OFF_ACTIVE_ENTITIES } from './transport/TelemetrySnapshot';
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,6 +58,8 @@ export default function App() {
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
 
   // Engine state
+  const transportRef = useRef<UiTransport | null>(null);
+  const [transportMode, setTransportMode] = useState<'native-ipc' | 'remote-ws'>('remote-ws');
   const [connected, setConnected] = useState(false);
   const [simulating, setSimulating] = useState(false); // physics PAUSED by default in edit mode
   const [entities, setEntities] = useState<EntityData[]>([]);
@@ -1100,10 +1105,23 @@ export default function App() {
     }
   }, [entities, selectedEntityId]);
 
-  // ── WebSocket connect & polling ──────────────────────────────────────────
+  // ── Dual-Transport UI Shell & WebSocket connect ──────────────────────────
   useEffect(() => {
     let reconnectTimeout: any;
     let isDisposed = false;
+
+    // Initialize Dual-Transport UI Shell (Native Shared Memory or Remote WebSocket)
+    const transport = createUiTransport();
+    transportRef.current = transport;
+    setTransportMode(transport.mode);
+    document.documentElement.setAttribute('data-transport-mode', transport.mode);
+
+    const unsubState = transport.subscribeState((view: DataView) => {
+      // Continuous binary telemetry (zero GC, no JSON serialization)
+      const cpuMs = view.getFloat32(OFF_CPU_FRAME_MS, true);
+      const activeEnts = view.getUint32(OFF_ACTIVE_ENTITIES, true);
+      (window as any).__lucidTelemetry = { cpuMs, activeEntities: activeEnts };
+    });
 
     const connect = () => {
       if (isDisposed) return;
@@ -1187,6 +1205,8 @@ export default function App() {
     return () => {
       isDisposed = true;
       clearTimeout(reconnectTimeout);
+      unsubState();
+      transport.dispose();
       const ws = wsRef.current;
       if (ws) {
         if (ws.readyState === WebSocket.OPEN) {
@@ -2440,6 +2460,10 @@ globalThis.update = function(entities, dt, input, contacts) {
             </span>
             <span className="text-slate-600">•</span>
             <span className="text-indigo-400">UI: {Math.round(effectiveUiScale * 100)}%</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-purple-400">
+              {transportMode === 'native-ipc' ? '⚡ SharedMem (Zero-GC)' : '🌐 Unified WS:9000'}
+            </span>
             <span className="text-slate-600">•</span>
             <span className="text-cyan-300">{viewMode === 'vulkan' ? `Vulkan: ${vulkanFps} FPS (${renderResolution.width}x${renderResolution.height} @ ${Math.round(resolutionScale * 100)}%)` : 'WebGL: 60 FPS'}</span>
           </div>

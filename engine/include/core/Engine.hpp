@@ -11,6 +11,9 @@
 
 #include "core/AssetManager.hpp"
 #include "network/WebSocketServer.hpp"
+#include "network/SharedStateRing.hpp"
+#include "network/MpscCommandQueue.hpp"
+#include "network/SinglePortUnifiedServer.hpp"
 #include "network/JsonRpcDispatcher.hpp"
 #include "script/QuickJSContext.hpp"
 #include "renderer/VulkanContext.hpp"
@@ -50,7 +53,7 @@ namespace engine::core {
 
     class Engine {
     public:
-        Engine(int wsPort, bool headless);
+        Engine(int wsPort = 9000, bool headless = false, bool enableRemote = true);
         ~Engine();
 
         void run();
@@ -200,6 +203,11 @@ namespace engine::core {
         void queueSubTickInput(uint32_t buttonMask, float yaw, float pitch);
         nlohmann::json getReplicationDelta(uint32_t baselineTick);
 
+        // Dual-Transport UI Shell Accessors
+        network::SharedStateRingBuffer* getSharedStateRing() const { return m_sharedStateRing.get(); }
+        network::MpscCommandQueue* getMpscCommandQueue() const { return m_mpscCommandQueue.get(); }
+        network::SinglePortUnifiedServer* getUnifiedServer() const { return m_unifiedServer.get(); }
+
     private:
         void update(float dt);
         void render();
@@ -237,6 +245,9 @@ namespace engine::core {
         std::unique_ptr<ecs::Registry> m_registry;
         std::unique_ptr<script::QuickJSContext> m_scriptContext;
         std::unique_ptr<network::WebSocketServer> m_wsServer;
+        std::unique_ptr<network::SharedStateRingBuffer> m_sharedStateRing;
+        std::unique_ptr<network::MpscCommandQueue> m_mpscCommandQueue;
+        std::unique_ptr<network::SinglePortUnifiedServer> m_unifiedServer;
         std::unique_ptr<network::UdpAnimationServer> m_udpServer;
         std::unique_ptr<network::mcp::McpServer> m_mcpServer;
         

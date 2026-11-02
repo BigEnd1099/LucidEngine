@@ -12,6 +12,19 @@ try {
   }
 } catch (e) {}
 
+// Test 0: Binary Layout & Seqlock Parity Verification (Dual-Transport UI Shell)
+console.log('[0/13] Testowanie parzystości układu binarnego i Seqlock (Dual-Transport UI Shell)...');
+execSync('node tests/test_binary_layout.mjs', { stdio: 'inherit' });
+console.log('  ✅ Parzystość struktur C++ i TypeScript zweryfikowana pomyślnie.\n');
+
+console.log('[0b/13] Testowanie serwera pojedynczego portu (Dual-Transport Unified Server)...');
+execSync('node tests/test_dual_transport.mjs', { stdio: 'inherit' });
+console.log('  ✅ Dual-Transport Unified Server zweryfikowany pomyślnie.\n');
+
+console.log('[0c/13] Testowanie trybu czysto lokalnego bez otwierania portów (--no-remote)...');
+execSync('node tests/test_local_mode.mjs', { stdio: 'inherit' });
+console.log('  ✅ Tryb czysto lokalny zweryfikowany pomyślnie.\n');
+
 // 1. Start engine instance
 console.log('[1/4] Uruchamianie instancji Lucid Engine (Headless)...');
 const engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {

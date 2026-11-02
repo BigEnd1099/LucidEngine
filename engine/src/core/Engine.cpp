@@ -93,7 +93,7 @@ namespace engine::core {
         return fallback;
     }
 
-    Engine::Engine(int wsPort, bool headless) : m_headless(headless) {
+    Engine::Engine(int wsPort, bool headless, bool enableRemote) : m_headless(headless) {
         m_registry = std::make_unique<ecs::Registry>();
         m_scriptContext = std::make_unique<script::QuickJSContext>();
         m_scriptContext->init(this);
@@ -102,8 +102,10 @@ namespace engine::core {
             broadcastScriptError(type, msg, stack);
         });
         
-        m_wsServer = std::make_unique<network::WebSocketServer>(wsPort, m_commandQueue);
-        m_udpServer = std::make_unique<network::UdpAnimationServer>(9001, m_commandQueue);
+        m_sharedStateRing = std::make_unique<network::SharedStateRingBuffer>();
+        m_mpscCommandQueue = std::make_unique<network::MpscCommandQueue>();
+        if (enableRemote && wsPort > 0) { m_unifiedServer = std::make_unique<network::SinglePortUnifiedServer>(wsPort, *m_sharedStateRing, *m_mpscCommandQueue, m_commandQueue); } else { core::Logger::info("Pure Local Mode active (--no-remote): 0 network ports opened."); }
+        if (enableRemote && wsPort > 0) { m_udpServer = std::make_unique<network::UdpAnimationServer>(9001, m_commandQueue); }
         m_mcpServer = std::make_unique<network::mcp::McpServer>(this);
         
         m_physicsContext = std::make_unique<physics::PhysicsContext>();
@@ -136,13 +138,13 @@ namespace engine::core {
 
         m_networkThread = std::jthread([this]() {
             try {
-                m_wsServer->start();
-                m_udpServer->start();
+                if (m_unifiedServer) m_unifiedServer->start();
+                if (m_udpServer) m_udpServer->start();
                 while (m_running) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
-                m_udpServer->stop();
-                m_wsServer->stop();
+                if (m_udpServer) m_udpServer->stop();
+                if (m_unifiedServer) m_unifiedServer->stop();
             } catch (const std::exception& e) {
                 core::Logger::error(std::string("Network thread exception: ") + e.what());
             } catch (...) {
@@ -170,7 +172,7 @@ namespace engine::core {
     }
 
     void Engine::broadcastSimulationState() {
-        if (m_wsServer) {
+        if (m_unifiedServer) {
             nlohmann::json msg = {
                 {"jsonrpc", "2.0"},
                 {"method", "engine.onSimulationStateChanged"},
@@ -179,7 +181,7 @@ namespace engine::core {
                     {"simulating", !m_paused}
                 }}
             };
-            m_wsServer->sendToAll(msg.dump());
+            m_unifiedServer->broadcastTextMessage(msg.dump());
         }
     }
 
@@ -672,6 +674,21 @@ namespace engine::core {
                         core::Logger::error("Unknown command exception in queue");
                     }
                 }
+                // Dual-Transport: Process MPSC binary command queue
+                if (m_mpscCommandQueue) {
+                    std::vector<network::RpcCommandMessage> mpscCmds;
+                    m_mpscCommandQueue->dequeueAll(mpscCmds);
+                    for (const auto& cmd : mpscCmds) {
+                        if (cmd.command_id == 1) {
+                            bool paused = (cmd.payload_len > 0 && cmd.payload[0] != 0);
+                            if (paused) stopSimulation(); else playSimulation();
+                        } else if (cmd.command_id == 2) {
+                            std::string preset = (cmd.payload_len > 0) ? std::string(reinterpret_cast<const char*>(cmd.payload), strnlen(reinterpret_cast<const char*>(cmd.payload), cmd.payload_len)) : "empty";
+                            resetScene(preset);
+                        }
+                    }
+                }
+
                 auto current_now = std::chrono::high_resolution_clock::now();
                 float dt_real = std::chrono::duration<float>(current_now - lastTime).count();
                 lastTime = current_now;
@@ -680,6 +697,19 @@ namespace engine::core {
                 }
                 if (!m_headless) {
                     try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); }
+                }
+
+                // Dual-Transport: Publish authoritative TelemetrySnapshot to 32-slot Seqlock Ring Buffer
+                if (m_sharedStateRing) {
+                    float cpuMs = dt_real * 1000.0f;
+                    float audioDb = -6.0f;
+                    uint32_t flags = network::STATE_FLAG_NONE;
+                    if (!m_paused) flags |= network::STATE_FLAG_SIMULATING;
+                    else flags |= network::STATE_FLAG_PAUSED;
+                    if (m_unifiedServer && m_unifiedServer->isRunning()) flags |= network::STATE_FLAG_NET_ACTIVE;
+
+                    uint32_t entCount = m_registry ? static_cast<uint32_t>(m_registry->get().view<ecs::TransformComponent>().size()) : 0;
+                    m_sharedStateRing->publish(cpuMs, audioDb, flags, entCount);
                 }
 
                 if (m_headless || m_paused) {
@@ -1549,7 +1579,7 @@ function update(entities, dt, input, contacts) {
                 {"stackTrace", stack}
             }}
         };
-        m_wsServer->sendToAll(rpc.dump());
+        if (m_unifiedServer) m_unifiedServer->broadcastTextMessage(rpc.dump());
     }
 
     void Engine::broadcastSfx(const std::string& type, float volume) {
@@ -1575,7 +1605,7 @@ function update(entities, dt, input, contacts) {
             }
         }).detach();
 #endif
-        if (!m_wsServer) return;
+        if (!m_unifiedServer) return;
         nlohmann::json rpc = {
             {"jsonrpc", "2.0"},
             {"method", "engine.onPlaySfx"},
@@ -1584,11 +1614,11 @@ function update(entities, dt, input, contacts) {
                 {"volume", volume}
             }}
         };
-        m_wsServer->sendToAll(rpc.dump());
+        if (m_unifiedServer) m_unifiedServer->broadcastTextMessage(rpc.dump());
     }
 
     void Engine::broadcastCameraShake(float intensity, float duration) {
-        if (!m_wsServer) return;
+        if (!m_unifiedServer) return;
         nlohmann::json rpc = {
             {"jsonrpc", "2.0"},
             {"method", "engine.onCameraShake"},
@@ -1597,7 +1627,7 @@ function update(entities, dt, input, contacts) {
                 {"duration", duration}
             }}
         };
-        m_wsServer->sendToAll(rpc.dump());
+        if (m_unifiedServer) m_unifiedServer->broadcastTextMessage(rpc.dump());
     }
 
     uint32_t Engine::loadGlbFromBase64(const std::string& base64Str) {
@@ -1663,8 +1693,10 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::sendWsMessage(ix::WebSocket* client, const std::string& msg) {
-        if (m_wsServer) {
-            m_wsServer->sendToClient(client, msg);
+        if (m_unifiedServer) {
+            if (client && client->getReadyState() == ix::ReadyState::Open) {
+                try { client->sendText(msg); } catch (...) {}
+            }
         }
     }
 

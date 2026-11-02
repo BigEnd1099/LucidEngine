@@ -1857,6 +1857,8 @@ namespace engine::renderer {
 
     static void loadUnrealFont(ImGuiIO& io) {
         const std::vector<std::string> fontCandidates = {
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/segoeuib.ttf",
             "assets/fonts/Roboto-Medium.ttf",
             "engine/assets/fonts/Roboto-Medium.ttf",
             "../assets/fonts/Roboto-Medium.ttf",
@@ -1867,8 +1869,6 @@ namespace engine::renderer {
             "../public/fonts/Roboto-Medium.ttf",
             "../../public/fonts/Roboto-Medium.ttf",
             "dist/fonts/Roboto-Medium.ttf",
-            "C:/Windows/Fonts/segoeui.ttf",
-            "C:/Windows/Fonts/segoeuib.ttf",
             "C:/Windows/Fonts/arial.ttf"
         };
 
@@ -1884,10 +1884,10 @@ namespace engine::renderer {
         for (const auto& path : fontCandidates) {
             if (std::filesystem::exists(path)) {
                 ImFontConfig config;
-                config.OversampleH = 2;
+                config.OversampleH = 3;
                 config.OversampleV = 2;
-                config.RasterizerMultiply = 1.12f;
-                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f, &config, glyphRanges);
+                config.RasterizerMultiply = 1.15f;
+                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f, &config, glyphRanges);
                 if (loadedFont) {
                     engine::core::Logger::info("Loaded crisp TrueType UI font: " + path);
                     break;
@@ -2236,7 +2236,7 @@ namespace engine::renderer {
 
         float autoScale = std::clamp(std::min(screenW / 1920.0f, screenH / 1080.0f), 0.70f, 2.50f);
         float s_uiScale = autoScale * m_uiScale;
-        ImGui::GetIO().FontGlobalScale = s_uiScale * 0.72f;
+        ImGui::GetIO().FontGlobalScale = 1.0f;
 
         if (m_standaloneGameMode) {
             ImGui::SetNextWindowPos(ImVec2(24, 24), ImGuiCond_Always);
@@ -3336,7 +3336,7 @@ namespace engine::renderer {
                 ImGui::TextDisabled("TYPE");
                 ImGui::Separator();
 
-                ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, outlinerH - 96.0f * s_uiScale), false);
+                ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, -26.0f * s_uiScale), false);
                 ImDrawList* odl = ImGui::GetWindowDrawList();
 
                 // World Root Row matching Image B
@@ -3350,7 +3350,8 @@ namespace engine::renderer {
                 }
 
                 // Lighting Folder
-                if (ImGui::TreeNodeEx("##LightingFolder", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth, "    Lighting")) {
+                if (outlinerFilter[0] != '\0') ImGui::SetNextItemOpen(true);
+                if (ImGui::TreeNodeEx("##LightingFolder", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow, "    Lighting")) {
                     ImVec2 fp = ImGui::GetItemRectMin();
                     drawVectorIcon(odl, ImVec2(fp.x + 24.0f * s_uiScale, fp.y + 8.0f * s_uiScale), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
 
@@ -3381,7 +3382,8 @@ namespace engine::renderer {
                 }
 
                 // Actors & Geometry Folder with PHYS badges matching Image B
-                if (ImGui::TreeNodeEx("##ActorsFolder", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth, "    Actors & Geometry")) {
+                if (outlinerFilter[0] != '\0') ImGui::SetNextItemOpen(true);
+                if (ImGui::TreeNodeEx("##ActorsFolder", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow, "    Actors & Geometry")) {
                     ImVec2 fp = ImGui::GetItemRectMin();
                     drawVectorIcon(odl, ImVec2(fp.x + 24.0f * s_uiScale, fp.y + 8.0f * s_uiScale), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(34, 211, 238, 255));
 
@@ -3405,24 +3407,24 @@ namespace engine::renderer {
 
                         ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
                         ImVec2 rowP = ImGui::GetCursorScreenPos();
-                        if (ImGui::Selectable("##ActorRowSel", isSelected, ImGuiSelectableFlags_SpanAllColumns, ImVec2(0, 19.0f * s_uiScale))) {
+                        if (ImGui::Selectable("##ActorRowSel", isSelected, ImGuiSelectableFlags_SpanAllColumns, ImVec2(0, 20.0f * s_uiScale))) {
                             selectedEnt = entity;
                             if (engine) engine->setSelectedEntity(selectedEnt);
                         }
-                        drawVectorIcon(odl, ImVec2(rowP.x + 5.0f * s_uiScale, rowP.y + 9.5f * s_uiScale), 4.2f * s_uiScale, VectorIconType::Eye, IM_COL32(148, 163, 184, 200));
-                        drawVectorIcon(odl, ImVec2(rowP.x + 19.0f * s_uiScale, rowP.y + 9.5f * s_uiScale), 4.8f * s_uiScale, VectorIconType::Cube, IM_COL32(56, 189, 248, 255));
+                        drawVectorIcon(odl, ImVec2(rowP.x + 5.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.2f * s_uiScale, VectorIconType::Eye, IM_COL32(148, 163, 184, 200));
+                        drawVectorIcon(odl, ImVec2(rowP.x + 19.0f * s_uiScale, rowP.y + 10.0f * s_uiScale), 4.8f * s_uiScale, VectorIconType::Cube, IM_COL32(56, 189, 248, 255));
 
-                        std::string shortName = label.size() > 14 ? (label.substr(0, 12) + "..") : label;
-                        odl->AddText(ImVec2(rowP.x + 29.0f * s_uiScale, rowP.y + 2.0f * s_uiScale), IM_COL32(230, 236, 248, 255), shortName.c_str());
+                        std::string shortName = label.size() > 16 ? (label.substr(0, 14) + "..") : label;
+                        odl->AddText(ImVec2(rowP.x + 29.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), IM_COL32(230, 236, 248, 255), shortName.c_str());
 
                         if (isDynamic) {
-                            ImVec2 badgeMin(rowP.x + 125.0f * s_uiScale, rowP.y + 2.5f * s_uiScale);
-                            ImVec2 badgeMax(rowP.x + 156.0f * s_uiScale, rowP.y + 16.5f * s_uiScale);
+                            ImVec2 badgeMin(rowP.x + 130.0f * s_uiScale, rowP.y + 2.5f * s_uiScale);
+                            ImVec2 badgeMax(rowP.x + 162.0f * s_uiScale, rowP.y + 17.0f * s_uiScale);
                             odl->AddRectFilled(badgeMin, badgeMax, IM_COL32(120, 65, 10, 140), 3.0f);
                             odl->AddText(ImVec2(badgeMin.x + 3.0f * s_uiScale, badgeMin.y + 0.5f * s_uiScale), IM_COL32(251, 191, 36, 255), "PHYS");
                         }
 
-                        odl->AddText(ImVec2(rowP.x + rightPanelW - 118.0f * s_uiScale, rowP.y + 2.0f * s_uiScale), IM_COL32(115, 125, 148, 255), typeStr);
+                        odl->AddText(ImVec2(rowP.x + rightPanelW - 118.0f * s_uiScale, rowP.y + 2.5f * s_uiScale), IM_COL32(115, 125, 148, 255), typeStr);
                         ImGui::PopID();
                     }
                     ImGui::TreePop();
@@ -3503,9 +3505,28 @@ namespace engine::renderer {
                         if (registry.get().all_of<ecs::TagComponent>(selectedEnt)) {
                             tagStr = registry.get().get<ecs::TagComponent>(selectedEnt).name;
                         }
+
+                        // Actor Header Bar
                         ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "%s", tagStr.c_str());
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "#%u", static_cast<uint32_t>(selectedEnt));
+                        ImGui::SameLine(ImGui::GetWindowWidth() - 65.0f * s_uiScale);
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.04f, 0.28f, 0.18f, 0.9f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.98f, 0.68f, 1.0f));
+                        ImGui::Button("+ Add", ImVec2(55.0f * s_uiScale, 20.0f * s_uiScale));
+                        ImGui::PopStyleColor(2);
+
+                        // Component hierarchy card matching Image 2
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.075f, 0.075f, 0.11f, 1.0f));
+                        ImGui::BeginChild("ComponentHeaderCard", ImVec2(0, 24.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                        drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(ImGui::GetWindowPos().x + 12.0f * s_uiScale, ImGui::GetWindowPos().y + 12.0f * s_uiScale), 4.5f * s_uiScale, VectorIconType::Cube, IM_COL32(56, 189, 248, 255));
+                        ImGui::SetCursorPosX(22.0f * s_uiScale);
+                        ImGui::TextColored(ImVec4(0.85f, 0.88f, 0.96f, 1.0f), "StaticMeshComponent (StaticMeshComponent0)");
+                        ImGui::SameLine(ImGui::GetWindowWidth() - 75.0f * s_uiScale);
+                        ImGui::TextDisabled("Edit in C++");
+                        ImGui::EndChild();
+                        ImGui::PopStyleColor();
+
                         ImGui::Separator();
 
                         if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
@@ -3517,6 +3538,27 @@ namespace engine::renderer {
                                 if (rCh) t.orientation = glm::quat(glm::radians(t.rotation));
                                 if ((pCh || rCh || sCh) && engine) engine->syncEntityTransformPhysics(selectedEnt);
                             }
+                        }
+
+                        if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
+                            auto& mc = registry.get().get<ecs::MeshComponent>(selectedEnt);
+                            if (ImGui::CollapsingHeader("Static Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
+                                const char* meshes[] = { "None", "Plane (Ground)", "Cube (1x1x1)", "Sphere (R=0.5)", "Cylinder", "Capsule" };
+                                int curMesh = std::clamp(static_cast<int>(mc.meshId), 0, 5);
+                                if (ImGui::Combo("Mesh Asset", &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
+                                    mc.meshId = static_cast<uint32_t>(curMesh);
+                                }
+                            }
+                        }
+
+                        if (ImGui::CollapsingHeader("Materials", ImGuiTreeNodeFlags_DefaultOpen)) {
+                            ImGui::TextDisabled("Slot 0: [M_LucidPBR]");
+                            static ImVec4 albedoColor(0.2f, 0.7f, 0.9f, 1.0f);
+                            ImGui::ColorEdit3("Albedo", (float*)&albedoColor, ImGuiColorEditFlags_NoInputs);
+                            static float roughness = 0.35f;
+                            ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f);
+                            static float metallic = 0.10f;
+                            ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f);
                         }
 
                         if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
@@ -3539,6 +3581,32 @@ namespace engine::renderer {
                         ImGui::PopStyleColor();
                     }
                 } else {
+                    // World Settings Tab
+                    static float s_gravity = -9.81f;
+                    static float s_exposure = 1.03f;
+                    static bool s_vsync = true;
+                    static bool s_hwRaytracing = true;
+                    static bool s_vsm = true;
+                    static bool s_restirGI = true;
+                    static bool s_volumetricClouds = true;
+
+                    if (ImGui::CollapsingHeader("Physics & World Dynamics", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::DragFloat("Gravity (Y)", &s_gravity, 0.1f, -50.0f, 50.0f, "%.3f m/s²");
+                        ImGui::TextDisabled("Physics Engine: Jolt Physics 60 Hz");
+                    }
+
+                    if (ImGui::CollapsingHeader("Lighting & Atmosphere", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::SliderFloat("Exposure", &s_exposure, 0.1f, 5.0f, "%.3f");
+                        ImGui::Checkbox("V-Sync", &s_vsync);
+                    }
+
+                    if (ImGui::CollapsingHeader("Lucid 2026/2027 AAA Rendering Pipeline", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::Checkbox("Hardware Raytracing (TLAS/BLAS)", &s_hwRaytracing);
+                        ImGui::Checkbox("Virtual Shadow Maps (16k)", &s_vsm);
+                        ImGui::Checkbox("ReSTIR Global Illumination", &s_restirGI);
+                        ImGui::Checkbox("Volumetric Clouds", &s_volumetricClouds);
+                    }
+
                     if (ImGui::CollapsingHeader("Viewport & Scaling", ImGuiTreeNodeFlags_DefaultOpen)) {
                         float resSc = m_resolutionScale;
                         if (ImGui::SliderFloat("Resolution Scale", &resSc, 0.5f, 2.0f, "%.2fx")) {

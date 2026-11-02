@@ -1,4 +1,5 @@
 #include "core/Engine.hpp"
+#include "network/DualTransportContracts.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
     });
     bool headless = false;
     bool standaloneGame = false;
+    bool enableRemote = true;
     std::string projectPath = "";
     std::string playPreset = "";
 
@@ -55,6 +57,8 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--headless") {
             headless = true;
+        } else if (arg == "--no-remote" || arg == "--local-only") {
+            enableRemote = false;
         } else if (arg == "--game" || arg == "--standalone") {
             standaloneGame = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -80,7 +84,7 @@ int main(int argc, char** argv) {
 
     try {
         logCrash("STEP 1: Creating engine instance...");
-        engine::core::Engine eng(9000, headless);
+        engine::core::Engine eng(9000, headless, enableRemote);
         
         if (standaloneGame) {
             eng.setStandaloneGameMode(true);

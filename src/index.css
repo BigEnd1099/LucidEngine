@@ -2,7 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --ui-app-bg: #0a0a0f;
+  --ui-viewport-bg: transparent;
+}
+
+[data-transport-mode="native-ipc"] {
+  --ui-app-bg: transparent;
+  --ui-viewport-bg: transparent;
+}
+
+[data-transport-mode="remote-ws"] {
+  --ui-app-bg: #0a0a0f;
+  --ui-viewport-bg: #0d0d14;
+}
+
 body {
-  background-color: #0a0a0f;
+  background-color: var(--ui-app-bg);
   color: #e2e8f0;
 }

@@ -150,8 +150,34 @@ endforeach()
 
 add_custom_target(CompileShaders DEPENDS ${SPV_FILES})
 
+# Auto-generate Dual-Transport UI Shell Binary Contracts & Embedded Assets
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/include/network/DualTransportContracts.hpp"
+               "${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/TelemetrySnapshot.ts"
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_binary_schema.py"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_binary_schema.py"
+        COMMENT "Generating Dual-Transport UI Shell Binary Contracts"
+    )
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/include/network/EmbeddedAssets.hpp"
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_assets.py"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_assets.py"
+        COMMENT "Embedding Web Assets into C++ Header"
+    )
+    add_custom_target(GenerateBinarySchema DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/network/DualTransportContracts.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/TelemetrySnapshot.ts"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/network/EmbeddedAssets.hpp"
+    )
+endif()
+
 add_executable(engine ${SRC_FILES} ${HEADER_FILES} ${IMGUI_SRCS})
 add_dependencies(engine CompileShaders)
+if(Python3_FOUND)
+    add_dependencies(engine GenerateBinarySchema)
+endif()
 
 # Copy shaders next to the executable
 foreach(SPV_FILE ${SPV_FILES})
