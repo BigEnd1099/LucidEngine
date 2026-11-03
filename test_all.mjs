@@ -75,40 +75,40 @@ if (mcpResponses.length >= 5) {
 
 // 3. Test WebSocket RPC (client & view sync)
 console.log('\n[3/4] Testowanie połączenia WebSocket JSON-RPC (port 9000)...');
-import('./test_client.mjs');
-await new Promise(r => setTimeout(r, 1500));
+const { runClientTest } = await import('./test_client.mjs');
+await runClientTest();
 
 console.log('\n[4/5] Testowanie synchronizacji widoku i zrzutu klatek (Capture Frame)...');
-import('./test_view_sync.mjs');
-await new Promise(r => setTimeout(r, 2000));
+const { runViewSyncTest } = await import('./test_view_sync.mjs');
+await runViewSyncTest();
 
 console.log('\n[5/6] Testowanie sprężystości fizyki (Bounciness) i API skryptów rozgrywki...');
-import('./test_physics_and_gameplay_sub.mjs');
-await new Promise(r => setTimeout(r, 2000));
+const { runPhysicsTest } = await import('./test_physics_and_gameplay_sub.mjs');
+await runPhysicsTest();
 
 console.log('\n[6/8] Testowanie kształtu Kapsuły, Triggerów Sensorycznych i Audio SFX...');
-import('./test_gameplay_capsule_and_audio.mjs');
-await new Promise(r => setTimeout(r, 2000));
+const { runCapsuleAudioTest } = await import('./test_gameplay_capsule_and_audio.mjs');
+await runCapsuleAudioTest();
 
 console.log('\n[7/8] Testowanie 4 szablonów gier i kontrolerów rozgrywki QuickJS...');
 const { runTemplatesTest } = await import('./test_game_templates_e2e.mjs');
 await runTemplatesTest();
 
 console.log('\n[8/9] Testowanie przycisku STOP (przywracanie migawki edycyjnej bez resetu)...');
-import('./test_stop_restore.mjs');
-await new Promise(r => setTimeout(r, 2000));
+const { runStopRestoreTest } = await import('./test_stop_restore.mjs');
+await runStopRestoreTest();
 
 console.log('\n[9/10] Testowanie kompilacji i pakowania pełnej gry PC (.exe + Vulkan 1.3 + Jolt)...');
-import('./test_package_game.mjs');
-await new Promise(r => setTimeout(r, 2000));
+const { runPackageGameTest } = await import('./test_package_game.mjs');
+await runPackageGameTest();
 
 console.log('\n[10/11] Testowanie skalowania UI oraz dynamicznej rozdzielczości renderowania (Vulkan 1.3)...');
 const { runResolutionScalingTest } = await import('./test_resolution_scaling.mjs');
 await runResolutionScalingTest();
 
 console.log('\n[11/12] Testowanie przywracania obiektów na miejsce po zmianie sceny (Stop & Re-spawn)...');
-import('./test_scene_change_stop.mjs');
-await new Promise(r => setTimeout(r, 3000));
+const { runSceneChangeStopTest } = await import('./test_scene_change_stop.mjs');
+await runSceneChangeStopTest();
 
 console.log('\n[12/12] Testowanie korony technologii AAA (Profiler, Zelda TotK Chemia, Voronoi Destrukcja, A* NavMesh, PCG, 64-bit World Partition, Sub-Tick Netcode, Hot-Reload)...');
 const { runAaaFeaturesTest } = await import('./test_aaa_features.mjs');

@@ -133,6 +133,12 @@ set(SHADER_FILES
     src/shaders/shadow_depth.frag
     src/shaders/particle.vert
     src/shaders/particle.frag
+    src/shaders/fullscreen.vert
+    src/shaders/bloom_downsample.frag
+    src/shaders/bloom_kawase.frag
+    src/shaders/gtao.frag
+    src/shaders/gtao_blur.frag
+    src/shaders/composite.frag
 )
 
 set(SPV_FILES "")

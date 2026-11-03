@@ -7,7 +7,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <shellapi.h>
 #endif
 
 void logCrash(const std::string& msg, bool showBox = false) {
@@ -52,8 +51,6 @@ int main(int argc, char** argv) {
     bool standaloneGame = false;
     bool enableRemote = true;
     bool launchStudio = false;
-    bool noStudio = false;
-    bool vulkanWindow = false;
     std::string projectPath = "";
     std::string playPreset = "";
 
@@ -61,15 +58,10 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--headless") {
             headless = true;
-            noStudio = true;
         } else if (arg == "--studio" || arg == "--web-ui") {
             launchStudio = true;
-        } else if (arg == "--no-studio" || arg == "--no-ui") {
-            noStudio = true;
         } else if (arg == "--no-remote" || arg == "--local-only") {
             enableRemote = false;
-        } else if (arg == "--vulkan-window" || arg == "--window") {
-            vulkanWindow = true;
         } else if (arg == "--game" || arg == "--standalone") {
             standaloneGame = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -86,16 +78,6 @@ int main(int argc, char** argv) {
         projectPath = "game.json";
     }
 
-    // Default: In desktop editor mode, run headless backend (offscreen Vulkan GPU streaming)
-    // and launch the unified 1:1 Studio UI Shell (so user has EXACTLY ONE unified window on desktop).
-    // The GLFW window is only opened if specifically requested via --vulkan-window or --game.
-    if (!standaloneGame && !vulkanWindow) {
-        if (!noStudio && !headless) {
-            launchStudio = true;
-        }
-        headless = true; // Offscreen Vulkan GPU streaming; UI shell embeds viewport directly
-    }
-
     // Clear previous log
     std::ofstream clearLog("crash.log");
     if(clearLog.is_open()) {
@@ -110,7 +92,7 @@ int main(int argc, char** argv) {
         if (standaloneGame) {
             eng.setStandaloneGameMode(true);
             if (!projectPath.empty()) {
-                eng.loadProjectFromDisk(projectPath);
+                eng.loadCurrentProject(projectPath);
             } else if (!playPreset.empty()) {
                 eng.resetScene(playPreset);
             }
@@ -122,15 +104,14 @@ int main(int argc, char** argv) {
 
         if (launchStudio) {
 #ifdef _WIN32
-            // Use ShellExecuteA so handles (such as listening sockets) are NEVER inherited by the UI process
-            if (std::filesystem::exists("node_modules\\electron\\dist\\electron.exe")) {
-                ShellExecuteA(NULL, "open", "node_modules\\electron\\dist\\electron.exe", ".", NULL, SW_SHOWNORMAL);
-            } else if (std::filesystem::exists("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")) {
-                ShellExecuteA(NULL, "open", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--app=http://127.0.0.1:9000 --window-size=1920,1080", NULL, SW_SHOWNORMAL);
-            } else if (std::filesystem::exists("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe")) {
-                ShellExecuteA(NULL, "open", "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "--app=http://127.0.0.1:9000 --window-size=1920,1080", NULL, SW_SHOWNORMAL);
+            const char* chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+            const char* edgePath = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+            if (std::filesystem::exists(chromePath)) {
+                std::system("start \"\" \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
+            } else if (std::filesystem::exists(edgePath)) {
+                std::system("start \"\" \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --app=http://127.0.0.1:9000 --window-size=1920,1080");
             } else {
-                ShellExecuteA(NULL, "open", "http://127.0.0.1:9000", NULL, NULL, SW_SHOWNORMAL);
+                std::system("start http://127.0.0.1:9000");
             }
 #endif
         }

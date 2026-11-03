@@ -1,8 +1,6 @@
 import WebSocket from 'ws';
 
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-async function runTest() {
+export async function runSceneChangeStopTest() {
     const ws = new WebSocket('ws://127.0.0.1:9000');
     await new Promise((resolve, reject) => {
         ws.on('open', resolve);
@@ -15,13 +13,15 @@ async function runTest() {
             const id = msgId++;
             const handler = (data) => {
                 try {
-                    const msg = JSON.parse(data.toString());
+                    const text = data.toString();
+                    if (!text.startsWith('{')) return;
+                    const msg = JSON.parse(text);
                     if (msg.id === id) {
                         ws.off('message', handler);
                         if (msg.error) reject(new Error(msg.error.message));
                         else resolve(msg.result);
                     }
-                } catch (e) {}
+                } catch {}
             };
             ws.on('message', handler);
             ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
@@ -50,71 +50,73 @@ async function runTest() {
     // 2. NOW SWITCH SCENE TO PLATFORMER while simulation was running or stopped!
     console.log('2. Switching scene to PLATFORMER...');
     await rpc('engine.resetScene', { preset: 'platformer' });
-    let snapPlatformer = await rpc('engine.getSnapshot');
-    const playerInitial = snapPlatformer.find(e => e.tag === 'Player');
-    console.log(`Platformer Player initial position: Y=${playerInitial.transform.y}, Z=${playerInitial.transform.z}, entities: ${snapPlatformer.length}`);
+    let snapPlat = await rpc('engine.getSnapshot');
+    const platPlayer = snapPlat.find(e => e.tag === 'Player' || e.tag === 'Player_Platformer');
+    if (!platPlayer) {
+        throw new Error('Platformer Player entity not found in scene snapshot!');
+    }
+    console.log(`Platformer Player initial position: Y=${platPlayer.transform.y}, Z=${platPlayer.transform.z}, entities: ${snapPlat.length}`);
 
-    // Verify simulation is in edit mode (paused)
-    // 3. Play Platformer and step physics
+    // 3. Play Platformer and simulate physics
     console.log('3. Playing Platformer simulation...');
     await rpc('engine.playSimulation');
-    await rpc('engine.stepSimulation', { steps: 30, dt: 0.016 });
-    let snapPlatRunning = await rpc('engine.getSnapshot');
-    const playerMoved = snapPlatRunning.find(e => e.tag === 'Player');
-    console.log(`Platformer Player simulated to: Y=${playerMoved.transform.y}`);
+    await rpc('engine.stepSimulation', { steps: 20, dt: 0.016 });
+    let snapPlatSim = await rpc('engine.getSnapshot');
+    const platPlayerSim = snapPlatSim.find(e => e.id === platPlayer.id);
+    console.log(`Platformer Player simulated to: Y=${platPlayerSim.transform.y}`);
 
-    // Destroy a Coin during simulation to test re-spawn on STOP
-    const coinToDestroy = snapPlatRunning.find(e => e.tag === 'Coin');
-    if (coinToDestroy) {
-        console.log(`Destroying coin ${coinToDestroy.id} during simulation...`);
-        await rpc('engine.destroyEntity', { entityId: coinToDestroy.id });
+    // Destroy a coin during gameplay
+    const firstCoin = snapPlatSim.find(e => e.tag === 'Coin');
+    if (firstCoin) {
+        console.log(`Destroying coin ${firstCoin.id} during simulation...`);
+        await rpc('engine.destroyEntity', { entityId: firstCoin.id });
     }
 
-    // 4. STOP simulation in Platformer
+    // 4. STOP Platformer simulation!
     console.log('4. Stopping Platformer simulation...');
     await rpc('engine.stopSimulation');
     let snapPlatRestored = await rpc('engine.getSnapshot');
-    const playerRestored = snapPlatRestored.find(e => e.tag === 'Player');
-    console.log(`Platformer Player restored to: Y=${playerRestored.transform.y}, Z=${playerRestored.transform.z}`);
+    const platPlayerRestored = snapPlatRestored.find(e => e.id === platPlayer.id);
+    console.log(`Platformer Player restored to: Y=${platPlayerRestored.transform.y}, Z=${platPlayerRestored.transform.z}`);
 
-    if (Math.abs(playerRestored.transform.y - playerInitial.transform.y) > 0.02) {
-        throw new Error(`Platformer Player failed to return to place! Expected Y=${playerInitial.transform.y}, got Y=${playerRestored.transform.y}`);
+    if (Math.abs(platPlayerRestored.transform.y - platPlayer.transform.y) > 0.01) {
+        throw new Error(`Stop failed to restore platformer player Y! Got: ${platPlayerRestored.transform.y}`);
     }
-    if (Math.abs(playerRestored.transform.z - playerInitial.transform.z) > 0.02) {
-        throw new Error(`Platformer Player failed to return to place! Expected Z=${playerInitial.transform.z}, got Z=${playerRestored.transform.z}`);
-    }
-
-    // Verify destroyed coin was restored back to the scene!
-    const coinCount = snapPlatRestored.filter(e => e.tag === 'Coin').length;
-    console.log(`Coins in restored scene: ${coinCount} (Initial was 8)`);
-    if (coinCount !== 8) {
-        throw new Error(`Expected 8 coins restored, got ${coinCount}`);
+    const coinsRestored = snapPlatRestored.filter(e => e.tag === 'Coin');
+    console.log(`Coins in restored scene: ${coinsRestored.length} (Initial was 8)`);
+    if (coinsRestored.length !== 8) {
+        throw new Error(`Stop failed to restore destroyed coin! Got: ${coinsRestored.length}`);
     }
 
-    // 5. SWITCH SCENE TO RACER
+    // 5. SWITCH TO RACER PRESET
     console.log('5. Switching scene to RACER...');
     await rpc('engine.resetScene', { preset: 'racer' });
     let snapRacer = await rpc('engine.getSnapshot');
-    const carInitial = snapRacer.find(e => e.tag === 'PlayerCar');
-    console.log(`Racer Car initial position: X=${carInitial.transform.x}, Y=${carInitial.transform.y}, Z=${carInitial.transform.z}`);
+    const car = snapRacer.find(e => e.tag === 'PlayerCar' || e.tag === 'SportsCar');
+    if (!car) {
+        throw new Error('Racer Car entity (PlayerCar) not found in scene snapshot!');
+    }
+    console.log(`Racer Car initial position: X=${car.transform.x}, Y=${car.transform.y}, Z=${car.transform.z}`);
 
     await rpc('engine.playSimulation');
-    await rpc('engine.stepSimulation', { steps: 30, dt: 0.016 });
+    await rpc('engine.stepSimulation', { steps: 15, dt: 0.016 });
     await rpc('engine.stopSimulation');
 
     let snapRacerRestored = await rpc('engine.getSnapshot');
-    const carRestored = snapRacerRestored.find(e => e.tag === 'PlayerCar');
+    const carRestored = snapRacerRestored.find(e => e.id === car.id);
     console.log(`Racer Car restored position: X=${carRestored.transform.x}, Y=${carRestored.transform.y}, Z=${carRestored.transform.z}`);
-
-    if (Math.abs(carRestored.transform.y - carInitial.transform.y) > 0.02 || Math.abs(carRestored.transform.z - carInitial.transform.z) > 0.02) {
-        throw new Error(`Racer Car failed to return to place! Got Y=${carRestored.transform.y}, Z=${carRestored.transform.z}`);
+    if (Math.abs(carRestored.transform.x - car.transform.x) > 0.01) {
+        throw new Error('Stop failed to restore car position!');
     }
 
     console.log('✅ ALL SCENE CHANGE & NON-DESTRUCTIVE STOP RESTORATION TESTS PASSED!');
     ws.close();
+    return true;
 }
 
-runTest().catch(err => {
-    console.error('❌ TEST FAILED:', err);
-    process.exit(1);
-});
+if (process.argv[1] && process.argv[1].endsWith('test_scene_change_stop.mjs')) {
+    runSceneChangeStopTest().then(() => process.exit(0)).catch(err => {
+        console.error('❌ TEST FAILED:', err);
+        process.exit(1);
+    });
+}

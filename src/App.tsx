@@ -366,7 +366,7 @@ export default function App() {
   const focusOnSelectedEntity = useCallback(() => {
     if (selectedEntityId === null) return;
     const mesh = meshMapRef.current.get(selectedEntityId);
-    if (!mesh) return;
+    if (!mesh || !mesh.position) return;
     const pos = mesh.position;
     cameraStateRef.current = { x: pos.x, y: pos.y + 6, z: pos.z + 14, yaw: -90, pitch: -20, fov: 45 };
     sendRpc('engine.setCamera', cameraStateRef.current).catch(() => { });
@@ -754,6 +754,16 @@ export default function App() {
       window.removeEventListener('mouseup', onMouseUp);
       targetDom.removeEventListener('wheel', onWheel as EventListener);
       window.removeEventListener('resize', handleResize);
+      particleManagerRef.current?.clearAll();
+      meshMapRef.current.forEach(m => {
+        m.geometry?.dispose();
+        if (Array.isArray(m.material)) {
+          m.material.forEach(mat => mat.dispose());
+        } else {
+          m.material?.dispose();
+        }
+      });
+      meshMapRef.current.clear();
       tc.dispose();
       renderer.dispose();
     };
@@ -1014,9 +1024,15 @@ export default function App() {
         } else {
           mesh = new THREE.Mesh(geom, mat);
           if (isLight) {
+            const isDir = ent.tag?.toLowerCase().includes('directional') || ent.tag?.toLowerCase().includes('sun') || ent.light?.type === 'directional';
             const lightColor = ent.light?.color ? new THREE.Color(ent.light.color) : new THREE.Color(0xffaa44);
-            const pLight = new THREE.PointLight(lightColor, ent.light?.intensity ?? 3.0, ent.light?.range ?? 20);
-            mesh.add(pLight);
+            if (isDir) {
+              const dLight = new THREE.DirectionalLight(lightColor, ent.light?.intensity ?? 3.5);
+              mesh.add(dLight);
+            } else {
+              const pLight = new THREE.PointLight(lightColor, ent.light?.intensity ?? 3.0, ent.light?.range ?? 20);
+              mesh.add(pLight);
+            }
           }
         }
         if (mesh) {

@@ -79,6 +79,10 @@ namespace engine::core {
         bool saveProjectToDisk(const std::string& folderPath, const nlohmann::json& projectData);
         nlohmann::json loadProjectFromDisk(const std::string& folderPath);
         nlohmann::json listDiskProjects(const std::string& baseDir = "projects");
+        bool saveCurrentProject(const std::string& folderPath = "projects/MyGame");
+        bool loadCurrentProject(const std::string& folderPath = "projects/MyGame");
+        std::string getCurrentScript() const;
+        void setCurrentScript(const std::string& code);
 
         template <typename F>
         auto executeOnMainThread(F&& func) -> decltype(func(this)) {
@@ -145,6 +149,8 @@ namespace engine::core {
 
         // Environment & Lighting API
         void setEnvironmentSettings(const EnvironmentSettings& env) { m_envSettings = env; }
+        void setGravity(float g) { m_envSettings.gravity = g; }
+        float getGravity() const { return m_envSettings.gravity; }
         const EnvironmentSettings& getEnvironmentSettings() const { return m_envSettings; }
         void setEnvironmentFromJson(const nlohmann::json& json);
         nlohmann::json getEnvironmentJson() const;

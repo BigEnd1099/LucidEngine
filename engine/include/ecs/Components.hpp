@@ -55,10 +55,16 @@ namespace engine::ecs {
     };
 
     struct LightComponent {
-        std::string type{"point"}; // "directional", "point", "spot", "sky"
+        std::string type{"point"}; // "point", "sun", "spot", "area", "directional"
         glm::vec3 color{1.0f, 1.0f, 1.0f};
         float intensity{1.0f};
-        float range{15.0f};
+        float range{20.0f};
+        // Spot light angles (degrees)
+        float innerConeAngle{25.0f};
+        float outerConeAngle{40.0f};
+        // Area light dimensions (meters)
+        float areaSizeX{2.5f};
+        float areaSizeY{2.0f};
     };
 
     struct AudioComponent {

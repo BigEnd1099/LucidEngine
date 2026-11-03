@@ -1,66 +1,47 @@
-import WebSocket from 'ws';
+import fs from 'fs';
+import { TestRpcClient } from './tests/test_utils.mjs';
 
-const ws = new WebSocket('ws://127.0.0.1:9000');
-
-function send(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    const timeout = setTimeout(() => reject(new Error('Timeout on ' + method)), 3000);
-    const handler = (data) => {
-      try {
-        const res = JSON.parse(data.toString());
-        if (res.id === id) {
-          clearTimeout(timeout);
-          ws.off('message', handler);
-          if (res.error) reject(res.error);
-          else resolve(res.result);
-        }
-      } catch (e) {}
-    };
-    ws.on('message', handler);
-    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
-  });
-}
-
-ws.on('open', async () => {
+export async function runViewSyncTest() {
+  const client = new TestRpcClient('ws://127.0.0.1:9000');
   try {
+    await client.connect();
     console.log('--- TEST SYNC & CAPTURE ---');
-    
+
     // 1. Get Camera
-    const cam = await send('engine.getCamera');
+    const cam = await client.send('engine.getCamera');
     console.log('1. getCamera result:', cam);
-    
+
     // 2. Set Camera
-    const setCamRes = await send('engine.setCamera', {
+    const setCamRes = await client.send('engine.setCamera', {
       x: 5, y: 20, z: 40, yaw: -45, pitch: -30, fov: 60
     });
     console.log('2. setCamera result:', setCamRes);
-    
+
     // 3. Verify Camera updated
-    const camUpdated = await send('engine.getCamera');
+    const camUpdated = await client.send('engine.getCamera');
     console.log('3. updated Camera:', camUpdated);
 
     // 4. Capture Frame
-    const frameRes = await send('engine.captureFrame');
+    const frameRes = await client.send('engine.captureFrame');
     console.log('4. captureFrame format prefix:', frameRes?.frame?.substring(0, 30));
     console.log('   captureFrame total base64 length:', frameRes?.frame?.length);
 
     if (frameRes?.frame) {
-      const fs = await import('fs');
       const base64Data = frameRes.frame.replace(/^data:image\/jpeg;base64,/, '');
       fs.writeFileSync('test_frame.jpg', Buffer.from(base64Data, 'base64'));
       console.log('   Saved captured frame to test_frame.jpg');
     }
 
     console.log('ALL TESTS PASSED SUCCESSFULLY!');
+    client.close();
+    return true;
   } catch (err) {
-    console.error('Test error:', err);
-  } finally {
-    ws.close();
+    console.error('Test view sync error:', err.message);
+    client.close();
+    throw err;
   }
-});
+}
 
-ws.on('error', (e) => {
-  console.error('WebSocket connection error:', e.message);
-  process.exit(1);
-});
+if (process.argv[1] && process.argv[1].endsWith('test_view_sync.mjs')) {
+  runViewSyncTest().then(() => process.exit(0)).catch(() => process.exit(1));
+}

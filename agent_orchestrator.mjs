@@ -8,9 +8,11 @@ const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:9000';
 
 class EngineClient {
   constructor(url) {
+    this.url = url;
     this.ws = new WebSocket(url);
     this.pending = new Map();
     this.lastError = null;
+    this.idCounter = 0;
 
     this.ws.on('message', (data) => {
       try {
@@ -23,13 +25,31 @@ class EngineClient {
         }
 
         // Obsługa odpowiedzi na żądania RPC
-        if (msg.id && this.pending.has(msg.id)) {
-          const { resolve, reject } = this.pending.get(msg.id);
+        if (msg.id !== undefined && this.pending.has(msg.id)) {
+          const { resolve, reject, timer } = this.pending.get(msg.id);
+          clearTimeout(timer);
           this.pending.delete(msg.id);
-          if (msg.error) reject(msg.error);
-          else resolve(msg.result);
+          if (msg.error) {
+            reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+          } else {
+            resolve(msg.result);
+          }
         }
-      } catch (e) {}
+      } catch (err) {
+        console.error('[EngineClient] Błąd parsowania wiadomości z silnika:', err.message);
+      }
+    });
+
+    this.ws.on('error', (err) => {
+      console.error('[EngineClient] Błąd WebSocket:', err.message);
+    });
+
+    this.ws.on('close', () => {
+      for (const [, { reject, timer }] of this.pending) {
+        clearTimeout(timer);
+        reject(new Error('Połączenie WebSocket z silnikiem zostało zamknięte.'));
+      }
+      this.pending.clear();
     });
   }
 
@@ -41,16 +61,31 @@ class EngineClient {
     });
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
-      const id = Date.now() + Math.floor(Math.random() * 10000);
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      const id = ++this.idCounter;
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`Timeout oczekiwania na odpowiedź RPC: ${method} (id=${id})`));
+        }
+      }, timeoutMs);
+
+      this.pending.set(id, { resolve, reject, timer });
+      try {
+        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      }
     });
   }
 
   close() {
-    this.ws.close();
+    try {
+      this.ws.close();
+    } catch {}
   }
 }
 
@@ -58,23 +93,37 @@ class EngineClient {
 async function callLLM(messages) {
   // Jeśli użytkownik ma klucz Gemini API
   if (GEMINI_API_KEY) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const contents = messages.map(m => ({
+    const systemMsg = messages.find(m => m.role === 'system');
+    const conversationMessages = messages.filter(m => m.role !== 'system');
+
+    const contents = conversationMessages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
     }));
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents })
-    });
+    const bodyPayload = {
+      contents,
+      ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {})
+    };
 
-    if (res.ok) {
-      const data = await res.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const codeMatch = raw.match(/```(?:typescript|javascript|ts|js)?([\s\S]*?)```/);
-      return codeMatch ? codeMatch[1].trim() : raw.trim();
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyPayload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const codeMatch = raw.match(/```(?:typescript|javascript|ts|js)?([\s\S]*?)```/);
+        return codeMatch ? codeMatch[1].trim() : raw.trim();
+      } else {
+        console.warn(`[Orchestrator] Gemini API zwróciło status ${res.status}, przejście do fallbacku.`);
+      }
+    } catch (err) {
+      console.warn('[Orchestrator] Błąd połączenia z Gemini API:', err.message);
     }
   }
 
@@ -266,8 +315,10 @@ ZASADY:
   engine.close();
 }
 
-// Uruchomienie z wiersza poleceń
-const goal = process.argv.slice(2).join(' ') || 'Stwórz symulację grawitacji układu planetarnego (solar)';
-runAutonomousLoop(goal).catch(err => {
-  console.error('[Błąd orchestratora]:', err.message);
-});
+// Uruchomienie z wiersza poleceń jeśli plik jest uruchomiony bezpośrednio
+if (process.argv[1] && process.argv[1].endsWith('agent_orchestrator.mjs')) {
+  const goal = process.argv.slice(2).join(' ') || 'Stwórz symulację grawitacji układu planetarnego (solar)';
+  runAutonomousLoop(goal).catch(err => {
+    console.error('[Błąd orchestratora]:', err.message);
+  });
+}

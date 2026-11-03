@@ -634,6 +634,56 @@ namespace engine::core {
                     auto now = std::chrono::high_resolution_clock::now();
                     float dt = std::chrono::duration<float>(now - lastTime).count();
                     bool imguiWantsTextInput = (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantTextInput);
+                    bool imguiWantsMouse = (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse);
+
+                    // Native Viewport Fly Camera (PPM + WASD / QE / Shift)
+                    static bool s_rmbDown = false;
+                    static double s_lastX = 0.0, s_lastY = 0.0;
+                    if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS && !imguiWantsMouse) {
+                        double curX, curY;
+                        glfwGetCursorPos(win, &curX, &curY);
+                        if (!s_rmbDown) {
+                            s_rmbDown = true;
+                            s_lastX = curX;
+                            s_lastY = curY;
+                        } else {
+                            float dx = static_cast<float>(curX - s_lastX);
+                            float dy = static_cast<float>(curY - s_lastY);
+                            s_lastX = curX;
+                            s_lastY = curY;
+
+                            m_camYaw += dx * 0.15f;
+                            m_camPitch = glm::clamp(m_camPitch - dy * 0.15f, -89.0f, 89.0f);
+                        }
+
+                        // Fly Movement in camera direction
+                        float radYaw = glm::radians(m_camYaw);
+                        float radPitch = glm::radians(m_camPitch);
+                        glm::vec3 fwd(
+                            cos(radYaw) * cos(radPitch),
+                            sin(radPitch),
+                            sin(radYaw) * cos(radPitch)
+                        );
+                        fwd = glm::normalize(fwd);
+                        glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+                        glm::vec3 up(0.0f, 1.0f, 0.0f);
+
+                        float speed = (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ? 35.0f : 12.0f;
+                        glm::vec3 moveDir(0.0f);
+                        if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) moveDir += fwd;
+                        if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) moveDir -= fwd;
+                        if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) moveDir += right;
+                        if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) moveDir -= right;
+                        if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) moveDir += up;
+                        if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) moveDir -= up;
+
+                        if (glm::length(moveDir) > 0.001f) {
+                            m_camPos += glm::normalize(moveDir) * speed * dt;
+                        }
+                    } else {
+                        s_rmbDown = false;
+                    }
+
                     if (!m_paused) {
                         // Native Gameplay Controls in GLFW Desktop Window
                         nlohmann::json keys = nlohmann::json::object();
@@ -838,7 +888,11 @@ namespace engine::core {
                 light.color = glm::vec3(parseColorJson(lJson["color"], glm::vec4(1.0f)));
             }
             light.intensity = lJson.value("intensity", 1.0f);
-            light.range = lJson.value("range", 15.0f);
+            light.range = lJson.value("range", 20.0f);
+            light.innerConeAngle = lJson.value("innerConeAngle", 25.0f);
+            light.outerConeAngle = lJson.value("outerConeAngle", 40.0f);
+            light.areaSizeX = lJson.value("areaSizeX", 2.5f);
+            light.areaSizeY = lJson.value("areaSizeY", 2.0f);
             m_registry->get().emplace<ecs::LightComponent>(entity, light);
         }
 
@@ -1117,6 +1171,18 @@ namespace engine::core {
             groundRb.shapeType = 0;
             groundRb.halfExtents = glm::vec3(50.0f, 1.0f, 50.0f);
             m_registry->get().emplace<ecs::RigidBodyComponent>(ground, groundRb);
+
+            // Directional Light (Sun)
+            auto sun = m_registry->createEntity();
+            m_registry->get().emplace<ecs::TagComponent>(sun, ecs::TagComponent{"DirectionalLight (Sun)"});
+            m_registry->get().emplace<ecs::TransformComponent>(sun, glm::vec3(0.0f, 18.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));
+            ecs::LightComponent sunLight;
+            sunLight.type = "directional";
+            sunLight.color = glm::vec3(1.0f, 0.98f, 0.92f);
+            sunLight.intensity = 3.5f;
+            sunLight.range = 0.0f;
+            m_registry->get().emplace<ecs::LightComponent>(sun, sunLight);
+
             core::Logger::info("Scene reset to: Empty Preset");
         } else {
             initTestScene();
@@ -1268,7 +1334,50 @@ function update(entities, dt, input, contacts) {
 }
 )";
         }
-        return "function update(entities, dt, input, contacts) {}\n";
+        return R"(// --- UNIVERSAL LUCID GAMEPLAY & PHYSICS CONTROLLER ---
+function update(entities, dt, input, contacts) {
+  // 1. Player Character Controls (WASD + Space)
+  var player = entities.find(e => e.tag === 'Player' || e.tag === 'Character' || e.tag === 'PlayerCar' || e.tag === 'Paddle');
+  if (player && player.transform) {
+    var speed = 12.0;
+    if (!player.velocity) player.velocity = { vx: 0, vy: 0, vz: 0 };
+    var moveX = 0, moveZ = 0;
+    if (input && input.keys) {
+      if (input.keys.KeyW || input.keys.ArrowUp) moveZ -= 1;
+      if (input.keys.KeyS || input.keys.ArrowDown) moveZ += 1;
+      if (input.keys.KeyA || input.keys.ArrowLeft) moveX -= 1;
+      if (input.keys.KeyD || input.keys.ArrowRight) moveX += 1;
+    }
+    player.velocity.vx = moveX * speed;
+    player.velocity.vz = moveZ * speed;
+    if (input && input.keys && input.keys.Space && Math.abs(player.velocity.vy) < 0.2) {
+      player.velocity.vy = 8.5;
+      if (typeof engine !== 'undefined' && engine.playSfx) engine.playSfx('jump', 0.8);
+    }
+  }
+
+  // 2. Interactive Contacts (Coins, Triggers, Hazards)
+  if (contacts && contacts.length > 0 && typeof engine !== 'undefined') {
+    for (var i = 0; i < contacts.length; i++) {
+      var c = contacts[i];
+      var ea = entities.find(e => e.id === c.a);
+      var eb = entities.find(e => e.id === c.b);
+      if (!ea || !eb) continue;
+      var isPlayerA = (ea.tag === 'Player' || ea.tag === 'Character');
+      var isPlayerB = (eb.tag === 'Player' || eb.tag === 'Character');
+      if (isPlayerA && eb.tag && (eb.tag === 'Coin' || eb.tag.indexOf('Coin') !== -1 || eb.tag === 'TriggerZone')) {
+        engine.destroyEntity(eb.id);
+        engine.setScore(engine.getScore() + 50);
+        engine.playSfx('coin', 1.0);
+      } else if (isPlayerB && ea.tag && (ea.tag === 'Coin' || ea.tag.indexOf('Coin') !== -1 || ea.tag === 'TriggerZone')) {
+        engine.destroyEntity(ea.id);
+        engine.setScore(engine.getScore() + 50);
+        engine.playSfx('coin', 1.0);
+      }
+    }
+  }
+}
+)";
     }
 
     std::string Engine::captureFrameBase64() {
@@ -1365,7 +1474,11 @@ function update(entities, dt, input, contacts) {
                     {"type", lc.type},
                     {"color", {lc.color.r, lc.color.g, lc.color.b}},
                     {"intensity", lc.intensity},
-                    {"range", lc.range}
+                    {"range", lc.range},
+                    {"innerConeAngle", lc.innerConeAngle},
+                    {"outerConeAngle", lc.outerConeAngle},
+                    {"areaSizeX", lc.areaSizeX},
+                    {"areaSizeY", lc.areaSizeY}
                 };
             }
             if (m_registry->get().all_of<ecs::AudioComponent>(entity)) {
@@ -1520,6 +1633,28 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::initTestScene() {
+        // Directional Light (Sun) - Celestial Sun Light source
+        auto sun = m_registry->createEntity();
+        m_registry->get().emplace<ecs::TagComponent>(sun, ecs::TagComponent{"DirectionalLight (Sun)"});
+        m_registry->get().emplace<ecs::TransformComponent>(sun, glm::vec3(0.0f, 18.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));
+        ecs::LightComponent sunLight;
+        sunLight.type = "directional";
+        sunLight.color = glm::vec3(1.0f, 0.98f, 0.92f);
+        sunLight.intensity = 3.5f;
+        sunLight.range = 0.0f;
+        m_registry->get().emplace<ecs::LightComponent>(sun, sunLight);
+
+        // Point Light (Warm Accent)
+        auto ptLight = m_registry->createEntity();
+        m_registry->get().emplace<ecs::TagComponent>(ptLight, ecs::TagComponent{"PointLight_Warm"});
+        m_registry->get().emplace<ecs::TransformComponent>(ptLight, glm::vec3(3.5f, 4.0f, 2.0f), glm::vec3(0.0f), glm::vec3(0.5f));
+        ecs::LightComponent pt;
+        pt.type = "point";
+        pt.color = glm::vec3(1.0f, 0.85f, 0.45f);
+        pt.intensity = 4.0f;
+        pt.range = 18.0f;
+        m_registry->get().emplace<ecs::LightComponent>(ptLight, pt);
+
         // Ground (Static)
         auto ground = m_registry->createEntity();
         m_registry->get().emplace<ecs::TagComponent>(ground, ecs::TagComponent{"GroundPlane"});
@@ -1967,6 +2102,92 @@ function update(entities, dt, input, contacts) {
         m_standaloneGameMode = enabled;
         if (m_renderer) {
             m_renderer->setStandaloneGameMode(enabled);
+        }
+    }
+
+    
+    std::string Engine::getCurrentScript() const {
+        return m_currentScriptCode.empty() ? const_cast<Engine*>(this)->getDefaultScript(m_currentPreset) : m_currentScriptCode;
+    }
+
+    void Engine::setCurrentScript(const std::string& code) {
+        m_currentScriptCode = code;
+    }
+
+    bool Engine::saveCurrentProject(const std::string& folderPath) {
+        try {
+            nlohmann::json proj = {
+                {"name", "LucidGame"},
+                {"preset", m_currentPreset},
+                {"entities", getSnapshotJson()},
+                {"script", m_currentScriptCode.empty() ? getDefaultScript(m_currentPreset) : m_currentScriptCode},
+                {"environment", getEnvironmentJson()},
+                {"settings", {
+                    {"gravity", m_envSettings.gravity}
+                }}
+            };
+            bool res = saveProjectToDisk(folderPath, proj);
+            std::filesystem::path fPath(folderPath);
+            std::filesystem::create_directories(fPath);
+            std::ofstream gj(fPath / "game.json");
+            if (gj.is_open()) {
+                gj << proj.dump(2);
+                gj.close();
+            }
+            std::ofstream rootGj("game.json");
+            if (rootGj.is_open()) {
+                rootGj << proj.dump(2);
+                rootGj.close();
+            }
+            core::Logger::info("saveCurrentProject successful: " + folderPath);
+            return res;
+        } catch (const std::exception& e) {
+            core::Logger::error(std::string("saveCurrentProject failed: ") + e.what());
+            return false;
+        }
+    }
+
+    bool Engine::loadCurrentProject(const std::string& folderPath) {
+        try {
+            auto proj = loadProjectFromDisk(folderPath);
+            if (proj.contains("error")) {
+                core::Logger::error("Failed to load project: " + proj["error"].get<std::string>());
+                return false;
+            }
+
+            if (proj.contains("preset")) {
+                m_currentPreset = proj["preset"].get<std::string>();
+            }
+
+            if (proj.contains("entities")) {
+                applySnapshotJson(proj["entities"].dump());
+            } else if (proj.contains("scenes") && proj["scenes"].is_array() && !proj["scenes"].empty()) {
+                const auto& sc = proj["scenes"][0];
+                if (sc.contains("entities")) {
+                    applySnapshotJson(sc["entities"].dump());
+                }
+            }
+
+            if (proj.contains("script")) {
+                loadScript(proj["script"].get<std::string>());
+            } else if (proj.contains("scripts") && proj["scripts"].is_array() && !proj["scripts"].empty()) {
+                loadScript(proj["scripts"][0].value("code", ""));
+            }
+
+            if (proj.contains("environment")) {
+                setEnvironmentFromJson(proj["environment"]);
+            }
+            if (proj.contains("settings") && proj["settings"].contains("gravity")) {
+                m_envSettings.gravity = proj["settings"]["gravity"].get<float>();
+            }
+
+            m_preSimulationSnapshot = getSnapshotJson();
+            m_hasPreSimulationSnapshot = true;
+            core::Logger::info("loadCurrentProject successful: " + folderPath);
+            return true;
+        } catch (const std::exception& e) {
+            core::Logger::error(std::string("loadCurrentProject failed: ") + e.what());
+            return false;
         }
     }
 

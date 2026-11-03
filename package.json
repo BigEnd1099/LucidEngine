@@ -1,16 +1,20 @@
 {
-  "name": "ai-native-engine-web",
+  "name": "lucid-engine",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.5.0",
+  "description": "Lucid Engine - Vulkan-powered 3D Game Engine with UE5-style Studio UI & AI QuickJS Orchestration",
   "type": "module",
   "main": "electron-main.cjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "electron .",
     "app": "electron .",
-    "dev": "vite --host 0.0.0.0 --port 3000",
+    "dev": "vite",
     "build": "tsc && vite build",
     "build:engine": "build_engine.bat",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "engine": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue; .\\engine\\build\\Release\\engine.exe\"",
     "engine:kill": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue\"",
@@ -21,7 +25,6 @@
     "test:mcp": "node test_mcp.mjs"
   },
   "dependencies": {
-    "@types/three": "^0.187.0",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -31,6 +34,7 @@
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
+    "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
     "electron": "^45.2.1",

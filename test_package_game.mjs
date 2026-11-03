@@ -1,8 +1,6 @@
 import WebSocket from 'ws';
 
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-async function runTest() {
+export async function runPackageGameTest() {
     const ws = new WebSocket('ws://127.0.0.1:9000');
     await new Promise((resolve, reject) => {
         ws.on('open', resolve);
@@ -15,13 +13,15 @@ async function runTest() {
             const id = msgId++;
             const handler = (data) => {
                 try {
-                    const msg = JSON.parse(data.toString());
+                    const text = data.toString();
+                    if (!text.startsWith('{')) return;
+                    const msg = JSON.parse(text);
                     if (msg.id === id) {
                         ws.off('message', handler);
                         if (msg.error) reject(new Error(msg.error.message));
                         else resolve(msg.result);
                     }
-                } catch (e) {}
+                } catch {}
             };
             ws.on('message', handler);
             ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
@@ -40,9 +40,12 @@ async function runTest() {
 
     console.log('✅ TEST PASSED: Standalone PC game successfully packaged!');
     ws.close();
+    return true;
 }
 
-runTest().catch(err => {
-    console.error('❌ TEST FAILED:', err);
-    process.exit(1);
-});
+if (process.argv[1] && process.argv[1].endsWith('test_package_game.mjs')) {
+    runPackageGameTest().then(() => process.exit(0)).catch(err => {
+        console.error('❌ TEST FAILED:', err);
+        process.exit(1);
+    });
+}

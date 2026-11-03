@@ -48,6 +48,10 @@ async function ensureNativeEngine() {
   const listening = await isEngineListening(9000);
   if (!listening) {
     const engineExe = path.join(__dirname, 'engine', 'build', 'Release', 'engine.exe');
+    if (!fs.existsSync(engineExe)) {
+      log('[Electron] Native engine executable not found at: ' + engineExe);
+      return;
+    }
     log('[Electron] Starting native C++ engine: ' + engineExe);
     try {
       engineProcess = spawn(engineExe, ['--headless'], {
@@ -77,15 +81,31 @@ async function ensureNativeEngine() {
 
 function isViteRunning() {
   return new Promise((resolve) => {
-    const req = http.get('http://127.0.0.1:3000', (res) => {
+    const req = http.get('http://127.0.0.1:3000', () => {
       resolve(true);
     });
     req.on('error', () => resolve(false));
     req.setTimeout(800, () => {
-      req.abort();
+      req.destroy();
       resolve(false);
     });
   });
+}
+
+function terminateEngineProcess() {
+  if (engineProcess && !engineProcess.killed) {
+    log('[Electron] Terminating native engine child process (PID: ' + engineProcess.pid + ')...');
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(engineProcess.pid), '/f', '/t'], { stdio: 'ignore', windowsHide: true });
+      } else {
+        engineProcess.kill('SIGTERM');
+      }
+    } catch (err) {
+      log('[Electron] Error terminating engine process: ' + err);
+    }
+    engineProcess = null;
+  }
 }
 
 async function createWindow() {
@@ -97,19 +117,23 @@ async function createWindow() {
     height: 950,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Lucid Engine',
+    title: 'Lucid Engine Studio',
     backgroundColor: '#0a0a0f',
     icon: path.join(__dirname, 'public', 'favicon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false, // Allows seamless local WebSocket and asset access
+      webSecurity: false, // Required for seamless local WebSocket & binary IPC buffers
     },
     show: true,
   });
 
   Menu.setApplicationMenu(null);
+
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    log(`[Electron] Window failed to load: ${errorDescription} (${errorCode})`);
+  });
 
   const viteReady = await isViteRunning();
   if (viteReady) {
@@ -131,13 +155,12 @@ async function createWindow() {
 
 app.whenReady().then(createWindow);
 
+app.on('before-quit', () => {
+  terminateEngineProcess();
+});
+
 app.on('window-all-closed', () => {
-  if (engineProcess) {
-    console.log('[Electron] Terminating native engine child process...');
-    try {
-      engineProcess.kill('SIGINT');
-    } catch { }
-  }
+  terminateEngineProcess();
   if (process.platform !== 'darwin') {
     app.quit();
   }
