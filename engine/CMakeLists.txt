@@ -139,6 +139,7 @@ set(SHADER_FILES
     src/shaders/gtao.frag
     src/shaders/gtao_blur.frag
     src/shaders/composite.frag
+    src/shaders/skybox.frag
 )
 
 set(SPV_FILES "")
@@ -199,6 +200,13 @@ add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts
     $<TARGET_FILE_DIR:engine>/assets/fonts
+)
+
+# Copy textures next to the executable
+add_custom_command(TARGET engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures
+    $<TARGET_FILE_DIR:engine>/assets/textures
 )
 
 target_include_directories(engine PRIVATE include)

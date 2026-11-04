@@ -48,3 +48,6 @@ test_*.mp4
 # Generated AI assets
 public/assets/aistudio/*
 !public/assets/aistudio/.gitignore
+
+# .old. files
+*.old.*

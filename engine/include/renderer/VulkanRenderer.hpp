@@ -3,6 +3,8 @@
 #include "ecs/Registry.hpp"
 #include <vector>
 #include <string>
+#include <array>
+#include <algorithm>
 
 namespace engine {
     namespace core {
@@ -66,6 +68,8 @@ namespace engine::renderer {
         void cleanupPointShadowResources();
         void createEnvironmentResources();
         void cleanupEnvironmentResources();
+        void createSkyboxPipeline();
+        void cleanupSkyboxPipeline();
         void loadEnvironmentHdri(int index);
         void createDefaultTextures();
         void cleanupDefaultTextures();
@@ -89,7 +93,7 @@ namespace engine::renderer {
         uint32_t m_baseHeight{1080};
         float m_resolutionScale{1.0f};
         float m_uiScale{1.0f};
-        float m_shadowDistance{48.0f};
+        float m_shadowDistance{150.0f};
         int m_antiAliasingMode{2};
 
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
@@ -101,10 +105,10 @@ namespace engine::renderer {
         VkSampler m_viewportSampler{VK_NULL_HANDLE};
         VkDescriptorSet m_viewportDescriptor{VK_NULL_HANDLE};
 
-        // HDR & Post-Processing (Bloom Dual-Kawase & Tone Mapping)
+        // HDR & Post-Processing (Bloom Dual-Kawase & Tone Mapping - fizycznie skalibrowane domyślne wartości)
         bool m_bloomEnabled{true};
-        float m_bloomIntensity{0.80f};
-        float m_bloomThreshold{1.0f};
+        float m_bloomIntensity{0.68f};
+        float m_bloomThreshold{1.25f};
 
         VkImage m_hdrImage{VK_NULL_HANDLE};
         VmaAllocation m_hdrAllocation{VK_NULL_HANDLE};
@@ -122,8 +126,8 @@ namespace engine::renderer {
 
         // Ground Truth Ambient Occlusion (GTAO)
         bool m_gtaoEnabled{true};
-        float m_gtaoRadius{0.80f};
-        float m_gtaoIntensity{1.50f};
+        float m_gtaoRadius{0.75f};
+        float m_gtaoIntensity{1.15f};
 
         VkImage m_aoImage{VK_NULL_HANDLE};
         VmaAllocation m_aoAllocation{VK_NULL_HANDLE};
@@ -154,6 +158,10 @@ namespace engine::renderer {
         VmaAllocation m_environmentAlloc{VK_NULL_HANDLE};
         VkImageView m_environmentImageView{VK_NULL_HANDLE};
         VkSampler m_environmentSampler{VK_NULL_HANDLE};
+        VkPipelineLayout m_skyboxPipelineLayout{VK_NULL_HANDLE};
+        VkPipeline m_skyboxPipeline{VK_NULL_HANDLE};
+        bool m_autoViewportResolution{true};
+        int m_resolutionPresetIndex{0};
 
         // Default PBR Material Textures (Albedo, Tangent Normal, ORM)
         VkImage m_defaultAlbedoImage{VK_NULL_HANDLE};
@@ -223,12 +231,12 @@ namespace engine::renderer {
         struct SceneUboData {
             glm::mat4 cascadeLightSpace[4]{};
             glm::vec4 cascadeSplits{7.0f, 18.0f, 45.0f, 150.0f};
-            glm::vec4 sunDirection{0.55f, 0.85f, 0.40f, 3.4f};
+            glm::vec4 sunDirection{0.55f, 0.85f, 0.40f, 2.8f};
             glm::vec4 sunPosition{0.0f, 18.0f, 0.0f, 1.0f};
             glm::vec4 sunColor{1.0f, 0.97f, 0.92f, 1.0f};
             glm::vec4 ambientColor{0.15f, 0.22f, 0.35f, 1.0f};
             glm::vec4 fogParams{0.0f, 20.0f, 100.0f, 0.0f};
-            glm::vec4 fogColor{0.06f, 0.07f, 0.09f, 1.0f};
+            glm::vec4 fogColor{0.006f, 0.008f, 0.016f, 1.0f};
             glm::vec4 lightsPos[8]{};
             glm::vec4 lightsCol[8]{};
             glm::vec4 lightsDir[8]{};

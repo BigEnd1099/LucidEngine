@@ -40,6 +40,7 @@ namespace engine::renderer {
         createDefaultTextures();
         createEnvironmentResources();
         loadEnvironmentHdri(m_selectedHdriIndex);
+        createSkyboxPipeline();
         createDescriptorSets();
         createShadowPipeline();
         createComputePipelines();
@@ -73,6 +74,7 @@ namespace engine::renderer {
             cleanupPostProcessResources();
             cleanupShadowResources();
             cleanupPointShadowResources();
+            cleanupSkyboxPipeline();
             cleanupEnvironmentResources();
             cleanupDefaultTextures();
             cleanupOffscreenTarget();
@@ -711,6 +713,146 @@ namespace engine::renderer {
         }
     }
 
+    void VulkanRenderer::createSkyboxPipeline() {
+        VkDevice device = m_context->getDevice();
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::vec4);
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = 1;
+        layoutInfo.pSetLayouts = &m_descriptorSetLayout;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_skyboxPipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create skybox pipeline layout!");
+        }
+
+        auto vertCode = utils::readFile("fullscreen.vert.spv");
+        auto fragCode = utils::readFile("skybox.frag.spv");
+
+        auto createMod = [&](const std::vector<char>& code) {
+            VkShaderModuleCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            createInfo.codeSize = code.size();
+            createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+            VkShaderModule mod = VK_NULL_HANDLE;
+            if (vkCreateShaderModule(device, &createInfo, nullptr, &mod) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create shader module!");
+            }
+            return mod;
+        };
+
+        VkShaderModule vertModule = createMod(vertCode);
+        VkShaderModule fragModule = createMod(fragCode);
+
+        VkPipelineShaderStageCreateInfo vertStage{};
+        vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertStage.module = vertModule;
+        vertStage.pName = "main";
+
+        VkPipelineShaderStageCreateInfo fragStage{};
+        fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragStage.module = fragModule;
+        fragStage.pName = "main";
+
+        VkPipelineShaderStageCreateInfo stages[] = {vertStage, fragStage};
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_FALSE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL; // Only background pixels (z == 1.0)
+
+        VkPipelineColorBlendAttachmentState colorBlend{};
+        colorBlend.colorWriteMask = 0xF;
+        colorBlend.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlend;
+
+        std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
+
+        VkFormat colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+
+        VkPipelineRenderingCreateInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachmentFormats = &colorFormat;
+        renderingInfo.depthAttachmentFormat = depthFormat;
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.pNext = &renderingInfo;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = stages;
+        pipelineInfo.pVertexInputState = &vertexInput;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_skyboxPipelineLayout;
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_skyboxPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create skybox graphics pipeline!");
+        }
+
+        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, vertModule, nullptr);
+    }
+
+    void VulkanRenderer::cleanupSkyboxPipeline() {
+        if (!m_context || !m_context->getDevice()) return;
+        VkDevice device = m_context->getDevice();
+        if (m_skyboxPipeline) {
+            vkDestroyPipeline(device, m_skyboxPipeline, nullptr);
+            m_skyboxPipeline = VK_NULL_HANDLE;
+        }
+        if (m_skyboxPipelineLayout) {
+            vkDestroyPipelineLayout(device, m_skyboxPipelineLayout, nullptr);
+            m_skyboxPipelineLayout = VK_NULL_HANDLE;
+        }
+    }
+
     void VulkanRenderer::cleanupEnvironmentResources() {
         if (!m_context || !m_context->getDevice()) return;
         VkDevice device = m_context->getDevice();
@@ -841,7 +983,7 @@ namespace engine::renderer {
         imageInfo.extent.height = m_shadowHeight;
         imageInfo.extent.depth = 1;
         imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
+        imageInfo.arrayLayers = SHADOW_CASCADE_COUNT;
         imageInfo.format = VK_FORMAT_D32_SFLOAT;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -855,19 +997,38 @@ namespace engine::renderer {
             throw std::runtime_error("failed to create shadow depth image!");
         }
 
+        // 2D Array view covering all 4 cascades for PBR shader sampling
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = m_shadowImage;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         viewInfo.format = VK_FORMAT_D32_SFLOAT;
         viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        viewInfo.subresourceRange.layerCount = SHADOW_CASCADE_COUNT;
 
         if (vkCreateImageView(m_context->getDevice(), &viewInfo, nullptr, &m_shadowImageView) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create shadow depth image view!");
+            throw std::runtime_error("failed to create shadow depth array view!");
+        }
+
+        // Single layer 2D views for rendering each cascade individually
+        for (uint32_t c = 0; c < SHADOW_CASCADE_COUNT; ++c) {
+            VkImageViewCreateInfo cascadeViewInfo{};
+            cascadeViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            cascadeViewInfo.image = m_shadowImage;
+            cascadeViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            cascadeViewInfo.format = VK_FORMAT_D32_SFLOAT;
+            cascadeViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            cascadeViewInfo.subresourceRange.baseMipLevel = 0;
+            cascadeViewInfo.subresourceRange.levelCount = 1;
+            cascadeViewInfo.subresourceRange.baseArrayLayer = c;
+            cascadeViewInfo.subresourceRange.layerCount = 1;
+
+            if (vkCreateImageView(m_context->getDevice(), &cascadeViewInfo, nullptr, &m_shadowCascadeImageViews[c]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create cascade image view!");
+            }
         }
 
         // Exact raw depth sampling without pre-comparison linear depth distortion
@@ -2555,7 +2716,7 @@ namespace engine::renderer {
         depthAttachment.imageView = m_depthImageView;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         depthAttachment.clearValue.depthStencil = {1.0f, 0};
 
         VkRenderingInfo renderInfo{};
@@ -2568,6 +2729,16 @@ namespace engine::renderer {
         renderInfo.pDepthAttachment = &depthAttachment;
 
         vkCmdBeginRendering(m_commandBuffer, &renderInfo);
+
+#ifdef USE_GLFW
+        float sceneAspect = (m_standaloneGameMode || m_viewportAspectRatio <= 0.1f) ? (static_cast<float>(m_width) / static_cast<float>(m_height)) : m_viewportAspectRatio;
+#else
+        float sceneAspect = static_cast<float>(m_width) / static_cast<float>(m_height);
+#endif
+        float sceneFov = engine ? engine->getCameraFov() : 45.0f;
+        if (sceneFov < 10.0f || sceneFov > 140.0f) sceneFov = 45.0f;
+        glm::mat4 projection = glm::perspective(glm::radians(sceneFov), sceneAspect, 0.1f, 1000.0f);
+        projection[1][1] *= -1.0f;
 
         if (m_graphicsPipeline) {
             vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
@@ -2682,15 +2853,7 @@ namespace engine::renderer {
             pcs.lightSpaceMatrix = lightSpaceMatrix;
             pcs.cameraPos = glm::vec4(camPos, 0.0f);
 
-#ifdef USE_GLFW
-            float aspect = (m_standaloneGameMode || m_viewportAspectRatio <= 0.1f) ? (viewport.width / viewport.height) : m_viewportAspectRatio;
-#else
-            float aspect = viewport.width / viewport.height;
-#endif
-            float fovDeg = engine ? engine->getCameraFov() : 45.0f;
-            if (fovDeg < 10.0f || fovDeg > 140.0f) fovDeg = 45.0f;
-            glm::mat4 projection = glm::perspective(glm::radians(fovDeg), aspect, 0.1f, 1000.0f);
-            projection[1][1] *= -1.0f;
+// projection calculated above
             glm::mat4 vp = projection * viewMatrix;
 
             auto view = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
@@ -2793,6 +2956,13 @@ namespace engine::renderer {
                 }
             }
         }
+
+        // Realistic HDRI Panorama Skybox Pass disabled for debugging
+        /*
+        if (m_skyboxPipeline && m_environmentImage) {
+            // ...
+        }
+        */
 
         // Render Particles
         if (m_particlePipeline && m_particleMappedPtr) {
@@ -5034,6 +5204,7 @@ namespace engine::renderer {
             ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
             if (viewportPanelSize.x > 10.0f && viewportPanelSize.y > 10.0f) {
                 m_viewportAspectRatio = viewportPanelSize.x / viewportPanelSize.y;
+// auto-resolution disabled in renderImGui to prevent continuous recreate loop
             }
 
             if (m_viewportDescriptor != VK_NULL_HANDLE && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
@@ -6322,19 +6493,39 @@ namespace engine::renderer {
                         ImGui::TextDisabled("Screen-space depth horizon integration + Bilateral depth-edge filter.");
                     }
 
-                    if (ImGui::CollapsingHeader("Anti-Aliasing (NVIDIA FXAA 3.11)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    if (ImGui::CollapsingHeader("Anti-Aliasing & Rozdzielczosc (4K / FXAA 3.11)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        const char* resPresets[] = {
+                            "0: Auto 1:1 Pixel-Perfect (Dopasuj do okna Viewportu / 4K UHD)",
+                            "1: Natywne 4K UHD (3840x2160)",
+                            "2: Natywne 1440p QHD (2560x1440)",
+                            "3: Standardowe 1080p FHD (1920x1080)",
+                            "4: Wydajne 720p HD (1280x720)"
+                        };
+                        if (ImGui::Combo("Tryb Rozdzielczosci", &m_resolutionPresetIndex, resPresets, IM_ARRAYSIZE(resPresets))) {
+                            if (m_resolutionPresetIndex == 0) {
+                                m_autoViewportResolution = true;
+                            } else {
+                                m_autoViewportResolution = false;
+                                if (m_resolutionPresetIndex == 1) setRenderResolution(3840, 2160);
+                                else if (m_resolutionPresetIndex == 2) setRenderResolution(2560, 1440);
+                                else if (m_resolutionPresetIndex == 3) setRenderResolution(1920, 1080);
+                                else if (m_resolutionPresetIndex == 4) setRenderResolution(1280, 720);
+                            }
+                        }
+                        ImGui::Text("Aktualna rozdzielczosc bufora: %u x %u px", m_width, m_height);
+
                         const char* aaModes[] = {
                             "0: Off (Brak AA)",
                             "1: FXAA Fast (Szybki)",
                             "2: FXAA Quality (Subpixel - Aktywny)",
-                            "3: FXAA Ultra (Maksymalne wygladzanie)"
+                            "3: FXAA Ultra (Maksymalne wygladzanie krawedzi)"
                         };
                         int curAA = m_antiAliasingMode;
-                        if (ImGui::Combo("AA Method", &curAA, aaModes, IM_ARRAYSIZE(aaModes))) {
+                        if (ImGui::Combo("Preset AA", &curAA, aaModes, IM_ARRAYSIZE(aaModes))) {
                             m_antiAliasingMode = curAA;
                         }
-                        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.5f, 1.0f), "FXAA 3.11: Aktywny w calym Viewporcie w czasie rzeczywistym.");
-                        ImGui::TextDisabled("Wygladza krawedzie geometrii, cieni i modeli z subpikselowym filtrem.");
+                        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.5f, 1.0f), "NVIDIA FXAA 3.11: Aktywny na buforze kompozytowym.");
+                        ImGui::TextDisabled("Wygadza krawedzie geometrii, cienie i modele bez rozmycia UI.");
                     }
 
                     if (ImGui::CollapsingHeader("Shadows & Quality (Jakosc Cieni)", ImGuiTreeNodeFlags_DefaultOpen)) {
