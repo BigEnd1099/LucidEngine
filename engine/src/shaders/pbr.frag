@@ -400,7 +400,9 @@ void main() {
 
     // 3. Prekalkulowane na GPU oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
     vec2 screenUV = gl_FragCoord.xy * ubo.screenParams.zw;
-    float ssao = texture(ssaoMap, screenUV).r;
+    vec4 gtaoData = texture(ssaoMap, screenUV);
+    float ssao = gtaoData.a;
+    vec3 ssgiDiffuse = gtaoData.rgb;
     float matAO = (pcs.baseColorFactor.a > 0.001) ? min(orm.r, pcs.baseColorFactor.a) : orm.r;
     float combinedAO = clamp(ssao * matAO, 0.0, 1.0);
 
@@ -424,52 +426,39 @@ void main() {
     float iblIntensity = max(ubo.ambientColor.w, 0.0);
     vec3 ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
 
-    // 3B. Indirect Diffuse GI: fizyczne wtórne odbicie od nieskończonej płaszczyzny Lamberta
-    //
-    // Model matematyczny (całka kosinusowa po półsferze dolnej):
-    //   E_ground = sunColor * sunIntensity * max(sunDir.y, 0)         (irradiancja na podłożu)
-    //   L_ground = (rho_ground / pi) * E_ground                       (luminancja wychodząca z podłoża)
-    //   E_bounce = pi * L_ground * (1 - N.y) / 2                     (irradiancja od dolnej półsfery na fragmencie)
-    //   L_out    = (rho_surface / pi) * E_bounce                      (luminancja wyjściowa po odbiciu)
-    //
-    // Po uproszczeniu pi się redukuje:
-    //   L_out = rho_surface * rho_ground * groundTint * sunColor * sunIntensity * max(sunDir.y, 0) * (1-N.y)/2
-    //
-    // Kluczowe różnice vs. stara wersja:
-    //   - Brak heightAtten (dla nieskończonej płaszczyzny form-factor nie zależy od wysokości)
-    //   - AO tłumi bounce na stykach (combinedAO ≈ 0 → bounce ≈ 0, zamiast contact glow)
-    //   - Brak albedo^2 color bleed (zachowanie energii: wyjście zawsze < wejście)
-    //   - Brak wirtualnych punktów odbicia od podłoża (eliminacja light leaking)
+    // 3B. Indirect Diffuse GI: Color Bleed od kazdego elementu (SSGI) + analityczny Ground Bounce
     vec3 bounceLighting = vec3(0.0);
     if (ubo.bounceParams.x > 0.5) {
         float bounceIntensity = ubo.bounceParams.y;
         float groundAlbedo = ubo.bounceParams.z;
         vec3 groundTint = ubo.bounceColor.rgb;
 
-        // A. Wtórne odbicie słoneczne od podłoża (Sun Ground Bounce)
-        if (sunIntensity > 0.001) {
-            // Irradiancja słoneczna padająca na podłoże (kąt padania = sunDir.y)
-            float sunOnGround = max(sunDir.y, 0.0) * sunIntensity;
+        // Wspolczynnik kD dla swiatla posredniego wyliczany z F_SchlickRoughness(N.V)
+        vec3 F_bounce = fresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD_bounce = (vec3(1.0) - F_bounce) * (1.0 - metallic);
 
-            // Exitancja podłoża: energia opuszczająca powierzchnię ziemi (Lambertowski emiter)
-            // rho_ground * E_sun (pi w luminancji i pi w całce półsferycznej się redukują)
-            vec3 groundExitance = ubo.sunColor.rgb * sunOnGround * groundAlbedo * groundTint;
+        // 1. SCREEN-SPACE DIFFUSE GI (COLOR BLEEDING OD KAZDEGO WIDOCZNEGO ELEMENTU WRAZ Z JEGO TEKSTURA)
+        vec3 ssgiBounce = (kD_bounce * albedo) * ssgiDiffuse;
 
-            // Geometryczny współczynnik widoczności dolnej półsfery:
-            //   N.y = -1 (spód obiektu)   → widzi 100% ziemi → waga 1.0
-            //   N.y =  0 (ściana pionowa)  → widzi 50% ziemi  → waga 0.5
-            //   N.y = +1 (góra / ziemia)   → nie widzi ziemi  → waga 0.0
-            float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
+        // 2. ANALITYCZNY GROUND BOUNCE (Far-field / Fallback GI z dzieleniem przez PI)
+        vec3 groundBounce = vec3(0.0);
+        float groundY = 0.0;
+        float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
 
-            // Wkład do oświetlenia z zachowaniem energii:
-            //   kD           — tłumienie dyfuzji przez Fresnela i metaliczność (1-F)(1-metal)
-            //   albedo       — współczynnik odbicia powierzchni docelowej
-            //   combinedAO   — okluzja otoczenia (KLUCZOWE: na stykach AO≈0 → bounce≈0)
-            bounceLighting += kD * albedo * groundExitance * hemisphereWeight * combinedAO;
+        // A. Wtorne odbicie sloneczne od podloza z okluzja cienia
+        if (sunIntensity > 0.001 && hemisphereWeight > 0.001) {
+            vec3 floorPt = vec3(fragWorldPos.x, groundY, fragWorldPos.z) + vec3(N.x, 0.0, N.z) * 0.5;
+            vec3 floorN = vec3(0.0, 1.0, 0.0);
+            float floorViewDepth = length(ubo.cameraPos.xyz - floorPt);
+            float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewDepth, ign);
+
+            float sunOnGround = max(sunDir.y, 0.0) * sunIntensity * floorSunShadow;
+            vec3 groundExitance = ubo.sunColor.rgb * sunOnGround * (groundAlbedo * groundTint);
+
+            groundBounce += (kD_bounce * albedo / PI) * groundExitance * hemisphereWeight * combinedAO;
         }
 
-        // B. Wtórne odbicie od podłoża dla świateł lokalnych (Point/Spot Ground Bounce)
-        // Model: nieskończona płaszczyzna Lamberta oświetlona punktowo z zanikiem 1/(1+d²)
+        // B. Wtorne odbicie od podloza dla swiatel lokalnych (Point & Spot z uwzglednieniem wysokosci i stozka)
         for (int i = 0; i < lightCount; ++i) {
             vec3 lPos = ubo.lightsPos[i].xyz;
             float lRange = max(ubo.lightsPos[i].w, 0.1);
@@ -477,27 +466,35 @@ void main() {
             float lIntensity = ubo.lightsCol[i].w;
             if (lIntensity <= 0.001) continue;
 
-            // Odległość źródła od podłoża → irradiancja na podłożu pod źródłem
-            float lightHeight = max(lPos.y, 0.01);
-            float lightOnGround = lIntensity / (1.0 + lightHeight * lightHeight);
+            float hL = lPos.y - groundY;
+            if (hL <= 0.0) continue;
 
-            // Odległość fragmentu od projekcji światła na podłoże
-            vec2 groundOffset = fragWorldPos.xz - lPos.xz;
-            float groundDist2 = dot(groundOffset, groundOffset);
-            float groundSpread = lightOnGround / (1.0 + groundDist2 * 0.25);
+            float hFrag = max(fragWorldPos.y - groundY, 0.0);
+            vec2 dXZ = fragWorldPos.xz - lPos.xz;
+            float dBounceSq = dot(dXZ, dXZ) + (hL + hFrag) * (hL + hFrag);
 
-            // Obcinanie zasięgu (poza range nie ma efektu)
             float dist = length(lPos - fragWorldPos);
             if (dist >= lRange) continue;
             float rangeFade = clamp(1.0 - dist / lRange, 0.0, 1.0);
             rangeFade *= rangeFade;
 
-            float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
-            vec3 localExitance = lCol * groundSpread * groundAlbedo * groundTint * rangeFade;
-            bounceLighting += kD * albedo * localExitance * hemisphereWeight * combinedAO;
+            float bounceAtten = rangeFade / (1.0 + dBounceSq);
+
+            int lType = int(ubo.lightsDir[i].w + 0.5);
+            if (lType == 1) { // Spot
+                vec3 spotDir = normalize(ubo.lightsDir[i].xyz);
+                float spotGroundCos = dot(spotDir, vec3(0.0, -1.0, 0.0));
+                float innerCos = ubo.lightsParams[i].x;
+                float outerCos = ubo.lightsParams[i].y;
+                float spotCone = clamp((spotGroundCos - outerCos) / max(innerCos - outerCos, 1e-4), 0.0, 1.0);
+                bounceAtten *= (spotCone * spotCone);
+            }
+
+            vec3 localGroundExitance = lCol * (lIntensity * bounceAtten) * (groundAlbedo * groundTint);
+            groundBounce += (kD_bounce * albedo / PI) * localGroundExitance * hemisphereWeight * combinedAO;
         }
 
-        bounceLighting *= bounceIntensity;
+        bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
 
     // 4. Emisja (nie podlega tłumieniu przez AO!)

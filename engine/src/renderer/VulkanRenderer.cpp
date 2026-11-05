@@ -1016,7 +1016,15 @@ namespace engine::renderer {
                 m_lightBounceGroundReflectance,
                 m_lightBounceMultiBounce
             );
-            ubo.bounceColor = glm::vec4(m_lightBounceGroundColor, 1.0f);
+            auto srgbToLinear = [](float c) {
+                return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);
+            };
+            glm::vec3 linearGroundColor(
+                srgbToLinear(m_lightBounceGroundColor.r),
+                srgbToLinear(m_lightBounceGroundColor.g),
+                srgbToLinear(m_lightBounceGroundColor.b)
+            );
+            ubo.bounceColor = glm::vec4(linearGroundColor, 1.0f);
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
             ubo.skyboxMode = m_skyboxEnabled ? 1 : 0;
 
@@ -1420,7 +1428,7 @@ namespace engine::renderer {
             clearAo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             clearAo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             clearAo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            clearAo.clearValue.color = { {1.0f, 1.0f, 1.0f, 1.0f} };
+            clearAo.clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 
             VkRenderingInfo clearRi{ VK_STRUCTURE_TYPE_RENDERING_INFO };
             clearRi.renderArea = { {0, 0}, {m_width, m_height} };

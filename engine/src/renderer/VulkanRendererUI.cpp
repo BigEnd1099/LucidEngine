@@ -1642,13 +1642,14 @@ namespace engine::renderer {
                         }
                     }
 
-                    if (ImGui::CollapsingHeader("Indirect Diffuse GI (Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Ground Bounce Active (Odbicia od podloza)", &m_lightBounceEnabled);
+                    if (ImGui::CollapsingHeader("Indirect Diffuse GI (SSGI & Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::Checkbox("GI & Bounce Active (Globalne oswietlenie)", &m_lightBounceEnabled);
                         if (m_lightBounceEnabled) {
                             ImGui::SliderFloat("Bounce Intensity", &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
-                            ImGui::SliderFloat("Ground Albedo (Jasnosc podloza)", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
-                            ImGui::ColorEdit3("Ground Color (Barwa podloza)", &m_lightBounceGroundColor.x);
-                            ImGui::TextDisabled("Fizyczny model: AO tlumi bounce na stykach");
+                            ImGui::SliderFloat("Ground Albedo", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
+                            ImGui::ColorEdit3("Ground Color (sRGB)", &m_lightBounceGroundColor.x);
+                            ImGui::TextDisabled("SSGI: Color bleed od kazdego elementu i tekstury");
+                            ImGui::TextDisabled("Ground Bounce: Odbicie podloza z cieniem slonca i 1/PI");
                         }
                     }
 

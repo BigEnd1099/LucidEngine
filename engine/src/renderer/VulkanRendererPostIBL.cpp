@@ -436,11 +436,11 @@ namespace engine::renderer {
             mipH = std::max(1u, mipH / 2u);
         }
 
-        createImg2D(m_width, m_height, 1, VK_FORMAT_R8_UNORM,
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_aoImage, m_aoAllocation, m_aoImageView);
 
-        createImg2D(m_width, m_height, 1, VK_FORMAT_R8_UNORM,
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_aoBlurImage, m_aoBlurAllocation, m_aoBlurImageView);
 
@@ -493,6 +493,10 @@ namespace engine::renderer {
                         VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
                         VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        transitionImage(cmd, m_hdrImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
+                        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         transitionImage(cmd, m_aoBlurImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
                         VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
@@ -504,7 +508,7 @@ namespace engine::renderer {
         clearAo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         clearAo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         clearAo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        clearAo.clearValue.color = { {1.0f, 1.0f, 1.0f, 1.0f} };
+        clearAo.clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 
         VkRenderingInfo ri{};
         ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -1237,7 +1241,7 @@ namespace engine::renderer {
             return ds;
         };
 
-        m_gtaoDescSet         = allocSet(m_singleTextureDescLayout);
+        m_gtaoDescSet         = allocSet(m_dualTextureDescLayout);
         m_gtaoBlurDescSet     = allocSet(m_dualTextureDescLayout);
         m_bloomDownHdrDescSet = allocSet(m_singleTextureDescLayout);
         for (uint32_t i = 0; i < BLOOM_MIP_COUNT; ++i) {
@@ -1256,14 +1260,14 @@ namespace engine::renderer {
             vkCreatePipelineLayout(dev, &pl, nullptr, outLayout);
         };
 
-        makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4) * 2, &m_gtaoPipelineLayout);
-        makeLayout(m_dualTextureDescLayout,   sizeof(glm::vec4),     &m_gtaoBlurPipelineLayout);
+        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 2, &m_gtaoPipelineLayout);
+        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4),     &m_gtaoBlurPipelineLayout);
         makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4),     &m_bloomPipelineLayout);
         makeLayout(m_dualTextureDescLayout,   sizeof(glm::vec4) * 2, &m_compositePipelineLayout);
         makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4),     &m_fxaaPipelineLayout);
 
-        createFullscreenPipeline("gtao.frag.spv",             m_gtaoPipelineLayout,      VK_FORMAT_R8_UNORM,           &m_gtaoPipeline,      false);
-        createFullscreenPipeline("gtao_blur.frag.spv",        m_gtaoBlurPipelineLayout,  VK_FORMAT_R8_UNORM,           &m_gtaoBlurPipeline,  false);
+        createFullscreenPipeline("gtao.frag.spv",             m_gtaoPipelineLayout,      VK_FORMAT_R16G16B16A16_SFLOAT,&m_gtaoPipeline,      false);
+        createFullscreenPipeline("gtao_blur.frag.spv",        m_gtaoBlurPipelineLayout,  VK_FORMAT_R16G16B16A16_SFLOAT,&m_gtaoBlurPipeline,  false);
         createFullscreenPipeline("bloom_downsample.frag.spv", m_bloomPipelineLayout,     VK_FORMAT_R16G16B16A16_SFLOAT,&m_bloomDownPipeline, false);
         createFullscreenPipeline("bloom_upsample.frag.spv",   m_bloomPipelineLayout,     VK_FORMAT_R16G16B16A16_SFLOAT,&m_bloomUpPipeline,   true);
         createFullscreenPipeline("composite.frag.spv",        m_compositePipelineLayout, VK_FORMAT_R8G8B8A8_UNORM,     &m_compositePipeline, false);
@@ -1290,6 +1294,7 @@ namespace engine::renderer {
         };
 
         bind1(m_gtaoDescSet,         0, m_depthSampler,  m_depthImageView,   VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        bind1(m_gtaoDescSet,         1, m_linearSampler, m_hdrImageView,     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         bind1(m_gtaoBlurDescSet,     0, m_linearSampler, m_aoImageView,      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         bind1(m_gtaoBlurDescSet,     1, m_depthSampler,  m_depthImageView,   VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
         bind1(m_bloomDownHdrDescSet, 0, m_linearSampler, m_hdrImageView,     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

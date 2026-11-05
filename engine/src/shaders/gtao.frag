@@ -1,9 +1,10 @@
 #version 450
 
 layout(location = 0) in vec2 fragUV;
-layout(location = 0) out float outAO;
+layout(location = 0) out vec4 outAOGI; // rgb = indirect diffuse GI (color bleed), a = AO
 
 layout(set = 0, binding = 0) uniform sampler2D depthTex;
+layout(set = 0, binding = 1) uniform sampler2D colorTex; // Scene HDR lit/textured color from previous frame
 
 layout(push_constant) uniform GtaoPush {
     vec4 params;       // x = worldRadius, y = intensity, z = tanHalfFovY, w = aspect
@@ -19,7 +20,7 @@ float linearizeDepth(float d) {
     return (zNear * zFar) / max(zFar - d * (zFar - zNear), 1e-6);
 }
 
-// Bezpośrednia rekonstrukcja pozycji w przestrzeni widoku (3 mnożenia zamiast macierzy odwrotnej)
+// Bezposrednia rekonstrukcja pozycji w przestrzeni widoku
 vec3 uvToViewPos(vec2 uv, float rawDepth) {
     float z = linearizeDepth(rawDepth);
     vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
@@ -40,14 +41,13 @@ float fastAcos(float x) {
 void main() {
     float centerRawDepth = texture(depthTex, fragUV).r;
     if (centerRawDepth >= 0.9999) {
-        outAO = 1.0;
+        outAOGI = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
     vec3 viewPos = uvToViewPos(fragUV, centerRawDepth);
     float viewDist = -viewPos.z;
 
-    // Normalna skierowana w stronę kamery (+Z w przestrzeni widoku przy konwencji Y-w-dół Vulkana)
     vec3 dpdx = dFdx(viewPos);
     vec3 dpdy = dFdy(viewPos);
     vec3 viewNormal = normalize(cross(dpdy, dpdx));
@@ -58,7 +58,7 @@ void main() {
     vec2 radiusUV = vec2(worldRadius * projScale / (viewDist * pcs.params.w), worldRadius * projScale / viewDist);
     float maxRadiusPx = radiusUV.y / max(pcs.screenParams.y, 1e-5);
     if (maxRadiusPx < 1.5) {
-        outAO = 1.0;
+        outAOGI = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
     radiusUV = min(radiusUV, vec2(0.12));
@@ -70,6 +70,9 @@ void main() {
     const int STEPS_PER_SIDE = 4;
     float visibility = 0.0;
     float falloffRange = worldRadius * 1.35;
+
+    vec3 accumGI = vec3(0.0);
+    float accumWeight = 0.0;
 
     for (int slice = 0; slice < NUM_SLICES; ++slice) {
         float phi = noiseAngle + (float(slice) / float(NUM_SLICES)) * PI;
@@ -91,7 +94,7 @@ void main() {
             s = max(s * s, 1.25 * pcs.screenParams.y / max(radiusUV.y, 1e-5));
             vec2 offsetUV = omega * radiusUV * s;
 
-            // Dodatnia i ujemna półprosta horyzontu
+            // Dodatnia i ujemna polprosta horyzontu
             for (int side = 0; side < 2; ++side) {
                 vec2 sampleUV = clamp(fragUV + (side == 0 ? offsetUV : -offsetUV), vec2(0.001), vec2(0.999));
                 float sDepth = texture(depthTex, sampleUV).r;
@@ -100,9 +103,23 @@ void main() {
                 float dist = length(diff);
                 if (dist > 1e-4) {
                     float cosH = dot(diff / dist, viewDir);
-                    // Heurystyka cienkich obiektów (eliminuje ciemne halo wokół bliższych krawędzi)
                     float weight = clamp(1.0 - (dist / falloffRange) * (dist / falloffRange), 0.0, 1.0);
                     maxHorizons[side] = max(maxHorizons[side], mix(-1.0, cosH, weight));
+
+                    // --- SCREEN-SPACE DIFFUSE GI (COLOR BLEED OD KAZDEGO ELEMENTU Z JEGO TEKSTURA) ---
+                    vec3 L = diff / dist;
+                    float NdotL = max(dot(viewNormal, L), 0.0);
+                    if (NdotL > 0.001 && dist < falloffRange) {
+                        vec3 sampleColor = texture(colorTex, sampleUV).rgb;
+                        // Firefly clamping: przyciecie pikow HDR powyzej 6.0
+                        sampleColor = min(sampleColor, vec3(6.0));
+
+                        float distFactor = clamp(1.0 - (dist / falloffRange), 0.0, 1.0);
+                        float geomAtten = (NdotL * distFactor * distFactor) / (1.0 + dist * dist * 0.5);
+
+                        accumGI += sampleColor * geomAtten;
+                        accumWeight += geomAtten;
+                    }
                 }
             }
         }
@@ -110,12 +127,17 @@ void main() {
         float h1 = n + max(-fastAcos(maxHorizons.y) - n, -HALF_PI);
         float h2 = n + min( fastAcos(maxHorizons.x) - n,  HALF_PI);
 
-        // Całka analityczna horyzontu cosinusowego (Jimenez 2016)
+        // Calka analityczna horyzontu cosinusowego (Jimenez 2016)
         float sliceVis = 0.25 * ((-cos(2.0 * h1 - n) + cosNorm + 2.0 * h1 * sin(n)) +
                                  (-cos(2.0 * h2 - n) + cosNorm + 2.0 * h2 * sin(n)));
         visibility += projNormalLen * sliceVis;
     }
 
     visibility = clamp(visibility / float(NUM_SLICES), 0.03, 1.0);
-    outAO = pow(visibility, max(pcs.params.y, 0.01));
+    float finalAO = pow(visibility, max(pcs.params.y, 0.01));
+
+    vec3 finalGI = (accumWeight > 1e-4) ? (accumGI / accumWeight) : vec3(0.0);
+    finalGI *= finalAO;
+
+    outAOGI = vec4(finalGI, finalAO);
 }

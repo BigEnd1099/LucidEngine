@@ -167,12 +167,12 @@ namespace engine::renderer {
         float m_fogHeightFalloff{0.08f};
         glm::vec3 m_fogColor{0.07f, 0.10f, 0.16f};
 
-        // Indirect Diffuse GI: fizyczne wtórne odbicie od nieskonczonej plaszczyzny Lamberta
+        // Indirect Diffuse GI: Color Bleed od kazdego elementu (SSGI) + analityczny Ground Bounce
         bool m_lightBounceEnabled{true};
-        float m_lightBounceIntensity{0.65f};
-        float m_lightBounceGroundReflectance{0.35f};
+        float m_lightBounceIntensity{0.85f};
+        float m_lightBounceGroundReflectance{1.0f};
         float m_lightBounceMultiBounce{1.0f};
-        glm::vec3 m_lightBounceGroundColor{0.75f, 0.72f, 0.65f};
+        glm::vec3 m_lightBounceGroundColor{0.16f, 0.19f, 0.25f};
 
         void setLightBounceEnabled(bool enabled) { m_lightBounceEnabled = enabled; }
         bool isLightBounceEnabled() const { return m_lightBounceEnabled; }
