@@ -187,15 +187,17 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
     float farPlane = max(ubo.pointShadowParams.z, 1.0);
     if (currentDist >= farPlane) return 1.0;
 
-    vec3 dir = -toLight;
-    float z_face = max(abs(dir.x), max(abs(dir.y), abs(dir.z)));
+    vec3 L = normalize(toLight);
+    float NdotL = max(dot(geomN, L), 0.0);
+    // Lekki offset wzdluz normalnej zapobiegajacy trądzikowi cienia na skosach
+    vec3 dir = -toLight + geomN * (0.012 * (1.0 - NdotL));
 
     vec3 up = abs(dir.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 right = normalize(cross(up, dir));
     vec3 bitan = cross(dir, right);
 
     float diskRadius = (0.012 + 0.02 * (currentDist / farPlane));
-    float bias = max(0.04 * (1.0 - max(dot(geomN, normalize(toLight)), 0.0)), ubo.pointShadowParams.w);
+    float bias = max(0.03 * (1.0 - NdotL), ubo.pointShadowParams.w);
     float phi = ign * 2.0 * PI;
 
     float vis = 0.0;
@@ -205,7 +207,8 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
         vec3 sampleDir = dir + right * o.x + bitan * o.y;
         float sampledDepth = texture(pointShadowMap, sampleDir).r;
         float linearDepth = (nearPlane * farPlane) / max(farPlane - sampledDepth * (farPlane - nearPlane), 1e-4);
-        vis += (z_face - bias <= linearDepth) ? 1.0 : 0.0;
+        float z_sample = max(abs(sampleDir.x), max(abs(sampleDir.y), abs(sampleDir.z)));
+        vis += (z_sample - bias <= linearDepth) ? 1.0 : 0.0;
     }
     return vis / float(SAMPLES);
 }

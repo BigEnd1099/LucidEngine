@@ -1242,7 +1242,9 @@ namespace engine::renderer {
                 const glm::vec3 targets[6] = { {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1} };
                 const glm::vec3 ups[6]     = { {0,-1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}, {0,-1,0}, {0,-1,0} };
                 glm::mat4 pProj = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, shadowedPointLightRange);
-                pProj[1][1] *= -1.0f;
+                // Uwaga: Dla cubemapy Vulkan NIE odwracamy pProj[1][1], poniewaz wektory ups[6]
+                // juz dokladnie definiuja orientacje scian cubemapy zgodnie ze specyfikacja Vulkan/OpenGL.
+                // Odwrocenie pProj[1][1] powodowalo lustrzane odbicie cieni wzdluz osi Z na scianie dolnej (-Y).
 
                 VkViewport vpCube{ 0.0f, 0.0f, static_cast<float>(POINT_SHADOW_MAP_SIZE), static_cast<float>(POINT_SHADOW_MAP_SIZE), 0.0f, 1.0f };
                 VkRect2D scCube{ {0, 0}, {POINT_SHADOW_MAP_SIZE, POINT_SHADOW_MAP_SIZE} };
