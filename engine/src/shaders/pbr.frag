@@ -235,7 +235,7 @@ float computeAnalyticOcclusion(vec3 p, vec3 lightPos) {
     return visibility;
 }
 
-vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 diffuseColor, vec3 F0, float alpha, vec3 energyComp) {
+vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, vec3 energyComp) {
     float NdotL = max(dot(N, L), 0.0);
     if (NdotL <= 0.0) return vec3(0.0);
     float NdotV = max(dot(N, V), 1e-4);
@@ -248,8 +248,8 @@ vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 diffuseColor, vec3
     vec3 F = fresnelSchlick(VdotH, F0);
 
     vec3 specular = (D * Vis) * F * energyComp;
-    vec3 kD = (1.0 - F);
-    vec3 diffuse = kD * (diffuseColor / PI);
+    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse = kD * (albedo / PI);
     return (diffuse + specular) * radiance * NdotL;
 }
 
@@ -277,8 +277,7 @@ void main() {
     roughness = alpha;
     alpha = roughness * roughness;
 
-    // Fizyczny model energetyczny (brak podwójnego mnożenia przez 1 - metallic)
-    vec3 diffuseColor = albedo * (1.0 - metallic);
+    // Fizyczny model energetyczny glTF 2.0 / Filament (mnożenie przez 1 - metallic dokładnie raz w kD)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     // Kulla-Conty / Lagarde kompensacja wielokrotnego rozpraszania GGX
@@ -296,7 +295,7 @@ void main() {
     if (sunIntensity > 0.001 && dot(geomN, sunDir) > -0.05) {
         float sunShadow = computeDirectionalShadow(fragWorldPos, geomN, sunDir, viewDepth, ign);
         vec3 sunRadiance = ubo.sunColor.rgb * sunIntensity * sunShadow;
-        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, diffuseColor, F0, alpha, energyCompensation);
+        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alpha, energyCompensation);
     }
 
     // 2. Lokalnie cieniowane światła Point, Spot oraz Area
@@ -353,7 +352,7 @@ void main() {
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
-        directLighting += evaluateBRDF(N, V, L, radiance, diffuseColor, F0, alpha, energyCompensation);
+        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alpha, energyCompensation);
     }
 
     // 3. Prekalkulowane na GPU oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
@@ -363,11 +362,11 @@ void main() {
     float combinedAO = clamp(ssao * matAO, 0.0, 1.0);
 
     vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
-    vec3 kD = 1.0 - kS;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
     vec3 irradiance = texture(irradianceMap, N).rgb;
     vec3 ambientTint = mix(vec3(1.0), ubo.ambientColor.rgb * 2.2, 0.35);
-    vec3 diffuseIBL = irradiance * diffuseColor * ambientTint * gtaoMultiBounce(combinedAO, albedo);
+    vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo);
 
     vec3 R = reflect(-V, N);
     // Tłumienie horyzontu odbić (zapobiega przeciekom światła spod powierzchni)

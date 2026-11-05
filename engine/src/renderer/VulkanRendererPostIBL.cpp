@@ -622,39 +622,29 @@ namespace engine::renderer {
     void VulkanRenderer::loadEnvironmentHdri(int index) {
         m_selectedHdriIndex = std::clamp(index, 0, 7);
 
-        const char* presetFiles[] = {
-            "assets/textures/sunset.exr",
-            "assets/textures/studio.exr",
-            "assets/textures/city.exr",
-            "assets/textures/courtyard.exr",
-            "assets/textures/forest.exr",
-            "assets/textures/interior.exr",
-            "assets/textures/night.exr",
-            "assets/textures/sunrise.exr"
-        };
-        const char* fallbackEngineFiles[] = {
-            "engine/assets/textures/sunset.exr",
-            "engine/assets/textures/studio.exr",
-            "engine/assets/textures/city.exr",
-            "engine/assets/textures/courtyard.exr",
-            "engine/assets/textures/forest.exr",
-            "engine/assets/textures/interior.exr",
-            "engine/assets/textures/night.exr",
-            "engine/assets/textures/sunrise.exr"
+        const char* presetNames[] = {
+            "sunset", "studio", "city", "courtyard", "forest", "interior", "night", "sunrise"
         };
 
         if (m_selectedHdriIndex >= 0 && m_selectedHdriIndex < 8) {
-            std::string p = presetFiles[m_selectedHdriIndex];
-            if (!std::filesystem::exists(p)) {
-                p = fallbackEngineFiles[m_selectedHdriIndex];
-            }
-            if (std::filesystem::exists(p)) {
-                if (loadEnvironmentHdriFile(p)) {
-                    return;
+            const std::string name = presetNames[m_selectedHdriIndex];
+            const std::vector<std::string> candidatePaths = {
+                "assets/textures/" + name + ".hdr",
+                "engine/assets/textures/" + name + ".hdr",
+                "assets/textures/" + name + ".exr",
+                "engine/assets/textures/" + name + ".exr",
+                "../../engine/assets/textures/" + name + ".hdr",
+                "../../engine/assets/textures/" + name + ".exr"
+            };
+
+            for (const auto& p : candidatePaths) {
+                if (std::filesystem::exists(p)) {
+                    if (loadEnvironmentHdriFile(p)) {
+                        return;
+                    }
                 }
             }
         }
-
         VkDevice dev = m_context->getDevice();
         VmaAllocator alloc = m_context->getAllocator();
 
