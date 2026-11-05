@@ -438,19 +438,29 @@ void main() {
         vec3 kD_bounce = (vec3(1.0) - F_bounce) * (1.0 - metallic);
 
         // 1. SCREEN-SPACE DIFFUSE GI (COLOR BLEEDING OD KAZDEGO WIDOCZNEGO ELEMENTU WRAZ Z JEGO TEKSTURA)
-        vec3 ssgiBounce = (kD_bounce * albedo) * ssgiDiffuse;
+        // Dzielenie przez PI dla zachowania energii (Lambert BRDF rho / PI)
+        vec3 ssgiBounce = (kD_bounce * albedo / PI) * ssgiDiffuse;
+
+        // Wskaznik pokrycia ekranowego SSGI - wygasza fallback ground bounce aby uniknac podwojnego liczenia podlogi
+        float ssgiScreenCoverage = clamp(length(ssgiDiffuse) * 1.5, 0.0, 1.0);
 
         // 2. ANALITYCZNY GROUND BOUNCE (Far-field / Fallback GI z dzieleniem przez PI)
         vec3 groundBounce = vec3(0.0);
         float groundY = 0.0;
         float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
+        float hFrag = max(fragWorldPos.y - groundY, 0.0);
 
         // A. Wtorne odbicie sloneczne od podloza z okluzja cienia
         if (sunIntensity > 0.001 && hemisphereWeight > 0.001) {
             vec3 floorPt = vec3(fragWorldPos.x, groundY, fragWorldPos.z) + vec3(N.x, 0.0, N.z) * 0.5;
             vec3 floorN = vec3(0.0, 1.0, 0.0);
-            float floorViewDepth = length(ubo.cameraPos.xyz - floorPt);
-            float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewDepth, ign);
+            
+            // Metryka glebokosci wzdluz osi Z kamery (-view.z), a nie odleglosc radialna
+            float floorViewZ = -(ubo.view * vec4(floorPt, 1.0)).z;
+            float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewZ, ign);
+            
+            // Wygaszanie cienia wraz z wysokoscia fragmentu nad ziemia (dla bryl uniesionych)
+            floorSunShadow = mix(floorSunShadow, 1.0, clamp(hFrag / 4.0, 0.0, 1.0));
 
             float sunOnGround = max(sunDir.y, 0.0) * sunIntensity * floorSunShadow;
             vec3 groundExitance = ubo.sunColor.rgb * sunOnGround * (groundAlbedo * groundTint);
@@ -458,7 +468,7 @@ void main() {
             groundBounce += (kD_bounce * albedo / PI) * groundExitance * hemisphereWeight * combinedAO;
         }
 
-        // B. Wtorne odbicie od podloza dla swiatel lokalnych (Point & Spot z uwzglednieniem wysokosci i stozka)
+        // B. Wtorne odbicie od podloza dla swiatel lokalnych (Point & Spot)
         for (int i = 0; i < lightCount; ++i) {
             vec3 lPos = ubo.lightsPos[i].xyz;
             float lRange = max(ubo.lightsPos[i].w, 0.1);
@@ -469,7 +479,37 @@ void main() {
             float hL = lPos.y - groundY;
             if (hL <= 0.0) continue;
 
-            float hFrag = max(fragWorldPos.y - groundY, 0.0);
+            int lType = int(ubo.lightsDir[i].w + 0.5);
+
+            // B.1. SPOT LIGHT JAKO VPL W SRODKU PLAMY NA PODLODZE
+            if (lType == 1) {
+                vec3 spotDir = normalize(ubo.lightsDir[i].xyz);
+                if (spotDir.y < -0.05) {
+                    float tFloor = hL / (-spotDir.y);
+                    if (tFloor < lRange) {
+                        vec3 patchPos = lPos + spotDir * tFloor;
+                        vec3 toFrag = fragWorldPos - patchPos;
+                        float distSq = dot(toFrag, toFrag);
+                        vec3 bounceDir = toFrag * inversesqrt(max(distSq, 1e-4));
+
+                        float dist = length(lPos - fragWorldPos);
+                        float rangeFade = clamp(1.0 - dist / lRange, 0.0, 1.0);
+                        rangeFade *= rangeFade;
+
+                        // Kat brylkowy stozka ~ (1 - outerCos)
+                        float coneFluxWeight = clamp(1.0 - ubo.lightsParams[i].y, 0.02, 1.0);
+                        float incidentAtten = (-spotDir.y) / (1.0 + tFloor * tFloor);
+                        float formFactor = max(bounceDir.y, 0.0) * max(dot(N, bounceDir), 0.0) / (1.0 + distSq);
+
+                        float bounceAtten = rangeFade * incidentAtten * coneFluxWeight * formFactor;
+                        vec3 localGroundExitance = lCol * (lIntensity * bounceAtten) * (groundAlbedo * groundTint);
+                        groundBounce += (kD_bounce * albedo / PI) * localGroundExitance * combinedAO;
+                    }
+                }
+                continue;
+            }
+
+            // B.2. POINT LIGHT (wirtualne odbicie lustrzane wzgledem podlogi)
             vec2 dXZ = fragWorldPos.xz - lPos.xz;
             float dBounceSq = dot(dXZ, dXZ) + (hL + hFrag) * (hL + hFrag);
 
@@ -479,24 +519,15 @@ void main() {
             rangeFade *= rangeFade;
 
             float bounceAtten = rangeFade / (1.0 + dBounceSq);
-
-            int lType = int(ubo.lightsDir[i].w + 0.5);
-            if (lType == 1) { // Spot
-                vec3 spotDir = normalize(ubo.lightsDir[i].xyz);
-                float spotGroundCos = dot(spotDir, vec3(0.0, -1.0, 0.0));
-                float innerCos = ubo.lightsParams[i].x;
-                float outerCos = ubo.lightsParams[i].y;
-                float spotCone = clamp((spotGroundCos - outerCos) / max(innerCos - outerCos, 1e-4), 0.0, 1.0);
-                bounceAtten *= (spotCone * spotCone);
-            }
-
             vec3 localGroundExitance = lCol * (lIntensity * bounceAtten) * (groundAlbedo * groundTint);
             groundBounce += (kD_bounce * albedo / PI) * localGroundExitance * hemisphereWeight * combinedAO;
         }
 
+        // Wygaszanie fallbacku ground bounce gdy obszar jest pokryty przez SSGI
+        groundBounce *= (1.0 - ssgiScreenCoverage);
+
         bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
-
     // 4. Emisja (nie podlega tłumieniu przez AO!)
     vec3 emissiveColor = albedo * emissive * 3.5;
 

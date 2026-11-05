@@ -766,6 +766,17 @@ namespace engine::core {
                     if (m_commandQueue.empty() && (!m_mpscCommandQueue || m_mpscCommandQueue->empty())) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     }
+                } else if (m_targetFps > 0) {
+                    float targetFrameTime = 1.0f / static_cast<float>(m_targetFps);
+                    auto frameEndTime = std::chrono::high_resolution_clock::now();
+                    float elapsed = std::chrono::duration<float>(frameEndTime - current_now).count();
+                    float sleepRemaining = targetFrameTime - elapsed;
+                    if (sleepRemaining > 0.0015f) {
+                        std::this_thread::sleep_for(std::chrono::duration<float>(sleepRemaining - 0.001f));
+                    }
+                    while (std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - current_now).count() < targetFrameTime) {
+                        std::this_thread::yield();
+                    }
                 }
             } catch (const std::exception& e) {
                 core::Logger::error(std::string("Loop exception: ") + e.what());
@@ -2369,5 +2380,11 @@ function update(entities, dt, input, contacts) {
             return m_replicationGraph->generateDeltaJson(m_currentTick, baselineTick);
         }
         return nlohmann::json::object();
+    }
+    void Engine::setVsyncEnabled(bool enabled) {
+        if (m_vulkanContext) m_vulkanContext->setVsyncEnabled(enabled);
+    }
+    bool Engine::isVsyncEnabled() const {
+        return m_vulkanContext ? m_vulkanContext->isVsyncEnabled() : true;
     }
 }

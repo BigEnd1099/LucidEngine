@@ -4,12 +4,13 @@ layout(location = 0) in vec2 fragUV;
 layout(location = 0) out vec4 outAOGI; // rgb = indirect diffuse GI (color bleed), a = AO
 
 layout(set = 0, binding = 0) uniform sampler2D depthTex;
-layout(set = 0, binding = 1) uniform sampler2D colorTex; // Scene HDR lit/textured color from previous frame
+layout(set = 0, binding = 1) uniform sampler2D colorTex; // Scene Linear HDR from previous frame
 
 layout(push_constant) uniform GtaoPush {
     vec4 params;       // x = worldRadius, y = intensity, z = tanHalfFovY, w = aspect
     vec4 screenParams; // x = invWidth, y = invHeight, z = zNear, w = zFar
     vec4 flags;        // x = gtaoEnabled (1.0/0.0), y = giEnabled (1.0/0.0), z = unused, w = unused
+    mat4 prevViewProjFromView; // 64 bytes: transforms current view space directly to previous clip space
 } pcs;
 
 const float PI = 3.14159265359;
@@ -99,6 +100,10 @@ void main() {
             for (int side = 0; side < 2; ++side) {
                 vec2 sampleUV = clamp(fragUV + (side == 0 ? offsetUV : -offsetUV), vec2(0.001), vec2(0.999));
                 float sDepth = texture(depthTex, sampleUV).r;
+
+                // MASKOWANIE SKYBOXA: odrzucenie pikseli tla/nieba z lokalnego odbicia
+                if (sDepth >= 0.9999) continue;
+
                 vec3 sPos = uvToViewPos(sampleUV, sDepth);
                 vec3 diff = sPos - viewPos;
                 float dist = length(diff);
@@ -112,12 +117,25 @@ void main() {
                         vec3 L = diff / dist;
                         float NdotL = max(dot(viewNormal, L), 0.0);
                         if (NdotL > 0.001 && dist < falloffRange) {
-                            vec3 sampleColor = texture(colorTex, sampleUV).rgb;
+                            // REPROJEKCJA Z POPRZEDNIEJ KLATKI (eliminuje smuzenie/ghosting przy obrocie kamery)
+                            vec4 prevClip = pcs.prevViewProjFromView * vec4(sPos, 1.0);
+                            vec2 sampleColorUV = sampleUV;
+                            if (prevClip.w > 0.001) {
+                                vec2 reproj = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+                                if (reproj.x >= 0.001 && reproj.x <= 0.999 && reproj.y >= 0.001 && reproj.y <= 0.999) {
+                                    sampleColorUV = reproj;
+                                }
+                            }
+
+                            vec3 sampleColor = texture(colorTex, sampleColorUV).rgb;
                             // Firefly clamping: przyciecie pikow HDR powyzej 6.0
                             sampleColor = min(sampleColor, vec3(6.0));
 
-                            float distFactor = clamp(1.0 - (dist / falloffRange), 0.0, 1.0);
-                            float geomAtten = (NdotL * distFactor * distFactor) / (1.0 + dist * dist * 0.5);
+                            // ZACHOWANIE ENERGII W SSGI:
+                            // Radiancja wzdloz promienia jest stala (kat brylkowy na ekranie sam maleje jak 1/d^2).
+                            // Lagodne wygaszanie smoothstep(falloffRange, 0.0, dist) zamiast 1/(1+d^2)
+                            float distAtten = smoothstep(falloffRange, 0.0, dist);
+                            float geomAtten = NdotL * distAtten;
 
                             accumGI += sampleColor * geomAtten;
                             accumWeight += geomAtten;
@@ -144,9 +162,8 @@ void main() {
 
     vec3 finalGI = vec3(0.0);
     if (pcs.flags.y > 0.5 && accumWeight > 1e-4) {
-        finalGI = accumGI / accumWeight;
-        // Jesli GTAO jest wlaczone, tlumi bounce na stykach (eliminacja contact glow).
-        // Jesli GTAO jest wylaczone przez uzytkownika, nie zerujemy bounce.
+        // Calka po polsferze z waga cosinusowa (zwraca irradiancje podzielona przez pi * pi = irradiancja)
+        finalGI = (accumGI / accumWeight) * PI;
         if (pcs.flags.x > 0.5) {
             finalGI *= finalAO;
         }

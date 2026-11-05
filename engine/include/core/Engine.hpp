@@ -162,12 +162,16 @@ namespace engine::core {
         void setSelectedEntity(entt::entity e) { m_selectedEntity = e; }
         void syncEntityTransformPhysics(entt::entity entity);
 
-        // Resolution & UI Scaling APIs
+        // Resolution, FPS Limiter & VSync APIs
         void setRenderResolution(uint32_t width, uint32_t height);
         void getRenderResolution(uint32_t& width, uint32_t& height) const;
         void setResolutionScale(float scale);
         float getResolutionScale() const;
         void setUiScale(float scale);
+        void setTargetFps(int fps) { m_targetFps = fps; }
+        int getTargetFps() const { return m_targetFps; }
+        void setVsyncEnabled(bool enabled);
+        bool isVsyncEnabled() const;
         float getUiScale() const;
 
         // Input API (Gamepad, Keyboard, Mouse from Studio)
@@ -224,6 +228,7 @@ namespace engine::core {
         bool m_headless;
         bool m_standaloneGameMode{false};
         bool m_paused{true};
+        int m_targetFps{0}; // 0 = unlimited, or 30, 60, 120, 240
         nlohmann::json m_preSimulationSnapshot = nlohmann::json::array();
         bool m_hasPreSimulationSnapshot{false};
         float m_physicsAccumulator{0.0f};

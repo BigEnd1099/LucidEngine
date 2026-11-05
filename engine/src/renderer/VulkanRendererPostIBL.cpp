@@ -1260,8 +1260,10 @@ namespace engine::renderer {
             vkCreatePipelineLayout(dev, &pl, nullptr, outLayout);
         };
 
-        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 3, &m_gtaoPipelineLayout);
-        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4),     &m_gtaoBlurPipelineLayout);
+        // gtaoPipelineLayout: vec4 params + vec4 screenParams + vec4 flags + mat4 prevViewProjFromView = 112 bytes <= 128 bytes
+        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 7, &m_gtaoPipelineLayout);
+        // gtaoBlurPipelineLayout: vec4 params + vec4 screenParams = 32 bytes <= 128 bytes
+        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 2, &m_gtaoBlurPipelineLayout);
         makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4),     &m_bloomPipelineLayout);
         makeLayout(m_dualTextureDescLayout,   sizeof(glm::vec4) * 2, &m_compositePipelineLayout);
         makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4),     &m_fxaaPipelineLayout);

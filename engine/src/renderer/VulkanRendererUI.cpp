@@ -606,6 +606,20 @@ namespace engine::renderer {
                         ImGui::MenuItem("Output Log", nullptr, &s_showOutputLog);
                         ImGui::MenuItem("Blueprints / Scripts", nullptr, &s_showScriptStudio);
                         ImGui::Separator();
+                        if (ImGui::BeginMenu("FPS")) {
+                            int curFps = engine ? engine->getTargetFps() : 0;
+                            if (ImGui::MenuItem("30 FPS", nullptr, curFps == 30)) { if (engine) engine->setTargetFps(30); }
+                            if (ImGui::MenuItem("60 FPS", nullptr, curFps == 60)) { if (engine) engine->setTargetFps(60); }
+                            if (ImGui::MenuItem("120 FPS", nullptr, curFps == 120)) { if (engine) engine->setTargetFps(120); }
+                            if (ImGui::MenuItem("240 FPS", nullptr, curFps == 240)) { if (engine) engine->setTargetFps(240); }
+                            if (ImGui::MenuItem("Unlimited (Brak limitu)", nullptr, curFps == 0)) { if (engine) engine->setTargetFps(0); }
+                            ImGui::Separator();
+                            bool vsync = engine ? engine->isVsyncEnabled() : true;
+                            if (ImGui::MenuItem("V-Sync", nullptr, vsync)) {
+                                if (engine) engine->setVsyncEnabled(!vsync);
+                            }
+                            ImGui::EndMenu();
+                        }
                         if (ImGui::BeginMenu("Anti-Aliasing (FXAA 3.11)")) {
                             if (ImGui::MenuItem("Off (Brak AA)", nullptr, m_antiAliasingMode == 0)) m_antiAliasingMode = 0;
                             if (ImGui::MenuItem("FXAA Fast", nullptr, m_antiAliasingMode == 1)) m_antiAliasingMode = 1;

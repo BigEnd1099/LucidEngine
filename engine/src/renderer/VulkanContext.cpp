@@ -364,7 +364,24 @@ namespace engine::renderer {
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         createInfo.preTransform = capabilities.currentTransform;
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        if (!m_vsyncEnabled) {
+            uint32_t presentModeCount = 0;
+            vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface, &presentModeCount, nullptr);
+            if (presentModeCount != 0) {
+                std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+                vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface, &presentModeCount, presentModes.data());
+                bool hasMailbox = false;
+                bool hasImmediate = false;
+                for (const auto& pm : presentModes) {
+                    if (pm == VK_PRESENT_MODE_MAILBOX_KHR) hasMailbox = true;
+                    if (pm == VK_PRESENT_MODE_IMMEDIATE_KHR) hasImmediate = true;
+                }
+                if (hasMailbox) presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+                else if (hasImmediate) presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+        }
+        createInfo.presentMode = presentMode;
         createInfo.clipped = VK_TRUE;
 
         if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapchain) != VK_SUCCESS) {

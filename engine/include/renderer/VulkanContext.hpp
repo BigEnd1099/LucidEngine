@@ -18,6 +18,16 @@ namespace engine::renderer {
         void cleanup();
         void recreateSwapchain();
 
+        void setVsyncEnabled(bool enabled) {
+            if (m_vsyncEnabled != enabled) {
+                m_vsyncEnabled = enabled;
+#ifdef USE_GLFW
+                if (!m_headless) recreateSwapchain();
+#endif
+            }
+        }
+        bool isVsyncEnabled() const { return m_vsyncEnabled; }
+
         VkDevice getDevice() const { return m_device; }
         VkInstance getInstance() const { return m_instance; }
         VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
@@ -51,6 +61,7 @@ namespace engine::renderer {
 #endif
 
         bool m_headless{true};
+        bool m_vsyncEnabled{true};
         float m_maxSamplerAnisotropy{1.0f};
         VkInstance m_instance{VK_NULL_HANDLE};
         VkPhysicalDevice m_physicalDevice{VK_NULL_HANDLE};

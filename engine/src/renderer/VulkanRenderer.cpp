@@ -1375,12 +1375,22 @@ namespace engine::renderer {
             vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gtaoPipelineLayout, 0, 1, &m_gtaoDescSet, 0, nullptr);
 
             const float tanHalfFovY = std::tan(glm::radians(sceneFov) * 0.5f);
-            const glm::vec4 gtaoPcs[3] = {
-                glm::vec4(m_gtaoRadius, m_gtaoIntensity, tanHalfFovY, sceneAspect),
-                glm::vec4(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f),
-                glm::vec4(m_gtaoEnabled ? 1.0f : 0.0f, m_lightBounceEnabled ? 1.0f : 0.0f, 0.0f, 0.0f)
-            };
-            vkCmdPushConstants(m_commandBuffer, m_gtaoPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(gtaoPcs), gtaoPcs);
+            glm::mat4 currentViewProj = vp;
+            glm::mat4 prevViewProjFromView = m_prevViewProj * glm::inverse(viewMatrix);
+            m_prevViewProj = currentViewProj;
+
+            struct GtaoPush {
+                glm::vec4 params;
+                glm::vec4 screenParams;
+                glm::vec4 flags;
+                glm::mat4 prevViewProjFromView;
+            } gtaoPcsData;
+            gtaoPcsData.params = glm::vec4(m_gtaoRadius, m_gtaoIntensity, tanHalfFovY, sceneAspect);
+            gtaoPcsData.screenParams = glm::vec4(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f);
+            gtaoPcsData.flags = glm::vec4(m_gtaoEnabled ? 1.0f : 0.0f, m_lightBounceEnabled ? 1.0f : 0.0f, 0.0f, 0.0f);
+            gtaoPcsData.prevViewProjFromView = prevViewProjFromView;
+
+            vkCmdPushConstants(m_commandBuffer, m_gtaoPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(gtaoPcsData), &gtaoPcsData);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
 
@@ -1407,8 +1417,11 @@ namespace engine::renderer {
             vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gtaoBlurPipeline);
             vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gtaoBlurPipelineLayout, 0, 1, &m_gtaoBlurDescSet, 0, nullptr);
 
-            const glm::vec4 blurPcs(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f);
-            vkCmdPushConstants(m_commandBuffer, m_gtaoBlurPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::vec4), &blurPcs);
+            const glm::vec4 blurPcs[2] = {
+                glm::vec4(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f),
+                glm::vec4(tanHalfFovY, sceneAspect, 0.0f, 0.0f)
+            };
+            vkCmdPushConstants(m_commandBuffer, m_gtaoBlurPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(blurPcs), blurPcs);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
 
