@@ -1642,13 +1642,13 @@ namespace engine::renderer {
                         }
                     }
 
-                    if (ImGui::CollapsingHeader("Global Illumination & Light Bouncing", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Light Bouncing Active (Odbicia swiatla)", &m_lightBounceEnabled);
+                    if (ImGui::CollapsingHeader("Indirect Diffuse GI (Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::Checkbox("Ground Bounce Active (Odbicia od podloza)", &m_lightBounceEnabled);
                         if (m_lightBounceEnabled) {
-                            ImGui::SliderFloat("Bounce Intensity (Sila odbicia)", &m_lightBounceIntensity, 0.0f, 3.0f, "%.2f");
-                            ImGui::SliderFloat("Ground Reflectance (Odbicie podloza)", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
-                            ImGui::SliderFloat("Multi-Bounce Color Bleed", &m_lightBounceMultiBounce, 0.0f, 2.0f, "%.2f");
-                            ImGui::ColorEdit3("Ground Bounce Tint", &m_lightBounceGroundColor.x);
+                            ImGui::SliderFloat("Bounce Intensity", &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
+                            ImGui::SliderFloat("Ground Albedo (Jasnosc podloza)", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
+                            ImGui::ColorEdit3("Ground Color (Barwa podloza)", &m_lightBounceGroundColor.x);
+                            ImGui::TextDisabled("Fizyczny model: AO tlumi bounce na stykach");
                         }
                     }
 

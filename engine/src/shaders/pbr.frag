@@ -424,37 +424,52 @@ void main() {
     float iblIntensity = max(ubo.ambientColor.w, 0.0);
     vec3 ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
 
-    // 3B. Fizyczny model wtórnego odbicia światła (Global Illumination / Light Bouncing)
+    // 3B. Indirect Diffuse GI: fizyczne wtórne odbicie od nieskończonej płaszczyzny Lamberta
+    //
+    // Model matematyczny (całka kosinusowa po półsferze dolnej):
+    //   E_ground = sunColor * sunIntensity * max(sunDir.y, 0)         (irradiancja na podłożu)
+    //   L_ground = (rho_ground / pi) * E_ground                       (luminancja wychodząca z podłoża)
+    //   E_bounce = pi * L_ground * (1 - N.y) / 2                     (irradiancja od dolnej półsfery na fragmencie)
+    //   L_out    = (rho_surface / pi) * E_bounce                      (luminancja wyjściowa po odbiciu)
+    //
+    // Po uproszczeniu pi się redukuje:
+    //   L_out = rho_surface * rho_ground * groundTint * sunColor * sunIntensity * max(sunDir.y, 0) * (1-N.y)/2
+    //
+    // Kluczowe różnice vs. stara wersja:
+    //   - Brak heightAtten (dla nieskończonej płaszczyzny form-factor nie zależy od wysokości)
+    //   - AO tłumi bounce na stykach (combinedAO ≈ 0 → bounce ≈ 0, zamiast contact glow)
+    //   - Brak albedo^2 color bleed (zachowanie energii: wyjście zawsze < wejście)
+    //   - Brak wirtualnych punktów odbicia od podłoża (eliminacja light leaking)
     vec3 bounceLighting = vec3(0.0);
     if (ubo.bounceParams.x > 0.5) {
         float bounceIntensity = ubo.bounceParams.y;
-        float groundReflectance = ubo.bounceParams.z;
-        float multiBounceScale = ubo.bounceParams.w;
+        float groundAlbedo = ubo.bounceParams.z;
         vec3 groundTint = ubo.bounceColor.rgb;
 
-        // A. Wtórne odbicie bezpośredniego światła słonecznego od podłoża (Sun Secondary Ground Bounce)
-        // Podłoże oświetlone promieniami słońca staje się wtórnym emiterem promieniującym w górę (+Y).
-        // Powierzchnie skierowane w dół lub pod kątem otrzymują odbite światło słoneczne.
+        // A. Wtórne odbicie słoneczne od podłoża (Sun Ground Bounce)
         if (sunIntensity > 0.001) {
-            float sunElevation = max(sunDir.y, 0.0);
-            // Współczynnik geometryczny całki półsferycznej:
-            // N.y = -1.0 (spód) -> 1.0 (maksymalne odbicie od dołu)
-            // N.y =  0.0 (ściana pionowa) -> 0.5 (połowa półsfery widzi ziemię)
-            // N.y = +1.0 (góra/ziemia) -> 0.0 (brak samozapętlenia w górę)
-            float upFacingHemisphere = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
+            // Irradiancja słoneczna padająca na podłoże (kąt padania = sunDir.y)
+            float sunOnGround = max(sunDir.y, 0.0) * sunIntensity;
 
-            // Odległość od podłoża: wygaszanie form-factor (dla obiektów bardzo wysoko na niebie)
-            float heightAboveGround = max(fragWorldPos.y, 0.0);
-            float heightAtten = 225.0 / (225.0 + heightAboveGround * heightAboveGround);
+            // Exitancja podłoża: energia opuszczająca powierzchnię ziemi (Lambertowski emiter)
+            // rho_ground * E_sun (pi w luminancji i pi w całce półsferycznej się redukują)
+            vec3 groundExitance = ubo.sunColor.rgb * sunOnGround * groundAlbedo * groundTint;
 
-            vec3 sunBouncedRadiance = ubo.sunColor.rgb * (sunIntensity * sunElevation * groundReflectance * heightAtten);
-            vec3 sunBounceIrradiance = sunBouncedRadiance * groundTint * upFacingHemisphere;
+            // Geometryczny współczynnik widoczności dolnej półsfery:
+            //   N.y = -1 (spód obiektu)   → widzi 100% ziemi → waga 1.0
+            //   N.y =  0 (ściana pionowa)  → widzi 50% ziemi  → waga 0.5
+            //   N.y = +1 (góra / ziemia)   → nie widzi ziemi  → waga 0.0
+            float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
 
-            // Odbicie jest modulowane przez fizyczną okluzję GTAO
-            bounceLighting += kD * (albedo / PI) * (sunBounceIrradiance * PI) * gtaoMultiBounce(combinedAO, albedo);
+            // Wkład do oświetlenia z zachowaniem energii:
+            //   kD           — tłumienie dyfuzji przez Fresnela i metaliczność (1-F)(1-metal)
+            //   albedo       — współczynnik odbicia powierzchni docelowej
+            //   combinedAO   — okluzja otoczenia (KLUCZOWE: na stykach AO≈0 → bounce≈0)
+            bounceLighting += kD * albedo * groundExitance * hemisphereWeight * combinedAO;
         }
 
-        // B. Wtórne odbicie świateł lokalnych (Point & Spot Virtual Ground Bounce)
+        // B. Wtórne odbicie od podłoża dla świateł lokalnych (Point/Spot Ground Bounce)
+        // Model: nieskończona płaszczyzna Lamberta oświetlona punktowo z zanikiem 1/(1+d²)
         for (int i = 0; i < lightCount; ++i) {
             vec3 lPos = ubo.lightsPos[i].xyz;
             float lRange = max(ubo.lightsPos[i].w, 0.1);
@@ -462,30 +477,25 @@ void main() {
             float lIntensity = ubo.lightsCol[i].w;
             if (lIntensity <= 0.001) continue;
 
-            vec3 toL = lPos - fragWorldPos;
-            float distToLight = length(toL);
-            if (distToLight >= lRange) continue;
+            // Odległość źródła od podłoża → irradiancja na podłożu pod źródłem
+            float lightHeight = max(lPos.y, 0.01);
+            float lightOnGround = lIntensity / (1.0 + lightHeight * lightHeight);
 
-            // Punkt odbicia na podłożu bezpośrednio pod źródłem światła
-            vec3 bouncePt = vec3(lPos.x, min(fragWorldPos.y, lPos.y) - 0.5, lPos.z);
-            vec3 fromBounce = fragWorldPos - bouncePt;
-            float bounceDist = length(fromBounce);
-            vec3 bounceDir = fromBounce / max(bounceDist, 1e-3);
+            // Odległość fragmentu od projekcji światła na podłoże
+            vec2 groundOffset = fragWorldPos.xz - lPos.xz;
+            float groundDist2 = dot(groundOffset, groundOffset);
+            float groundSpread = lightOnGround / (1.0 + groundDist2 * 0.25);
 
-            float NdotBounce = max(dot(N, -bounceDir), 0.0);
-            float ptAtten = clamp(1.0 - (distToLight + bounceDist * 0.5) / lRange, 0.0, 1.0);
-            ptAtten = ptAtten * ptAtten;
+            // Obcinanie zasięgu (poza range nie ma efektu)
+            float dist = length(lPos - fragWorldPos);
+            if (dist >= lRange) continue;
+            float rangeFade = clamp(1.0 - dist / lRange, 0.0, 1.0);
+            rangeFade *= rangeFade;
 
-            vec3 ptBouncedRadiance = lCol * (lIntensity * 0.4 * ptAtten * groundReflectance);
-            bounceLighting += kD * (albedo / PI) * (ptBouncedRadiance * groundTint * NdotBounce * PI) * combinedAO;
+            float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
+            vec3 localExitance = lCol * groundSpread * groundAlbedo * groundTint * rangeFade;
+            bounceLighting += kD * albedo * localExitance * hemisphereWeight * combinedAO;
         }
-
-        // C. Wielo-odbiciowe nasycenie barw (Diffuse Inter-reflection Color Bleed)
-        // Karis / Jimenez / Fdez-Agüera: wielokrotne odbicia światła we wnękach i stykach
-        // nasycają światło barwą albedo: sum(rho^k) = rho^2 / (1 - rho)
-        vec3 colorBleedFactor = (albedo * albedo) / max(vec3(1.0) - albedo * 0.75, vec3(0.05));
-        vec3 interreflection = colorBleedFactor * ((1.0 - combinedAO) * multiBounceScale * 0.85);
-        bounceLighting += diffuseIBL * interreflection;
 
         bounceLighting *= bounceIntensity;
     }
