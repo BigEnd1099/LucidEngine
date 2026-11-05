@@ -45,6 +45,8 @@ namespace engine::core {
         glm::vec3 sunColor{1.0f, 0.97f, 0.92f};
         float sunIntensity{3.4f};
         glm::vec3 sunDirection{0.55f, 0.85f, 0.40f};
+        bool sunEnabled{true};
+        bool sunDirectionFromPosition{false};
         bool fogEnabled{false};
         glm::vec3 fogColor{0.06f, 0.07f, 0.09f};
         float fogNear{20.0f};

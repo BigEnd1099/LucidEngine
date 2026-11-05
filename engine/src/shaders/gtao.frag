@@ -1,112 +1,121 @@
 #version 450
 
-layout(location = 0) in vec2 inUV;
-layout(location = 0) out vec4 outColor;
+layout(location = 0) in vec2 fragUV;
+layout(location = 0) out float outAO;
 
-layout(set = 0, binding = 0) uniform sampler2D uDepthTexture;
+layout(set = 0, binding = 0) uniform sampler2D depthTex;
 
-layout(push_constant) uniform GtaoConstants {
-    vec4 params;       // x = radius (0.8m), y = intensity (1.5), z = fovRadians, w = aspect
-    vec4 screenParams; // xy = texelSize, z = near (0.1), w = far (1000.0)
-} pc;
+layout(push_constant) uniform GtaoPush {
+    vec4 params;       // x = worldRadius, y = intensity, z = tanHalfFovY, w = aspect
+    vec4 screenParams; // x = invWidth, y = invHeight, z = zNear, w = zFar
+} pcs;
 
-// Reconstruct view-space position from non-linear depth buffer
-vec3 ReconstructViewPos(vec2 uv, float depth) {
-    float near = pc.screenParams.z;
-    float far = pc.screenParams.w;
-    float z = (near * far) / max(far - depth * (far - near), 1e-5);
+const float PI = 3.14159265359;
+const float HALF_PI = 1.57079632679;
 
-    vec2 ndc = uv * 2.0 - 1.0;
-    float tanHalfFov = tan(pc.params.z * 0.5);
-    vec3 viewPos;
-    viewPos.x = ndc.x * z * tanHalfFov * pc.params.w;
-    viewPos.y = ndc.y * z * tanHalfFov;
-    viewPos.z = z;
-    return viewPos;
+float linearizeDepth(float d) {
+    float zNear = pcs.screenParams.z;
+    float zFar = pcs.screenParams.w;
+    return (zNear * zFar) / max(zFar - d * (zFar - zNear), 1e-6);
 }
 
-// Jorge Jimenez Interleaved Gradient Noise (IGN) - much smoother and regular than white noise
-float InterleavedGradientNoise(vec2 coord) {
-    vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
-    return fract(magic.z * fract(dot(coord, magic.xy)));
+// Bezpośrednia rekonstrukcja pozycji w przestrzeni widoku (3 mnożenia zamiast macierzy odwrotnej)
+vec3 uvToViewPos(vec2 uv, float rawDepth) {
+    float z = linearizeDepth(rawDepth);
+    vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    return vec3(ndc.x * pcs.params.z * pcs.params.w * z, ndc.y * pcs.params.z * z, -z);
+}
+
+float interleavedGradientNoise(vec2 pixel) {
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+float fastAcos(float x) {
+    float ax = abs(x);
+    float res = -0.156583 * ax + HALF_PI;
+    res *= sqrt(max(0.0, 1.0 - ax));
+    return (x >= 0.0) ? res : (PI - res);
 }
 
 void main() {
-    float centerDepth = texture(uDepthTexture, inUV).r;
-    if (centerDepth >= 0.9999) {
-        outColor = vec4(0.0);
+    float centerRawDepth = texture(depthTex, fragUV).r;
+    if (centerRawDepth >= 0.9999) {
+        outAO = 1.0;
         return;
     }
 
-    vec2 texelSize = pc.screenParams.xy;
-    vec3 centerPos = ReconstructViewPos(inUV, centerDepth);
+    vec3 viewPos = uvToViewPos(fragUV, centerRawDepth);
+    float viewDist = -viewPos.z;
 
-    // Reconstruct view-space normal from depth neighbor differences (screen-space gradients)
-    float depthR = texture(uDepthTexture, inUV + vec2(texelSize.x, 0.0)).r;
-    float depthL = texture(uDepthTexture, inUV - vec2(texelSize.x, 0.0)).r;
-    float depthU = texture(uDepthTexture, inUV + vec2(0.0, texelSize.y)).r;
-    float depthD = texture(uDepthTexture, inUV - vec2(0.0, texelSize.y)).r;
+    // Normalna skierowana w stronę kamery (+Z w przestrzeni widoku przy konwencji Y-w-dół Vulkana)
+    vec3 dpdx = dFdx(viewPos);
+    vec3 dpdy = dFdy(viewPos);
+    vec3 viewNormal = normalize(cross(dpdy, dpdx));
+    vec3 viewDir = normalize(-viewPos);
 
-    vec3 posR = ReconstructViewPos(inUV + vec2(texelSize.x, 0.0), depthR);
-    vec3 posL = ReconstructViewPos(inUV - vec2(texelSize.x, 0.0), depthL);
-    vec3 posU = ReconstructViewPos(inUV + vec2(0.0, texelSize.y), depthU);
-    vec3 posD = ReconstructViewPos(inUV - vec2(0.0, texelSize.y), depthD);
+    float worldRadius = pcs.params.x;
+    float projScale = 0.5 / max(pcs.params.z, 1e-4);
+    vec2 radiusUV = vec2(worldRadius * projScale / (viewDist * pcs.params.w), worldRadius * projScale / viewDist);
+    float maxRadiusPx = radiusUV.y / max(pcs.screenParams.y, 1e-5);
+    if (maxRadiusPx < 1.5) {
+        outAO = 1.0;
+        return;
+    }
+    radiusUV = min(radiusUV, vec2(0.12));
 
-    vec3 dX = (abs(posR.z - centerPos.z) < abs(posL.z - centerPos.z)) ? (posR - centerPos) : (centerPos - posL);
-    vec3 dY = (abs(posU.z - centerPos.z) < abs(posD.z - centerPos.z)) ? (posU - centerPos) : (centerPos - posD);
-    vec3 N = normalize(cross(dX, dY));
+    float noiseAngle = interleavedGradientNoise(gl_FragCoord.xy) * PI;
+    float noiseOffset = fract(interleavedGradientNoise(gl_FragCoord.xy + vec2(17.0, 31.0)));
 
-    float aoRadius = pc.params.x > 0.01 ? pc.params.x : 0.8;
-    float aoIntensity = pc.params.y > 0.01 ? pc.params.y : 1.5;
+    const int NUM_SLICES = 3;
+    const int STEPS_PER_SIDE = 4;
+    float visibility = 0.0;
+    float falloffRange = worldRadius * 1.35;
 
-    // Projected radius in screen pixels
-    float projRadius = (aoRadius / max(centerPos.z, 0.1)) * (0.5 / max(tan(pc.params.z * 0.5), 1e-4));
-    projRadius = clamp(projRadius, 2.0, 48.0);
+    for (int slice = 0; slice < NUM_SLICES; ++slice) {
+        float phi = noiseAngle + (float(slice) / float(NUM_SLICES)) * PI;
+        vec2 omega = vec2(cos(phi), sin(phi));
+        vec3 dirVec = vec3(omega.x, -omega.y, 0.0);
+        vec3 orthoDir = dirVec - dot(dirVec, viewDir) * viewDir;
+        vec3 axisVec = normalize(cross(orthoDir, viewDir));
+        vec3 projNormal = viewNormal - axisVec * dot(viewNormal, axisVec);
+        float projNormalLen = max(length(projNormal), 1e-4);
 
-    float noise = InterleavedGradientNoise(gl_FragCoord.xy);
-    float angleOffset = noise * 3.14159265;
+        float signN = sign(dot(orthoDir, projNormal));
+        float cosNorm = clamp(dot(projNormal, viewDir) / projNormalLen, -1.0, 1.0);
+        float n = signN * fastAcos(cosNorm);
 
-    float totalOcclusion = 0.0;
-    const int NUM_DIRECTIONS = 4;
-    const int NUM_STEPS = 4;
+        vec2 maxHorizons = vec2(-1.0);
 
-    for (int d = 0; d < NUM_DIRECTIONS; ++d) {
-        float phi = angleOffset + float(d) * (3.14159265 / float(NUM_DIRECTIONS));
-        vec2 dir = vec2(cos(phi), sin(phi));
+        for (int step = 0; step < STEPS_PER_SIDE; ++step) {
+            float s = (float(step) + noiseOffset * 0.75 + 0.25) / float(STEPS_PER_SIDE);
+            s = max(s * s, 1.25 * pcs.screenParams.y / max(radiusUV.y, 1e-5));
+            vec2 offsetUV = omega * radiusUV * s;
 
-        float maxHorizonCos = 0.0;
-
-        for (int s = 1; s <= NUM_STEPS; ++s) {
-            float stepFrac = (float(s) + noise * 0.2) / float(NUM_STEPS);
-            vec2 sampleUV = inUV + dir * texelSize * projRadius * stepFrac;
-
-            if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) continue;
-
-            float sampleDepth = texture(uDepthTexture, sampleUV).r;
-            vec3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
-
-            vec3 horizonVec = samplePos - centerPos;
-            float horizonDist = length(horizonVec);
-
-            if (horizonDist > 0.01 && horizonDist < (aoRadius * 1.5)) {
-                vec3 horizonDir = horizonVec / horizonDist;
-                // Angle bias of ~14 degrees (sin 14 deg ~ 0.24) prevents flat surfaces from self-occluding and creating grain
-                float horizonCos = dot(N, horizonDir) - 0.24;
-                if (horizonCos > 0.0) {
-                    float distFactor = clamp(1.0 - horizonDist / aoRadius, 0.0, 1.0);
-                    maxHorizonCos = max(maxHorizonCos, horizonCos * distFactor);
+            // Dodatnia i ujemna półprosta horyzontu
+            for (int side = 0; side < 2; ++side) {
+                vec2 sampleUV = clamp(fragUV + (side == 0 ? offsetUV : -offsetUV), vec2(0.001), vec2(0.999));
+                float sDepth = texture(depthTex, sampleUV).r;
+                vec3 sPos = uvToViewPos(sampleUV, sDepth);
+                vec3 diff = sPos - viewPos;
+                float dist = length(diff);
+                if (dist > 1e-4) {
+                    float cosH = dot(diff / dist, viewDir);
+                    // Heurystyka cienkich obiektów (eliminuje ciemne halo wokół bliższych krawędzi)
+                    float weight = clamp(1.0 - (dist / falloffRange) * (dist / falloffRange), 0.0, 1.0);
+                    maxHorizons[side] = max(maxHorizons[side], mix(-1.0, cosH, weight));
                 }
             }
         }
 
-        totalOcclusion += maxHorizonCos;
+        float h1 = n + max(-fastAcos(maxHorizons.y) - n, -HALF_PI);
+        float h2 = n + min( fastAcos(maxHorizons.x) - n,  HALF_PI);
+
+        // Całka analityczna horyzontu cosinusowego (Jimenez 2016)
+        float sliceVis = 0.25 * ((-cos(2.0 * h1 - n) + cosNorm + 2.0 * h1 * sin(n)) +
+                                 (-cos(2.0 * h2 - n) + cosNorm + 2.0 * h2 * sin(n)));
+        visibility += projNormalLen * sliceVis;
     }
 
-    float ao = (totalOcclusion / float(NUM_DIRECTIONS)) * aoIntensity;
-    ao = clamp(ao, 0.0, 1.0);
-
-    // Quadratic falloff eliminates residual low-level noise on flat surfaces
-    ao = ao * ao;
-
-    outColor = vec4(ao, 0.0, 0.0, 1.0);
+    visibility = clamp(visibility / float(NUM_SLICES), 0.03, 1.0);
+    outAO = pow(visibility, max(pcs.params.y, 0.01));
 }

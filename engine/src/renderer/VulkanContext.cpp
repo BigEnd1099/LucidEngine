@@ -21,7 +21,7 @@ namespace engine::renderer {
             }
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
             glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-            m_window = glfwCreateWindow(1920, 1080, "LUCID Engine | Platformer 3D (Coin Runner) | Lucid Studio 2026", nullptr, nullptr);
+            m_window = glfwCreateWindow(1920, 1080, "LUCID Engine | Lucid Studio 2026", nullptr, nullptr);
             if (!m_window) {
                 throw std::runtime_error("glfwCreateWindow failed!");
             }
@@ -76,6 +76,7 @@ namespace engine::renderer {
         if (m_window) {
             glfwDestroyWindow(m_window);
             glfwTerminate();
+            m_window = nullptr;
         }
 #endif
     }
@@ -83,22 +84,24 @@ namespace engine::renderer {
     void VulkanContext::createInstance() {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "AI Native Engine";
+        appInfo.pApplicationName = "Lucid Engine";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "No Engine";
+        appInfo.pEngineName = "Lucid Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_3; // Require Vulkan 1.4 (released Jan 2025)
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
-        
+
         std::vector<const char*> extensions;
 #ifdef USE_GLFW
         if (!m_headless) {
             uint32_t glfwExtensionCount = 0;
             const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-            for(uint32_t i=0; i<glfwExtensionCount; i++) extensions.push_back(glfwExtensions[i]);
+            for (uint32_t i = 0; i < glfwExtensionCount; i++) {
+                extensions.push_back(glfwExtensions[i]);
+            }
         }
 #endif
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -125,7 +128,7 @@ namespace engine::renderer {
 
             bool hasGraphics = false;
             bool hasPresent = false;
-            
+
             for (uint32_t i = 0; i < queueFamilyCount; i++) {
                 if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                     hasGraphics = true;
@@ -158,7 +161,7 @@ namespace engine::renderer {
                 break;
             }
         }
-        
+
         if (m_physicalDevice == VK_NULL_HANDLE) {
             for (const auto& device : devices) {
                 if (isDeviceSuitable(device)) {
@@ -185,7 +188,7 @@ namespace engine::renderer {
         m_graphicsQueueFamily = 0;
         bool found = false;
         for (uint32_t i = 0; i < queueFamilyCount; i++) {
-            bool hasGraphics = (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT);
+            bool hasGraphics = (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
             bool hasPresent = false;
 #ifdef USE_GLFW
             if (!m_headless && m_surface != VK_NULL_HANDLE) {
@@ -206,6 +209,26 @@ namespace engine::renderer {
         }
         if (!found) throw std::runtime_error("failed to find a graphics AND present queue family!");
 
+        VkPhysicalDeviceProperties devProps{};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &devProps);
+
+        VkPhysicalDeviceVulkan12Features supportedFeatures12{};
+        supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+        VkPhysicalDeviceVulkan13Features supportedFeatures13{};
+        supportedFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        supportedFeatures13.pNext = &supportedFeatures12;
+
+        VkPhysicalDeviceFeatures2 supportedFeatures2{};
+        supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        supportedFeatures2.pNext = &supportedFeatures13;
+        vkGetPhysicalDeviceFeatures2(m_physicalDevice, &supportedFeatures2);
+
+        if (!supportedFeatures13.dynamicRendering || !supportedFeatures13.synchronization2) {
+            core::Logger::error("GPU does not support required Vulkan 1.3 features: dynamicRendering and synchronization2!");
+            throw std::runtime_error("failed to find Vulkan 1.3 dynamicRendering/synchronization2 support!");
+        }
+
         float queuePriority = 1.0f;
         VkDeviceQueueCreateInfo queueCreateInfo{};
         queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -213,44 +236,37 @@ namespace engine::renderer {
         queueCreateInfo.queueCount = 1;
         queueCreateInfo.pQueuePriorities = &queuePriority;
 
-        // Enable Dynamic Rendering (Core in 1.3)
+        VkPhysicalDeviceVulkan12Features features12{};
+        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        features12.descriptorIndexing = supportedFeatures12.descriptorIndexing;
+        features12.runtimeDescriptorArray = supportedFeatures12.runtimeDescriptorArray;
+        features12.descriptorBindingPartiallyBound = supportedFeatures12.descriptorBindingPartiallyBound;
+        features12.descriptorBindingVariableDescriptorCount = supportedFeatures12.descriptorBindingVariableDescriptorCount;
+        features12.bufferDeviceAddress = supportedFeatures12.bufferDeviceAddress;
+
         VkPhysicalDeviceVulkan13Features features13{};
         features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         features13.dynamicRendering = VK_TRUE;
-        features13.synchronization2 = VK_TRUE; // Required for VkBufferMemoryBarrier2
-
-        // Enable Ray Query & Acceleration Structure (Ray Tracing)
-        VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
-        rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-        rayQueryFeatures.rayQuery = VK_TRUE;
-
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
-        asFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-        asFeatures.accelerationStructure = VK_TRUE;
-        asFeatures.pNext = &rayQueryFeatures;
-
-        // Enable Bindless Descriptors (Core in 1.2)
-        VkPhysicalDeviceVulkan12Features features12{};
-        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-        features12.descriptorIndexing = VK_TRUE;
-        features12.runtimeDescriptorArray = VK_TRUE;
-        features12.descriptorBindingPartiallyBound = VK_TRUE;
-        features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
-        features12.bufferDeviceAddress = VK_TRUE; // Required for Ray Tracing (AS)
-        
+        features13.synchronization2 = VK_TRUE;
         features13.pNext = &features12;
-        
+
+        VkPhysicalDeviceFeatures2 features2{};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features2.pNext = &features13;
+        if (supportedFeatures2.features.samplerAnisotropy) {
+            features2.features.samplerAnisotropy = VK_TRUE;
+            m_maxSamplerAnisotropy = std::min(16.0f, devProps.limits.maxSamplerAnisotropy);
+        } else {
+            m_maxSamplerAnisotropy = 1.0f;
+        }
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createInfo.pNext = &features13;
+        createInfo.pNext = &features2;
         createInfo.pQueueCreateInfos = &queueCreateInfo;
         createInfo.queueCreateInfoCount = 1;
 
-        std::vector<const char*> deviceExtensions = {
-            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
-        };
-        // Add swapchain extension if interactive
+        std::vector<const char*> deviceExtensions;
         if (!m_headless) {
             deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
         }
@@ -270,7 +286,8 @@ namespace engine::renderer {
         allocatorInfo.physicalDevice = m_physicalDevice;
         allocatorInfo.device = m_device;
         allocatorInfo.instance = m_instance;
-        
+        allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+
         if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
             throw std::runtime_error("failed to create VMA allocator!");
         }
@@ -288,9 +305,7 @@ namespace engine::renderer {
     }
 
 #ifdef USE_GLFW
-    void VulkanContext::createWindowAndSurface() {
-        // Handled in init() inline
-    }
+    void VulkanContext::createWindowAndSurface() {}
 
     void VulkanContext::createSwapchain() {
         VkSurfaceCapabilitiesKHR capabilities;
@@ -301,13 +316,6 @@ namespace engine::renderer {
         std::vector<VkSurfaceFormatKHR> formats(formatCount);
         if (formatCount != 0) {
             vkGetPhysicalDeviceSurfaceFormatsKHR(m_physicalDevice, m_surface, &formatCount, formats.data());
-        }
-
-        uint32_t presentModeCount;
-        vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface, &presentModeCount, nullptr);
-        std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-        if (presentModeCount != 0) {
-            vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface, &presentModeCount, presentModes.data());
         }
 
         m_swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
@@ -327,9 +335,16 @@ namespace engine::renderer {
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
             m_swapchainExtent = capabilities.currentExtent;
         } else {
-            m_swapchainExtent = {1920, 1080};
-            m_swapchainExtent.width = std::clamp(m_swapchainExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-            m_swapchainExtent.height = std::clamp(m_swapchainExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+            int width = 0, height = 0;
+            if (m_window) {
+                glfwGetFramebufferSize(m_window, &width, &height);
+            }
+            m_swapchainExtent.width = std::clamp(static_cast<uint32_t>(width > 0 ? width : 1920),
+                                                 capabilities.minImageExtent.width,
+                                                 capabilities.maxImageExtent.width);
+            m_swapchainExtent.height = std::clamp(static_cast<uint32_t>(height > 0 ? height : 1080),
+                                                  capabilities.minImageExtent.height,
+                                                  capabilities.maxImageExtent.height);
         }
 
         uint32_t imageCount = capabilities.minImageCount + 1;
@@ -349,7 +364,7 @@ namespace engine::renderer {
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         createInfo.preTransform = capabilities.currentTransform;
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR; // V-Sync
+        createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         createInfo.clipped = VK_TRUE;
 
         if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapchain) != VK_SUCCESS) {
@@ -381,8 +396,7 @@ namespace engine::renderer {
     }
 
     void VulkanContext::createImGuiPool() {
-        VkDescriptorPoolSize pool_sizes[] =
-        {
+        VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
@@ -395,19 +409,19 @@ namespace engine::renderer {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
             { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
         };
-        VkDescriptorPoolCreateInfo pool_info = {};
+        VkDescriptorPoolCreateInfo pool_info{};
         pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         pool_info.maxSets = 1000 * 11;
         pool_info.poolSizeCount = 11;
         pool_info.pPoolSizes = pool_sizes;
-        
+
         if (vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_imguiPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create imgui descriptor pool!");
         }
     }
 #endif
-    
+
     void VulkanContext::recreateSwapchain() {
 #ifdef USE_GLFW
         int width = 0, height = 0;

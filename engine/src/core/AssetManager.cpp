@@ -4,18 +4,221 @@
 #include <fastgltf/tools.hpp>
 #include <stdexcept>
 #include <cmath>
+#include <algorithm>
 #include <glm/gtc/constants.hpp>
 #include "core/Logger.hpp"
+#include "utils/FileIO.hpp"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "renderer/stb_image.h"
 
 namespace engine::core {
     AssetManager::AssetManager(renderer::VulkanContext* context) : m_context(context) {
         createFallbackMeshes();}
 
     AssetManager::~AssetManager() {
+        for (auto& tex : m_textures) {
+            if (tex->imageView) vkDestroyImageView(m_context->getDevice(), tex->imageView, nullptr);
+            if (tex->image) vmaDestroyImage(m_context->getAllocator(), tex->image, tex->allocation);
+        }
         for (auto& mesh : m_meshes) {
             if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
             if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
         }
+    }
+
+    TextureAsset* AssetManager::getTexture(uint32_t id) {
+        for (auto& tex : m_textures) {
+            if (tex->id == id) return tex.get();
+        }
+        return nullptr;
+    }
+
+    uint32_t AssetManager::loadGLTF(const std::string& path) {
+        try {
+            auto data = utils::readFile(path);
+            return loadGLTFFromMemory(std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(data.data()), reinterpret_cast<const uint8_t*>(data.data()) + data.size()));
+        } catch (const std::exception& e) {
+            core::Logger::error("AssetManager::loadGLTF failed for " + path + ": " + e.what());
+            return 0;
+        }
+    }
+
+    void AssetManager::uploadTexture(VkImage& dstImage, VmaAllocation& dstAlloc, VkImageView& dstView,
+                                     const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips) {
+        if (!pixels || width == 0 || height == 0) return;
+
+        const VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
+        const uint32_t mipLevels = generateMips
+            ? (static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1u)
+            : 1u;
+
+        VkBuffer stagingBuffer = VK_NULL_HANDLE;
+        VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+        VkBufferCreateInfo bufInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufInfo.size = imageSize;
+        bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        VmaAllocationCreateInfo allocCreateInfo{};
+        allocCreateInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        if (vmaCreateBuffer(m_context->getAllocator(), &bufInfo, &allocCreateInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create texture staging buffer");
+        }
+
+        void* mapped = nullptr;
+        vmaMapMemory(m_context->getAllocator(), stagingAlloc, &mapped);
+        std::memcpy(mapped, pixels, static_cast<size_t>(imageSize));
+        vmaUnmapMemory(m_context->getAllocator(), stagingAlloc);
+
+        VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        imgInfo.imageType = VK_IMAGE_TYPE_2D;
+        imgInfo.extent = { width, height, 1 };
+        imgInfo.mipLevels = mipLevels;
+        imgInfo.arrayLayers = 1;
+        imgInfo.format = format;
+        imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                        (generateMips ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0u);
+        imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+        VmaAllocationCreateInfo imgAllocInfo{};
+        imgAllocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateImage(m_context->getAllocator(), &imgInfo, &imgAllocInfo, &dstImage, &dstAlloc, nullptr) != VK_SUCCESS) {
+            vmaDestroyBuffer(m_context->getAllocator(), stagingBuffer, stagingAlloc);
+            throw std::runtime_error("Failed to create destination texture image");
+        }
+
+        VkCommandBufferAllocateInfo cmdAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+        cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmdAllocInfo.commandPool = m_context->getCommandPool();
+        cmdAllocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        vkAllocateCommandBuffers(m_context->getDevice(), &cmdAllocInfo, &cmd);
+
+        VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cmd, &beginInfo);
+
+        // Transition image to transfer dst
+        VkImageMemoryBarrier2 barrierToDst{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        barrierToDst.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        barrierToDst.srcAccessMask = 0;
+        barrierToDst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barrierToDst.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrierToDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrierToDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrierToDst.image = dstImage;
+        barrierToDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1 };
+
+        VkDependencyInfo depToDst{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        depToDst.imageMemoryBarrierCount = 1;
+        depToDst.pImageMemoryBarriers = &barrierToDst;
+        vkCmdPipelineBarrier2(cmd, &depToDst);
+
+        VkBufferImageCopy copyRegion{};
+        copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copyRegion.imageSubresource.mipLevel = 0;
+        copyRegion.imageSubresource.baseArrayLayer = 0;
+        copyRegion.imageSubresource.layerCount = 1;
+        copyRegion.imageExtent = { width, height, 1 };
+        vkCmdCopyBufferToImage(cmd, stagingBuffer, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+        if (generateMips && mipLevels > 1) {
+            int32_t mipW = static_cast<int32_t>(width);
+            int32_t mipH = static_cast<int32_t>(height);
+            for (uint32_t i = 1; i < mipLevels; ++i) {
+                VkImageMemoryBarrier2 barrierSrc{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                barrierSrc.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrierSrc.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                barrierSrc.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrierSrc.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+                barrierSrc.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                barrierSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrierSrc.image = dstImage;
+                barrierSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 1, 0, 1 };
+
+                VkDependencyInfo depSrc{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                depSrc.imageMemoryBarrierCount = 1;
+                depSrc.pImageMemoryBarriers = &barrierSrc;
+                vkCmdPipelineBarrier2(cmd, &depSrc);
+
+                VkImageBlit blit{};
+                blit.srcOffsets[1] = { mipW, mipH, 1 };
+                blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 };
+                blit.dstOffsets[1] = { std::max(1, mipW / 2), std::max(1, mipH / 2), 1 };
+                blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
+                vkCmdBlitImage(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+                VkImageMemoryBarrier2 barrierRead{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                barrierRead.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrierRead.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+                barrierRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                barrierRead.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+                barrierRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrierRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrierRead.image = dstImage;
+                barrierRead.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 1, 0, 1 };
+
+                VkDependencyInfo depRead{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                depRead.imageMemoryBarrierCount = 1;
+                depRead.pImageMemoryBarriers = &barrierRead;
+                vkCmdPipelineBarrier2(cmd, &depRead);
+
+                mipW = std::max(1, mipW / 2);
+                mipH = std::max(1, mipH / 2);
+            }
+
+            VkImageMemoryBarrier2 barrierLast{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            barrierLast.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            barrierLast.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barrierLast.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrierLast.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            barrierLast.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrierLast.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrierLast.image = dstImage;
+            barrierLast.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mipLevels - 1, 1, 0, 1 };
+
+            VkDependencyInfo depLast{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depLast.imageMemoryBarrierCount = 1;
+            depLast.pImageMemoryBarriers = &barrierLast;
+            vkCmdPipelineBarrier2(cmd, &depLast);
+        } else {
+            VkImageMemoryBarrier2 barrierFinal{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            barrierFinal.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            barrierFinal.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barrierFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrierFinal.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            barrierFinal.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrierFinal.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrierFinal.image = dstImage;
+            barrierFinal.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+            VkDependencyInfo depFinal{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depFinal.imageMemoryBarrierCount = 1;
+            depFinal.pImageMemoryBarriers = &barrierFinal;
+            vkCmdPipelineBarrier2(cmd, &depFinal);
+        }
+
+        vkEndCommandBuffer(cmd);
+
+        VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &cmd;
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_context->getGraphicsQueue());
+
+        vkFreeCommandBuffers(m_context->getDevice(), m_context->getCommandPool(), 1, &cmd);
+        vmaDestroyBuffer(m_context->getAllocator(), stagingBuffer, stagingAlloc);
+
+        VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        viewInfo.image = dstImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1 };
+        vkCreateImageView(m_context->getDevice(), &viewInfo, nullptr, &dstView);
     }
 
     void AssetManager::uploadBuffer(VkBuffer& dstBuffer, VmaAllocation& dstAlloc, const void* data, size_t size, VkBufferUsageFlags usage) {
@@ -199,6 +402,63 @@ namespace engine::core {
             m_meshes.push_back(std::move(meshAsset));
             rootMeshId = m_nextMeshId - 1;
             
+            // --- Load Textures from glTF ---
+            std::vector<uint32_t> textureIdMap(asset.get().textures.size(), 0);
+            for (size_t t = 0; t < asset.get().textures.size(); ++t) {
+                const auto& gltfTex = asset.get().textures[t];
+                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.get().images.size()) continue;
+
+                const auto& image = asset.get().images[gltfTex.imageIndex.value()];
+                const uint8_t* rawBytes = nullptr;
+                size_t rawSize = 0;
+
+                if (auto* bv = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
+                    if (bv->bufferViewIndex < asset.get().bufferViews.size()) {
+                        const auto& bufferView = asset.get().bufferViews[bv->bufferViewIndex];
+                        if (bufferView.bufferIndex < asset.get().buffers.size()) {
+                            const auto& buf = asset.get().buffers[bufferView.bufferIndex];
+                            const uint8_t* bufferStart = nullptr;
+                            if (auto* vb = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(vb->bytes.data());
+                            } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&buf.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(ab->bytes.data());
+                            } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&buf.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
+                            }
+                            if (bufferStart) {
+                                rawBytes = bufferStart + bufferView.byteOffset;
+                                rawSize = bufferView.byteLength;
+                            }
+                        }
+                    }
+                } else if (auto* vb = std::get_if<fastgltf::sources::Vector>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(vb->bytes.data());
+                    rawSize = vb->bytes.size();
+                } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
+                    rawSize = bvb->bytes.size();
+                } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(ab->bytes.data());
+                    rawSize = ab->bytes.size();
+                }
+
+                if (rawBytes && rawSize > 0) {
+                    int w = 0, h = 0, comp = 0;
+                    stbi_uc* pixels = stbi_load_from_memory(rawBytes, static_cast<int>(rawSize), &w, &h, &comp, 4);
+                    if (pixels) {
+                        auto texAsset = std::make_unique<TextureAsset>();
+                        texAsset->id = m_nextTextureId++;
+                        texAsset->width = static_cast<uint32_t>(w);
+                        texAsset->height = static_cast<uint32_t>(h);
+                        uploadTexture(texAsset->image, texAsset->allocation, texAsset->imageView, pixels, texAsset->width, texAsset->height, VK_FORMAT_R8G8B8A8_UNORM, true);
+                        stbi_image_free(pixels);
+                        textureIdMap[t] = texAsset->id;
+                        m_textures.push_back(std::move(texAsset));
+                        core::Logger::info("Uploaded glTF texture " + std::to_string(t) + " (" + std::to_string(w) + "x" + std::to_string(h) + ")");
+                    }
+                }
+            }
+
             if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.get().materials.size()) {
                 auto& mat = asset.get().materials[primitive.materialIndex.value()];
                 auto materialAsset = std::make_unique<MaterialAsset>();
@@ -211,6 +471,26 @@ namespace engine::core {
                 );
                 materialAsset->metallicFactor = mat.pbrData.metallicFactor;
                 materialAsset->roughnessFactor = mat.pbrData.roughnessFactor;
+
+                if (mat.pbrData.baseColorTexture.has_value()) {
+                    size_t texIdx = mat.pbrData.baseColorTexture.value().textureIndex;
+                    if (texIdx < textureIdMap.size()) {
+                        materialAsset->albedoTextureId = textureIdMap[texIdx];
+                    }
+                }
+                if (mat.normalTexture.has_value()) {
+                    size_t texIdx = mat.normalTexture.value().textureIndex;
+                    if (texIdx < textureIdMap.size()) {
+                        materialAsset->normalTextureId = textureIdMap[texIdx];
+                    }
+                }
+                if (mat.pbrData.metallicRoughnessTexture.has_value()) {
+                    size_t texIdx = mat.pbrData.metallicRoughnessTexture.value().textureIndex;
+                    if (texIdx < textureIdMap.size()) {
+                        materialAsset->ormTextureId = textureIdMap[texIdx];
+                    }
+                }
+                meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
             return rootMeshId;

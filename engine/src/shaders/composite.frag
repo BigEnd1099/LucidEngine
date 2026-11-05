@@ -1,122 +1,71 @@
 #version 450
 
-layout(location = 0) in vec2 inUV;
+layout(location = 0) in vec2 fragUV;
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform sampler2D uHdrScene;
-layout(set = 0, binding = 1) uniform sampler2D uBloom;
-layout(set = 0, binding = 2) uniform sampler2D uAoTexture;
+layout(set = 0, binding = 0) uniform sampler2D hdrSceneTex;
+layout(set = 0, binding = 1) uniform sampler2D bloomTex;
 
-layout(push_constant) uniform CompositeConstants {
-    vec4 params;   // x = bloomIntensity, y = exposure, z = aaMode (0: Off, 1: FXAA Fast, 2: FXAA Quality, 3: Ultra), w = bloomEnabled (1.0 or 0.0)
-    vec4 aoParams; // x = aoEnabled (1.0 or 0.0), y = aoPower, z = texelSizeX, w = texelSizeY
+layout(push_constant) uniform CompositePush {
+    vec4 params;  // x = bloomIntensity, y = exposure, z = bloomEnabled, w = frameIndex
+    vec4 params2; // x = useFxaa (1.0 = true, 0.0 = false)
 } pcs;
 
-// [UE5 TonemapCommon.ush: ACESFilm] ACES Filmic Tone Mapping Curve
-vec3 ACESFilm(vec3 x) {
-    float a = 2.51;
-    float b = 0.03;
-    float c = 2.43;
-    float d = 0.59;
-    float e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+// Macierze przestrzeni barw ACES (Stephen Hill RRT + ODT Fit: sRGB -> AP1 -> RRT+ODT -> sRGB)
+const mat3 ACES_INPUT_MAT = mat3(
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777
+);
+
+const mat3 ACES_OUTPUT_MAT = mat3(
+     1.60475, -0.10208, -0.00327,
+    -0.53108,  1.10813, -0.07276,
+    -0.07367, -0.00605,  1.07602
+);
+
+vec3 rrtAndOdtFit(vec3 v) {
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return a / b;
 }
 
-// Samples HDR scene, applies Bloom & GTAO, and performs ACES Tonemap + Gamma
-vec3 SampleToneMappedPixel(vec2 uv) {
-    vec3 sceneColor = texture(uHdrScene, uv).rgb;
-    
-    // GTAO Contact Shadow
-    if (pcs.aoParams.x > 0.5) {
-        float ao = texture(uAoTexture, uv).r;
-        float aoFactor = clamp(1.0 - ao * 0.75, 0.0, 1.0);
-        sceneColor *= aoFactor;
-    }
-    
-    // Bloom Dual-Kawase Glow
-    if (pcs.params.w > 0.5) {
-        float bloomIntensity = pcs.params.x > 0.0 ? pcs.params.x : 0.85;
-        sceneColor += texture(uBloom, uv).rgb * bloomIntensity;
-    }
-    
-    // Exposure
-    sceneColor *= (pcs.params.y > 0.0 ? pcs.params.y : 1.0);
-    
-    // ACES Filmic Tone Mapping
-    vec3 ldr = ACESFilm(sceneColor);
-    
-    // Gamma 2.2 Correction
-    return pow(ldr, vec3(1.0 / 2.2));
+vec3 acesFitted(vec3 color) {
+    color = ACES_INPUT_MAT * color;
+    color = rrtAndOdtFit(color);
+    color = ACES_OUTPUT_MAT * color;
+    return clamp(color, 0.0, 1.0);
 }
 
-float RGBToLuma(vec3 rgb) {
-    return dot(rgb, vec3(0.299, 0.587, 0.114));
+// Dokladna krzywa elektro-optyczna IEC 61966-2-1 sRGB
+vec3 linearToSRGB(vec3 x) {
+    bvec3 cutoff = lessThanEqual(x, vec3(0.0031308));
+    vec3 lower = x * 12.92;
+    vec3 higher = 1.055 * pow(max(x, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+    return mix(higher, lower, cutoff);
+}
+
+float ignDither(vec2 pos, float frame) {
+    return fract(52.9829189 * fract(dot(pos + mod(frame, 64.0) * vec2(5.588238, 5.588238), vec2(0.06711056, 0.00583715)))) - 0.5;
 }
 
 void main() {
-    float aaMode = pcs.params.z;
-    vec2 ts = pcs.aoParams.zw;
-
-    vec3 colorCenter = SampleToneMappedPixel(inUV);
-
-    // If Anti-Aliasing is disabled (Mode 0), output direct tone-mapped pixel
-    if (aaMode < 0.5 || ts.x <= 0.0 || ts.y <= 0.0) {
-        outColor = vec4(colorCenter, 1.0);
-        return;
+    vec3 hdr = texture(hdrSceneTex, fragUV).rgb;
+    if (pcs.params.z > 0.5) {
+        vec3 bloom = texture(bloomTex, fragUV).rgb;
+        hdr += bloom * pcs.params.x;
     }
 
-    // === NVIDIA FXAA 3.11 (Full-Screen Fast Approximate Anti-Aliasing) ===
-    float lumaM = RGBToLuma(colorCenter);
-    float lumaU = RGBToLuma(SampleToneMappedPixel(inUV + vec2(0.0, -ts.y)));
-    float lumaD = RGBToLuma(SampleToneMappedPixel(inUV + vec2(0.0,  ts.y)));
-    float lumaL = RGBToLuma(SampleToneMappedPixel(inUV + vec2(-ts.x, 0.0)));
-    float lumaR = RGBToLuma(SampleToneMappedPixel(inUV + vec2( ts.x, 0.0)));
+    hdr *= max(pcs.params.y, 0.01);
+    vec3 mapped = acesFitted(hdr);
+    vec3 srgb = linearToSRGB(mapped);
 
-    float lumaMin = min(lumaM, min(min(lumaU, lumaD), min(lumaL, lumaR)));
-    float lumaMax = max(lumaM, max(max(lumaU, lumaD), max(lumaL, lumaR)));
-    float lumaRange = lumaMax - lumaMin;
+    // Dithering 8-bit zapobiegajacy pasmowaniu (banding) na ciemnym niebie i mgle
+    srgb = clamp(srgb + ignDither(gl_FragCoord.xy, pcs.params.w) / 255.0, 0.0, 1.0);
 
-    // Edge contrast threshold: if delta is below threshold, skip AA to preserve sharp textures
-    float edgeThresholdMin = 0.0312;
-    float edgeThresholdMax = 0.125;
-    float edgeThreshold = max(edgeThresholdMin, lumaMax * edgeThresholdMax);
-
-    if (lumaRange < edgeThreshold) {
-        outColor = vec4(colorCenter, 1.0);
-        return;
-    }
-
-    // 4 Corner diagonals for subpixel filter and gradient direction
-    float lumaUL = RGBToLuma(SampleToneMappedPixel(inUV + vec2(-ts.x, -ts.y)));
-    float lumaUR = RGBToLuma(SampleToneMappedPixel(inUV + vec2( ts.x, -ts.y)));
-    float lumaDL = RGBToLuma(SampleToneMappedPixel(inUV + vec2(-ts.x,  ts.y)));
-    float lumaDR = RGBToLuma(SampleToneMappedPixel(inUV + vec2( ts.x,  ts.y)));
-
-    float lumaLPlusR = lumaL + lumaR;
-    float lumaUPlusD = lumaU + lumaD;
-    float lumaCorners = lumaUL + lumaUR + lumaDL + lumaDR;
-
-    // Local edge orientation (horizontal vs vertical)
-    float edgeH = abs(-2.0 * lumaL + lumaUL + lumaDL) + abs(-2.0 * lumaM + lumaU + lumaD) * 2.0 + abs(-2.0 * lumaR + lumaUR + lumaDR);
-    float edgeV = abs(-2.0 * lumaU + lumaUL + lumaUR) + abs(-2.0 * lumaM + lumaL + lumaR) * 2.0 + abs(-2.0 * lumaD + lumaDL + lumaDR);
-    bool isHorizontal = (edgeH >= edgeV);
-
-    // Subpixel antialiasing filter
-    float subpixelLuma = (2.0 * (lumaUPlusD + lumaLPlusR) + lumaCorners) / 12.0;
-    float subpixelDiff = abs(subpixelLuma - lumaM);
-    float subpixelBlend = clamp(subpixelDiff / lumaRange, 0.0, 1.0);
-    subpixelBlend = smoothstep(0.0, 1.0, subpixelBlend);
-    float subpixelFactor = (aaMode > 1.5) ? 0.75 : 0.50;
-    float subpixelOffset = subpixelBlend * subpixelBlend * subpixelFactor;
-
-    // Edge step normal
-    float luma1 = isHorizontal ? lumaU : lumaL;
-    float luma2 = isHorizontal ? lumaD : lumaR;
-    float stepSign = (abs(luma1 - lumaM) >= abs(luma2 - lumaM)) ? -1.0 : 1.0;
-
-    vec2 blendDir = isHorizontal ? vec2(0.0, ts.y * stepSign * (0.5 + subpixelOffset * 0.5))
-                                 : vec2(ts.x * stepSign * (0.5 + subpixelOffset * 0.5), 0.0);
-
-    vec3 blendedColor = SampleToneMappedPixel(inUV + blendDir);
-    outColor = vec4(mix(colorCenter, blendedColor, 0.85), 1.0);
+    // Gdy FXAA jest aktywne, zapisujemy percepcyjna luminancje w kanale alfa.
+    // Gdy FXAA jest wylaczone, zapisujemy scisle alpha = 1.0, aby ImGui nie mieszal przezroczystosci!
+    float luma = dot(srgb, vec3(0.299, 0.587, 0.114));
+    float outAlpha = (pcs.params2.x > 0.5) ? luma : 1.0;
+    outColor = vec4(srgb, outAlpha);
 }

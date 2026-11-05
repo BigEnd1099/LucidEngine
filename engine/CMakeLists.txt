@@ -4,30 +4,24 @@ if(POLICY CMP0218)
 endif()
 set(CMAKE_WARN_DEPRECATED OFF)
 
-# Rozwiązuje ostrzeżenia o instalacji i ścieżkach (CMP0177) w zależnościach
 set(CMAKE_POLICY_DEFAULT_CMP0177 NEW)
-
-# Wycisza ostrzeżenie o braku wsparcia dla IPO w Twoim kompilatorze
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 
 if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
 
-# Force MSVC to use standard dynamic runtime (MD)
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
 project(LucidEngine CXX)
 
-# Prevent Windows headers from defining min/max macros which break C++ std::min/std::max
 if(MSVC)
     add_compile_options(/EHa)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-# Vulkan 1.3 clip space depth range [0.0, 1.0] and radians for GLM
 add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS GLM_ENABLE_EXPERIMENTAL)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -68,7 +62,6 @@ FetchContent_Declare(qjs URL https://github.com/quickjs-ng/quickjs/archive/refs/
 FetchContent_MakeAvailable(qjs)
 
 if(MSVC)
-    # Suppress noisy C warnings in QuickJS
     foreach(qjs_target qjs qjsc qjs_exe run-test262 test_conv function_source)
         if(TARGET ${qjs_target})
             target_compile_options(${qjs_target} PRIVATE /w)
@@ -80,10 +73,10 @@ endif()
 set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
 set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
-set(USE_AVX2 OFF CACHE BOOL "" FORCE) # disable AVX2 constraint for general compat
-set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE) # Fix MSVC error C2220 (Warnings as Errors) in Windows SDK headers
-set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE) # FORCE /MD INSTEAD OF /MT FOR JOLT
-set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "" FORCE) # Fix LNK2038 mismatch (MD_DynamicRelease vs MT_StaticRelease)
+set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "" FORCE)
 FetchContent_Declare(jolt URL https://github.com/jrouwe/JoltPhysics/archive/refs/tags/v5.0.0.tar.gz)
 FetchContent_MakeAvailable(jolt)
 add_subdirectory(${jolt_SOURCE_DIR}/Build ${jolt_BINARY_DIR})
@@ -109,10 +102,9 @@ FetchContent_MakeAvailable(imgui)
 
 find_package(Vulkan REQUIRED)
 
-file(GLOB_RECURSE SRC_FILES "src/*.cpp")
-file(GLOB_RECURSE HEADER_FILES "include/*.hpp")
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "src/*.cpp")
+file(GLOB_RECURSE HEADER_FILES CONFIGURE_DEPENDS "include/*.hpp")
 
-# ImGui sources
 set(IMGUI_SRCS
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_demo.cpp
@@ -123,7 +115,7 @@ set(IMGUI_SRCS
     ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
 )
 
-# Shaders
+# Shaders (including Precomputed Cubemap IBL, 5-Mip Bloom Pyramid & FXAA 3.11)
 set(SHADER_FILES
     src/shaders/triangle.vert
     src/shaders/triangle.frag
@@ -134,11 +126,16 @@ set(SHADER_FILES
     src/shaders/particle.vert
     src/shaders/particle.frag
     src/shaders/fullscreen.vert
+    src/shaders/ibl_equirect_to_cube.frag
+    src/shaders/ibl_irradiance.frag
+    src/shaders/ibl_prefilter.frag
+    src/shaders/ibl_brdf_lut.frag
     src/shaders/bloom_downsample.frag
-    src/shaders/bloom_kawase.frag
+    src/shaders/bloom_upsample.frag
     src/shaders/gtao.frag
     src/shaders/gtao_blur.frag
     src/shaders/composite.frag
+    src/shaders/fxaa.frag
     src/shaders/skybox.frag
 )
 
@@ -157,7 +154,6 @@ endforeach()
 
 add_custom_target(CompileShaders DEPENDS ${SPV_FILES})
 
-# Auto-generate Dual-Transport UI Shell Binary Contracts & Embedded Assets
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
     add_custom_command(
@@ -186,7 +182,6 @@ if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
 endif()
 
-# Copy shaders next to the executable
 foreach(SPV_FILE ${SPV_FILES})
     add_custom_command(TARGET engine POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -195,14 +190,12 @@ foreach(SPV_FILE ${SPV_FILES})
     )
 endforeach()
 
-# Copy fonts next to the executable
 add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts
     $<TARGET_FILE_DIR:engine>/assets/fonts
 )
 
-# Copy textures next to the executable
 add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures

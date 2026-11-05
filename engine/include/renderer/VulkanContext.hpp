@@ -25,8 +25,8 @@ namespace engine::renderer {
         VkQueue getGraphicsQueue() const { return m_graphicsQueue; }
         uint32_t getGraphicsQueueFamily() const { return m_graphicsQueueFamily; }
         VkCommandPool getCommandPool() const { return m_commandPool; }
-
         bool isHeadless() const { return m_headless; }
+        float getMaxSamplerAnisotropy() const { return m_maxSamplerAnisotropy; }
 
 #ifdef USE_GLFW
         GLFWwindow* getWindow() const { return m_window; }
@@ -44,7 +44,6 @@ namespace engine::renderer {
         void createLogicalDevice();
         void createAllocator();
         void createCommandPool();
-
 #ifdef USE_GLFW
         void createWindowAndSurface();
         void createSwapchain();
@@ -52,7 +51,7 @@ namespace engine::renderer {
 #endif
 
         bool m_headless{true};
-
+        float m_maxSamplerAnisotropy{1.0f};
         VkInstance m_instance{VK_NULL_HANDLE};
         VkPhysicalDevice m_physicalDevice{VK_NULL_HANDLE};
         VkDevice m_device{VK_NULL_HANDLE};
@@ -67,8 +66,8 @@ namespace engine::renderer {
         VkSwapchainKHR m_swapchain{VK_NULL_HANDLE};
         std::vector<VkImage> m_swapchainImages;
         std::vector<VkImageView> m_swapchainImageViews;
-        VkFormat m_swapchainImageFormat;
-        VkExtent2D m_swapchainExtent;
+        VkFormat m_swapchainImageFormat{VK_FORMAT_B8G8R8A8_UNORM};
+        VkExtent2D m_swapchainExtent{1920, 1080};
         VkDescriptorPool m_imguiPool{VK_NULL_HANDLE};
 #endif
     };

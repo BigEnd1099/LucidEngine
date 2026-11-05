@@ -1553,6 +1553,12 @@ function update(entities, dt, input, contacts) {
         if (json.contains("sunDirection") && json["sunDirection"].is_array() && json["sunDirection"].size() >= 3) {
             m_envSettings.sunDirection = glm::vec3(json["sunDirection"][0], json["sunDirection"][1], json["sunDirection"][2]);
         }
+        if (json.contains("sunEnabled")) {
+            m_envSettings.sunEnabled = json["sunEnabled"].get<bool>();
+        }
+        if (json.contains("sunDirectionFromPosition")) {
+            m_envSettings.sunDirectionFromPosition = json["sunDirectionFromPosition"].get<bool>();
+        }
         if (json.contains("fogEnabled")) {
             m_envSettings.fogEnabled = json["fogEnabled"].get<bool>();
         } else if (json.contains("fog")) {
@@ -1592,6 +1598,8 @@ function update(entities, dt, input, contacts) {
             {"sunColor", {m_envSettings.sunColor.r, m_envSettings.sunColor.g, m_envSettings.sunColor.b}},
             {"sunIntensity", m_envSettings.sunIntensity},
             {"sunDirection", {m_envSettings.sunDirection.x, m_envSettings.sunDirection.y, m_envSettings.sunDirection.z}},
+            {"sunEnabled", m_envSettings.sunEnabled},
+            {"sunDirectionFromPosition", m_envSettings.sunDirectionFromPosition},
             {"fog", m_envSettings.fogEnabled},
             {"fogEnabled", m_envSettings.fogEnabled},
             {"fogColor", {m_envSettings.fogColor.r, m_envSettings.fogColor.g, m_envSettings.fogColor.b}},

@@ -1,38 +1,57 @@
 #version 450
 
-layout(location = 0) in vec2 inUV;
+layout(location = 0) in vec2 fragUV;
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 3) uniform sampler2D environmentMap;
+struct OccluderData {
+    vec4 centerRadius;
+    vec4 halfExtents;
+};
 
-layout(push_constant) uniform SkyboxPushConstants {
+layout(set = 0, binding = 1) uniform SceneUbo {
+    mat4 viewProj;
+    mat4 view;
     mat4 invViewProj;
-    vec4 cameraPosAndParams; // xyz = cameraPos, w = skyIntensity
-} pcs;
+    mat4 cascadeLightSpace[4];
+    vec4 cascadeSplits;
+    vec4 cascadeRadii;
+    vec4 cameraPos;
+    vec4 sunDirection;
+    vec4 sunPosition;
+    vec4 sunColor;
+    vec4 ambientColor;
+    vec4 fogParams;
+    vec4 fogColor;
+    vec4 screenParams;
+    vec4 lightsPos[8];
+    vec4 lightsCol[8];
+    vec4 lightsDir[8];
+    vec4 lightsParams[8];
+    vec4 pointShadowParams;
+    int numLights;
+    int numOccluders;
+    int frameIndex;
+    int skyboxMode;
+    OccluderData occluders[32];
+} ubo;
 
-vec2 SampleSphericalMap(vec3 v) {
-    vec3 dir = normalize(v);
-    vec2 uv = vec2(atan(dir.z, dir.x), asin(clamp(dir.y, -1.0, 1.0)));
-    uv *= vec2(0.15915494, -0.31830989); // 1 / (2*PI), -1 / PI
-    uv += 0.5;
-    return uv;
-}
+layout(set = 0, binding = 3) uniform samplerCube envCubemap;
 
 void main() {
-    // Unproject pixel from normalized device coordinates to world space ray direction
-    vec4 clip = vec4(inUV.x * 2.0 - 1.0, inUV.y * 2.0 - 1.0, 1.0, 1.0);
-    vec4 worldPos = pcs.invViewProj * clip;
-    if (abs(worldPos.w) < 1e-6) discard;
+    vec2 ndc = fragUV * 2.0 - 1.0;
+    vec4 worldTarget = ubo.invViewProj * vec4(ndc, 1.0, 1.0);
+    vec3 rayDir = normalize(worldTarget.xyz / worldTarget.w - ubo.cameraPos.xyz);
 
-    vec3 rayDir = normalize(worldPos.xyz / worldPos.w - pcs.cameraPosAndParams.xyz);
-    vec2 skyUv = SampleSphericalMap(rayDir);
+    vec3 skyHdr = textureLod(envCubemap, rayDir, 0.0).rgb * max(ubo.ambientColor.w, 0.15);
 
-    vec3 skyColor = texture(environmentMap, skyUv).rgb;
-    if (any(isnan(skyColor)) || any(isinf(skyColor))) {
-        skyColor = vec3(0.0);
+    // Analityczna tarcza słoneczna oraz aureola Mie zsynchronizowana z kierunkiem słońca
+    if (ubo.sunDirection.w > 0.05) {
+        vec3 sunDir = normalize(ubo.sunDirection.xyz);
+        float cosTheta = dot(rayDir, sunDir);
+        float sunDisk = smoothstep(0.99965, 0.99990, cosTheta);
+        float sunCorona = pow(max(cosTheta, 0.0), 256.0) * 0.35;
+        skyHdr += ubo.sunColor.rgb * ubo.sunDirection.w * (sunDisk * 8.0 + sunCorona);
     }
-    skyColor = max(skyColor, vec3(0.0));
 
-    float intensity = pcs.cameraPosAndParams.w > 0.0 ? pcs.cameraPosAndParams.w : 1.0;
-    outColor = vec4(skyColor * intensity, 1.0);
+    outColor = vec4(max(skyHdr, vec3(0.0)), 1.0);
 }
