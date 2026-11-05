@@ -1042,26 +1042,8 @@ namespace engine::renderer {
             }
             ubo.numLights = lightIdx;
 
-            auto occMeshView = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
-            int occIdx = 0;
-            for (auto mEnt : occMeshView) {
-                if (occIdx >= 32) break;
-                const auto& tc = occMeshView.get<ecs::TransformComponent>(mEnt);
-                const auto& mc = occMeshView.get<ecs::MeshComponent>(mEnt);
-                std::string tag = registry.get().all_of<ecs::TagComponent>(mEnt) ? registry.get().get<ecs::TagComponent>(mEnt).name : "";
-                if (mc.meshId == 1 || tag == "GroundPlane" || tag == "Ground") continue;
-                if (registry.get().all_of<ecs::LightComponent>(mEnt) || tag.find("Light") != std::string::npos) continue;
-                if (registry.get().all_of<ecs::RigidBodyComponent>(mEnt) && registry.get().get<ecs::RigidBodyComponent>(mEnt).isSensor) continue;
-
-                const glm::mat3 rot = glm::mat3_cast(tc.orientation);
-                const glm::mat3 absRot(glm::abs(rot[0]), glm::abs(rot[1]), glm::abs(rot[2]));
-                const glm::vec3 halfExt = absRot * glm::max(tc.scale * 0.5f, glm::vec3(0.05f));
-                float shapeType = (mc.meshId == 3) ? 1.0f : ((mc.meshId == 4 || mc.meshId == 5) ? 2.0f : 0.0f);
-                ubo.occluders[occIdx].centerRadius = glm::vec4(tc.position, glm::length(halfExt));
-                ubo.occluders[occIdx].halfExtents  = glm::vec4(halfExt, shapeType);
-                occIdx++;
-            }
-            ubo.numOccluders = occIdx;
+            // Analityczne cienie sferyczne usuniete - zastepuja je rzeczywiste cienie mapowane
+            ubo.numOccluders = 0;
             std::memcpy(m_sceneUboMappedPtr, &ubo, sizeof(SceneUboData));
         }
 

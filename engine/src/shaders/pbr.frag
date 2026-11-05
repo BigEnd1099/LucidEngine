@@ -141,10 +141,36 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
         return 1.0;
     }
 
-    // Stały promień półcienia w metrach świata (0.045m) przeskalowany do przestrzeni UV danej kaskady
-    float uvFilterRadius = clamp(0.045 / (2.0 * cRadius), 0.00035, 0.0035);
     float depthBias = 0.00025 + 0.0006 * sinTheta;
 
+    // === PCSS Krok 1: Blocker Search (szukanie przeszkód rzucających cień) ===
+    float searchRadius = clamp(0.06 / (2.0 * cRadius), 0.0015, 0.008);
+    float avgBlockerDepth = 0.0;
+    int numBlockers = 0;
+    const int BLOCKER_SAMPLES = 8;
+    for (int i = 0; i < BLOCKER_SAMPLES; ++i) {
+        vec2 offset = vogelDiskSample(i, BLOCKER_SAMPLES, phi) * searchRadius;
+        float d = texture(shadowMap, vec3(proj.xy + offset, float(cascadeIdx))).r;
+        if (d < proj.z - depthBias) {
+            avgBlockerDepth += d;
+            numBlockers++;
+        }
+    }
+
+    // Brak przeszkód pomiędzy słońcem a punktem = pełne oświetlenie
+    if (numBlockers == 0) return 1.0;
+
+    // === PCSS Krok 2: Estymacja szerokości półcienia (Penumbra Estimation) ===
+    avgBlockerDepth /= float(numBlockers);
+    float blockerDist = max(proj.z - avgBlockerDepth, 0.0);
+
+    // Contact Hardening: na styku cień jest ostry (minFilterRadius),
+    // a w miarę oddalania od przeszkody miękko i naturalnie się rozmywa
+    float minFilterRadius = 1.0 / float(textureSize(shadowMap, 0).x);
+    const float penumbraScale = 0.06;
+    float uvFilterRadius = clamp(minFilterRadius + blockerDist * penumbraScale, minFilterRadius, 0.0065);
+
+    // === PCSS Krok 3: Vogel Disk PCF z dynamicznym promieniem ===
     float visibility = 0.0;
     const int SAMPLES = 16;
     for (int i = 0; i < SAMPLES; ++i) {
@@ -189,14 +215,26 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
 
     vec3 L = normalize(toLight);
     float NdotL = max(dot(geomN, L), 0.0);
+
     // Lekki offset wzdluz normalnej zapobiegajacy trądzikowi cienia na skosach
-    vec3 dir = -toLight + geomN * (0.012 * (1.0 - NdotL));
+    vec3 dir = -toLight + geomN * (0.015 * (1.0 - NdotL));
 
-    vec3 up = abs(dir.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-    vec3 right = normalize(cross(up, dir));
-    vec3 bitan = cross(dir, right);
+    // Frisvad 2012: stabilna, w 100% symetryczna baza ortonormalna z jednego wektora.
+    // Eliminuje degenerację cross(up, dir) wokół osi Y, dzięki czemu rozmycie cienia
+    // jest idealnie izotropowe we wszystkich osiach (koniec rozmycia tylko w osi X).
+    vec3 ndir = normalize(dir);
+    vec3 right, bitan;
+    if (ndir.z < -0.9999) {
+        right = vec3(0.0, -1.0, 0.0);
+        bitan = vec3(-1.0, 0.0, 0.0);
+    } else {
+        float a = 1.0 / (1.0 + ndir.z);
+        float b = -ndir.x * ndir.y * a;
+        right = vec3(1.0 - ndir.x * ndir.x * a, b, -ndir.x);
+        bitan = vec3(b, 1.0 - ndir.y * ndir.y * a, -ndir.y);
+    }
 
-    float diskRadius = (0.012 + 0.02 * (currentDist / farPlane));
+    float diskRadius = (0.015 + 0.02 * (currentDist / farPlane));
     float bias = max(0.03 * (1.0 - NdotL), ubo.pointShadowParams.w);
     float phi = ign * 2.0 * PI;
 
@@ -351,7 +389,7 @@ void main() {
         if (i == shadowedPointIdx && (lType == 0 || lType == 1)) {
             shadowVis = samplePointLightShadow(toLight, dist, geomN, ign);
         } else {
-            shadowVis = computeAnalyticOcclusion(fragWorldPos, lPos);
+            shadowVis = 1.0;  // Brak mapy cieni — pomijamy cienie analityczne
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
