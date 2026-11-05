@@ -1349,7 +1349,7 @@ namespace engine::renderer {
                         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-        if (m_gtaoEnabled && m_gtaoPipeline && m_gtaoBlurPipeline) {
+        if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline) {
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1375,9 +1375,10 @@ namespace engine::renderer {
             vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gtaoPipelineLayout, 0, 1, &m_gtaoDescSet, 0, nullptr);
 
             const float tanHalfFovY = std::tan(glm::radians(sceneFov) * 0.5f);
-            const glm::vec4 gtaoPcs[2] = {
+            const glm::vec4 gtaoPcs[3] = {
                 glm::vec4(m_gtaoRadius, m_gtaoIntensity, tanHalfFovY, sceneAspect),
-                glm::vec4(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f)
+                glm::vec4(1.0f / static_cast<float>(m_width), 1.0f / static_cast<float>(m_height), 0.1f, 1000.0f),
+                glm::vec4(m_gtaoEnabled ? 1.0f : 0.0f, m_lightBounceEnabled ? 1.0f : 0.0f, 0.0f, 0.0f)
             };
             vkCmdPushConstants(m_commandBuffer, m_gtaoPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(gtaoPcs), gtaoPcs);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);

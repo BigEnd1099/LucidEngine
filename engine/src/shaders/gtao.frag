@@ -9,6 +9,7 @@ layout(set = 0, binding = 1) uniform sampler2D colorTex; // Scene HDR lit/textur
 layout(push_constant) uniform GtaoPush {
     vec4 params;       // x = worldRadius, y = intensity, z = tanHalfFovY, w = aspect
     vec4 screenParams; // x = invWidth, y = invHeight, z = zNear, w = zFar
+    vec4 flags;        // x = gtaoEnabled (1.0/0.0), y = giEnabled (1.0/0.0), z = unused, w = unused
 } pcs;
 
 const float PI = 3.14159265359;
@@ -107,18 +108,20 @@ void main() {
                     maxHorizons[side] = max(maxHorizons[side], mix(-1.0, cosH, weight));
 
                     // --- SCREEN-SPACE DIFFUSE GI (COLOR BLEED OD KAZDEGO ELEMENTU Z JEGO TEKSTURA) ---
-                    vec3 L = diff / dist;
-                    float NdotL = max(dot(viewNormal, L), 0.0);
-                    if (NdotL > 0.001 && dist < falloffRange) {
-                        vec3 sampleColor = texture(colorTex, sampleUV).rgb;
-                        // Firefly clamping: przyciecie pikow HDR powyzej 6.0
-                        sampleColor = min(sampleColor, vec3(6.0));
+                    if (pcs.flags.y > 0.5) {
+                        vec3 L = diff / dist;
+                        float NdotL = max(dot(viewNormal, L), 0.0);
+                        if (NdotL > 0.001 && dist < falloffRange) {
+                            vec3 sampleColor = texture(colorTex, sampleUV).rgb;
+                            // Firefly clamping: przyciecie pikow HDR powyzej 6.0
+                            sampleColor = min(sampleColor, vec3(6.0));
 
-                        float distFactor = clamp(1.0 - (dist / falloffRange), 0.0, 1.0);
-                        float geomAtten = (NdotL * distFactor * distFactor) / (1.0 + dist * dist * 0.5);
+                            float distFactor = clamp(1.0 - (dist / falloffRange), 0.0, 1.0);
+                            float geomAtten = (NdotL * distFactor * distFactor) / (1.0 + dist * dist * 0.5);
 
-                        accumGI += sampleColor * geomAtten;
-                        accumWeight += geomAtten;
+                            accumGI += sampleColor * geomAtten;
+                            accumWeight += geomAtten;
+                        }
                     }
                 }
             }
@@ -133,11 +136,21 @@ void main() {
         visibility += projNormalLen * sliceVis;
     }
 
-    visibility = clamp(visibility / float(NUM_SLICES), 0.03, 1.0);
-    float finalAO = pow(visibility, max(pcs.params.y, 0.01));
+    float finalAO = 1.0;
+    if (pcs.flags.x > 0.5) {
+        visibility = clamp(visibility / float(NUM_SLICES), 0.03, 1.0);
+        finalAO = pow(visibility, max(pcs.params.y, 0.01));
+    }
 
-    vec3 finalGI = (accumWeight > 1e-4) ? (accumGI / accumWeight) : vec3(0.0);
-    finalGI *= finalAO;
+    vec3 finalGI = vec3(0.0);
+    if (pcs.flags.y > 0.5 && accumWeight > 1e-4) {
+        finalGI = accumGI / accumWeight;
+        // Jesli GTAO jest wlaczone, tlumi bounce na stykach (eliminacja contact glow).
+        // Jesli GTAO jest wylaczone przez uzytkownika, nie zerujemy bounce.
+        if (pcs.flags.x > 0.5) {
+            finalGI *= finalAO;
+        }
+    }
 
     outAOGI = vec4(finalGI, finalAO);
 }

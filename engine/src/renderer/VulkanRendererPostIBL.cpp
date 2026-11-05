@@ -1260,7 +1260,7 @@ namespace engine::renderer {
             vkCreatePipelineLayout(dev, &pl, nullptr, outLayout);
         };
 
-        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 2, &m_gtaoPipelineLayout);
+        makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4) * 3, &m_gtaoPipelineLayout);
         makeLayout(m_dualTextureDescLayout, sizeof(glm::vec4),     &m_gtaoBlurPipelineLayout);
         makeLayout(m_singleTextureDescLayout, sizeof(glm::vec4),     &m_bloomPipelineLayout);
         makeLayout(m_dualTextureDescLayout,   sizeof(glm::vec4) * 2, &m_compositePipelineLayout);
