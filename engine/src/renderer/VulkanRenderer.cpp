@@ -1010,6 +1010,13 @@ namespace engine::renderer {
                                           1.0f / static_cast<float>(std::max(1u, m_width)),
                                           1.0f / static_cast<float>(std::max(1u, m_height)));
             ubo.pointShadowParams = glm::vec4(static_cast<float>(shadowedPointLightIdx), 0.1f, shadowedPointLightRange, 0.015f);
+            ubo.bounceParams = glm::vec4(
+                m_lightBounceEnabled ? 1.0f : 0.0f,
+                m_lightBounceIntensity,
+                m_lightBounceGroundReflectance,
+                m_lightBounceMultiBounce
+            );
+            ubo.bounceColor = glm::vec4(m_lightBounceGroundColor, 1.0f);
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
             ubo.skyboxMode = m_skyboxEnabled ? 1 : 0;
 

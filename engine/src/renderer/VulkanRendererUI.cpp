@@ -1642,6 +1642,16 @@ namespace engine::renderer {
                         }
                     }
 
+                    if (ImGui::CollapsingHeader("Global Illumination & Light Bouncing", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::Checkbox("Light Bouncing Active (Odbicia swiatla)", &m_lightBounceEnabled);
+                        if (m_lightBounceEnabled) {
+                            ImGui::SliderFloat("Bounce Intensity (Sila odbicia)", &m_lightBounceIntensity, 0.0f, 3.0f, "%.2f");
+                            ImGui::SliderFloat("Ground Reflectance (Odbicie podloza)", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
+                            ImGui::SliderFloat("Multi-Bounce Color Bleed", &m_lightBounceMultiBounce, 0.0f, 2.0f, "%.2f");
+                            ImGui::ColorEdit3("Ground Bounce Tint", &m_lightBounceGroundColor.x);
+                        }
+                    }
+
                     if (ImGui::CollapsingHeader("Multi-Bounce GTAO (Depth Prepass)", ImGuiTreeNodeFlags_DefaultOpen)) {
                         ImGui::Checkbox("GTAO Active", &m_gtaoEnabled);
                         if (m_gtaoEnabled) {

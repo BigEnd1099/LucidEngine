@@ -28,6 +28,8 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     vec4 lightsDir[8];
     vec4 lightsParams[8];
     vec4 pointShadowParams;
+    vec4 bounceParams;
+    vec4 bounceColor;
     int numLights;
     int numOccluders;
     int frameIndex;

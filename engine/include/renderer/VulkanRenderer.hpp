@@ -167,6 +167,24 @@ namespace engine::renderer {
         float m_fogHeightFalloff{0.08f};
         glm::vec3 m_fogColor{0.07f, 0.10f, 0.16f};
 
+        // Global Illumination / Light Bouncing
+        bool m_lightBounceEnabled{true};
+        float m_lightBounceIntensity{0.80f};
+        float m_lightBounceGroundReflectance{0.60f};
+        float m_lightBounceMultiBounce{1.0f};
+        glm::vec3 m_lightBounceGroundColor{0.85f, 0.80f, 0.72f};
+
+        void setLightBounceEnabled(bool enabled) { m_lightBounceEnabled = enabled; }
+        bool isLightBounceEnabled() const { return m_lightBounceEnabled; }
+        void setLightBounceIntensity(float intensity) { m_lightBounceIntensity = std::clamp(intensity, 0.0f, 5.0f); }
+        float getLightBounceIntensity() const { return m_lightBounceIntensity; }
+        void setLightBounceGroundReflectance(float r) { m_lightBounceGroundReflectance = std::clamp(r, 0.0f, 1.0f); }
+        float getLightBounceGroundReflectance() const { return m_lightBounceGroundReflectance; }
+        void setLightBounceMultiBounce(float mb) { m_lightBounceMultiBounce = std::clamp(mb, 0.0f, 3.0f); }
+        float getLightBounceMultiBounce() const { return m_lightBounceMultiBounce; }
+        void setLightBounceGroundColor(const glm::vec3& col) { m_lightBounceGroundColor = col; }
+        glm::vec3 getLightBounceGroundColor() const { return m_lightBounceGroundColor; }
+
         // Ground Truth Ambient Occlusion (GTAO)
         bool m_gtaoEnabled{true};
         float m_gtaoRadius{0.75f};
@@ -323,6 +341,8 @@ namespace engine::renderer {
             glm::vec4 lightsDir[8]{};
             glm::vec4 lightsParams[8]{};
             glm::vec4 pointShadowParams{-1.0f, 0.1f, 25.0f, 0.005f};
+            glm::vec4 bounceParams{1.0f, 0.80f, 0.60f, 1.0f};
+            glm::vec4 bounceColor{0.85f, 0.80f, 0.72f, 1.0f};
             int numLights{0};
             int numOccluders{0};
             int frameIndex{0};
