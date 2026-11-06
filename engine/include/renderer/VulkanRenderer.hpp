@@ -129,6 +129,7 @@ namespace engine::renderer {
         bool m_rtReflectionsEnabled{true};
         bool m_rtGiEnabled{true};
         float m_rtGiIntensity{1.0f};
+        int m_rtGiBounces{2};
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
         static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;
@@ -214,6 +215,7 @@ namespace engine::renderer {
         float m_lightBounceMultiBounce{1.0f};
         glm::vec3 m_lightBounceGroundColor{0.16f, 0.19f, 0.25f};
         glm::mat4 m_prevViewProj{1.0f};
+        bool m_hasPreviousViewProj{false}; // Prevents sampling undefined history on the first frame or after resize.
 
         void setLightBounceEnabled(bool enabled) { m_lightBounceEnabled = enabled; }
         bool isLightBounceEnabled() const { return m_lightBounceEnabled; }

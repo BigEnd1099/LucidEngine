@@ -149,6 +149,9 @@ namespace engine::renderer {
 
         m_width = width;
         m_height = height;
+        // History buffers are resolution-dependent; never reproject across a resize.
+        m_hasPreviousViewProj = false;
+        m_prevViewProj = glm::mat4(1.0f);
 
         createOffscreenTarget();
         updatePostProcessDescriptorSets();
@@ -1196,7 +1199,7 @@ namespace engine::renderer {
                 m_rtAoEnabled ? 1.0f : 0.0f,
                 m_rtReflectionsEnabled ? 1.0f : 0.0f
             );
-            ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, m_rtGiIntensity, 0.0f);
+            ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, m_rtGiIntensity, static_cast<float>(std::clamp(m_rtGiBounces, 1, 15)));
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
             // Bit 0 controls skybox rendering metadata; bit 1 independently
             // controls environment lighting (diffuse IBL + specular reflections).
@@ -1615,9 +1618,16 @@ namespace engine::renderer {
             vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gtaoPipelineLayout, 0, 1, &m_gtaoDescSet, 0, nullptr);
 
             const float tanHalfFovY = std::tan(glm::radians(sceneFov) * 0.5f);
-            glm::mat4 currentViewProj = vp;
-            glm::mat4 prevViewProjFromView = m_prevViewProj * glm::inverse(viewMatrix);
+            const glm::mat4 currentViewProj = vp;
+            // On the first frame (and after a resize), use the current camera as
+            // the history camera. This produces an identity reprojection instead
+            // of pulling unrelated pixels from an undefined/stale history image.
+            const glm::mat4 historyViewProj = m_hasPreviousViewProj
+                ? m_prevViewProj
+                : currentViewProj;
+            const glm::mat4 prevViewProjFromView = historyViewProj * glm::inverse(viewMatrix);
             m_prevViewProj = currentViewProj;
+            m_hasPreviousViewProj = true;
 
             struct GtaoPush {
                 glm::vec4 params;
