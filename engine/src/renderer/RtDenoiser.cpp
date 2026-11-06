@@ -1,0 +1,315 @@
+#include "renderer/RtDenoiser.hpp"
+#include "core/Logger.hpp"
+#include "utils/FileIO.hpp"
+
+#include <algorithm>
+#include <stdexcept>
+#include <vector>
+
+namespace engine::renderer {
+
+    namespace {
+        struct PushData {
+            glm::mat4 m;   // previous view-projection (temporal pass)
+            glm::vec4 f;
+            uint32_t  u[4];
+        };
+        static_assert(sizeof(PushData) == 96, "RT denoiser push constants must match the shaders");
+
+        void memoryBarrier(VkCommandBuffer cmd,
+                           VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                           VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) {
+            VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+            mb.srcStageMask = srcStage;
+            mb.srcAccessMask = srcAccess;
+            mb.dstStageMask = dstStage;
+            mb.dstAccessMask = dstAccess;
+            VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dep.memoryBarrierCount = 1;
+            dep.pMemoryBarriers = &mb;
+            vkCmdPipelineBarrier2(cmd, &dep);
+        }
+
+        constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    }
+
+    // Set 1 bindings: 0 depth sampler, 1 imgS, 2 imgA, 3 geomCur, 4 geomPrev, 5 histCur, 6 histPrev.
+    bool RtDenoiser::init(VulkanContext* context, VkDescriptorSetLayout sceneSetLayout,
+                          uint32_t width, uint32_t height, VkImageView depthView, VkSampler depthSampler) {
+        m_context = context;
+        if (!m_context || !m_context->isRayTracingSupported()) return false;
+        VkDevice dev = m_context->getDevice();
+        m_width = width;
+        m_height = height;
+
+        VkSamplerCreateInfo si{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        si.magFilter = si.minFilter = VK_FILTER_NEAREST;
+        si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create sampler");
+
+        VkDescriptorSetLayoutBinding b[7]{};
+        for (uint32_t i = 0; i < 7; ++i) {
+            b[i].binding = i;
+            b[i].descriptorCount = 1;
+            b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            b[i].descriptorType = (i == 0) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        }
+        VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        li.bindingCount = 7;
+        li.pBindings = b;
+        if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create set layout");
+
+        const VkDescriptorPoolSize sizes[2] = {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 12 }
+        };
+        VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        pi.maxSets = 2;
+        pi.poolSizeCount = 2;
+        pi.pPoolSizes = sizes;
+        if (vkCreateDescriptorPool(dev, &pi, nullptr, &m_pool) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create descriptor pool");
+
+        const VkDescriptorSetLayout layouts[2] = { m_setLayout, m_setLayout };
+        VkDescriptorSetAllocateInfo ai{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        ai.descriptorPool = m_pool;
+        ai.descriptorSetCount = 2;
+        ai.pSetLayouts = layouts;
+        if (vkAllocateDescriptorSets(dev, &ai, m_sets.data()) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate descriptor sets");
+
+        const VkDescriptorSetLayout setLayouts[2] = { sceneSetLayout, m_setLayout };
+        const VkPushConstantRange pcr{ VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData) };
+        VkPipelineLayoutCreateInfo pli{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        pli.setLayoutCount = 2;
+        pli.pSetLayouts = setLayouts;
+        pli.pushConstantRangeCount = 1;
+        pli.pPushConstantRanges = &pcr;
+        if (vkCreatePipelineLayout(dev, &pli, nullptr, &m_pipelineLayout) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create pipeline layout");
+
+        VkShaderModule trace = loadModule("rt_indirect.comp.spv");
+        VkShaderModule temporal = loadModule("rt_temporal.comp.spv");
+        VkShaderModule atrous = loadModule("rt_atrous.comp.spv");
+        m_tracePipelineHandle = createPipeline(trace, -1);
+        m_temporalPipeline = createPipeline(temporal, -1);
+        m_atrousPipelines[0] = createPipeline(atrous, 0);
+        m_atrousPipelines[1] = createPipeline(atrous, 1);
+        vkDestroyShaderModule(dev, trace, nullptr);
+        vkDestroyShaderModule(dev, temporal, nullptr);
+        vkDestroyShaderModule(dev, atrous, nullptr);
+
+        createImages();
+        writeDescriptors(depthView, depthSampler);
+        m_ready = true;
+        core::Logger::info("RT indirect pipeline (trace + temporal + a-trous) initialized.");
+        return true;
+    }
+
+    void RtDenoiser::resize(uint32_t width, uint32_t height, VkImageView depthView, VkSampler depthSampler) {
+        if (!m_context || m_setLayout == VK_NULL_HANDLE) return;
+        vkDeviceWaitIdle(m_context->getDevice());
+        destroyImages();
+        m_width = width;
+        m_height = height;
+        createImages();
+        writeDescriptors(depthView, depthSampler);
+        m_needsLayoutInit = true;
+        m_historyValid = false;
+    }
+
+    void RtDenoiser::cleanup() {
+        if (!m_context || !m_context->getDevice()) return;
+        VkDevice dev = m_context->getDevice();
+        destroyImages();
+        for (auto& p : m_atrousPipelines) { if (p) vkDestroyPipeline(dev, p, nullptr); p = VK_NULL_HANDLE; }
+        if (m_temporalPipeline) vkDestroyPipeline(dev, m_temporalPipeline, nullptr);
+        if (m_tracePipelineHandle) vkDestroyPipeline(dev, m_tracePipelineHandle, nullptr);
+        m_temporalPipeline = m_tracePipelineHandle = VK_NULL_HANDLE;
+        if (m_pipelineLayout) vkDestroyPipelineLayout(dev, m_pipelineLayout, nullptr);
+        if (m_pool) vkDestroyDescriptorPool(dev, m_pool, nullptr);
+        if (m_setLayout) vkDestroyDescriptorSetLayout(dev, m_setLayout, nullptr);
+        if (m_sampler) vkDestroySampler(dev, m_sampler, nullptr);
+        m_pipelineLayout = VK_NULL_HANDLE;
+        m_pool = VK_NULL_HANDLE;
+        m_setLayout = VK_NULL_HANDLE;
+        m_sampler = VK_NULL_HANDLE;
+        m_ready = false;
+    }
+
+    VkShaderModule RtDenoiser::loadModule(const char* spvName) const {
+        const std::vector<char> code = utils::readFile(spvName);
+        VkShaderModuleCreateInfo ci{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        ci.codeSize = code.size();
+        ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        VkShaderModule m = VK_NULL_HANDLE;
+        if (vkCreateShaderModule(m_context->getDevice(), &ci, nullptr, &m) != VK_SUCCESS)
+            throw std::runtime_error(std::string("RtDenoiser: failed to create shader module ") + spvName);
+        return m;
+    }
+
+    VkPipeline RtDenoiser::createPipeline(VkShaderModule module, int32_t specPass) const {
+        VkSpecializationMapEntry entry{ 0, 0, sizeof(int32_t) };
+        VkSpecializationInfo spec{};
+        spec.mapEntryCount = 1;
+        spec.pMapEntries = &entry;
+        spec.dataSize = sizeof(int32_t);
+        spec.pData = &specPass;
+
+        VkComputePipelineCreateInfo ci{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+        ci.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+                     VK_SHADER_STAGE_COMPUTE_BIT, module, "main", specPass >= 0 ? &spec : nullptr };
+        ci.layout = m_pipelineLayout;
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(m_context->getDevice(), VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create compute pipeline");
+        return pipeline;
+    }
+
+    RtDenoiser::Image RtDenoiser::makeImage(VkFormat format) const {
+        Image img;
+        VkImageCreateInfo ii{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ii.imageType = VK_IMAGE_TYPE_2D;
+        ii.format = format;
+        ii.extent = { m_width, m_height, 1 };
+        ii.mipLevels = 1;
+        ii.arrayLayers = 1;
+        ii.samples = VK_SAMPLE_COUNT_1_BIT;
+        ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaAllocationCreateInfo ai{};
+        ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateImage(m_context->getAllocator(), &ii, &ai, &img.image, &img.alloc, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create image");
+
+        VkImageViewCreateInfo vi{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vi.image = img.image;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = format;
+        vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        if (vkCreateImageView(m_context->getDevice(), &vi, nullptr, &img.view) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create image view");
+        return img;
+    }
+
+    void RtDenoiser::createImages() {
+        m_imgS = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
+        m_imgA = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
+        for (auto& g : m_geom) g = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT);
+        for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
+    }
+
+    void RtDenoiser::destroyImages() {
+        auto destroy = [&](Image& i) {
+            if (i.view) vkDestroyImageView(m_context->getDevice(), i.view, nullptr);
+            if (i.image) vmaDestroyImage(m_context->getAllocator(), i.image, i.alloc);
+            i = {};
+        };
+        destroy(m_imgS);
+        destroy(m_imgA);
+        for (auto& g : m_geom) destroy(g);
+        for (auto& h : m_hist) destroy(h);
+    }
+
+    void RtDenoiser::writeDescriptors(VkImageView depthView, VkSampler depthSampler) {
+        for (uint32_t p = 0; p < 2; ++p) {
+            const uint32_t q = 1 - p;
+            const VkDescriptorImageInfo depthInfo{ depthSampler, depthView, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL };
+            const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
+                                                  m_geom[q].view, m_hist[p].view, m_hist[q].view };
+            VkDescriptorImageInfo storageInfos[6];
+            VkWriteDescriptorSet writes[7]{};
+            writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[0].dstSet = m_sets[p];
+            writes[0].dstBinding = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].pImageInfo = &depthInfo;
+            for (uint32_t i = 0; i < 6; ++i) {
+                storageInfos[i] = { VK_NULL_HANDLE, storageViews[i], VK_IMAGE_LAYOUT_GENERAL };
+                writes[i + 1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                writes[i + 1].dstSet = m_sets[p];
+                writes[i + 1].dstBinding = i + 1;
+                writes[i + 1].descriptorCount = 1;
+                writes[i + 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                writes[i + 1].pImageInfo = &storageInfos[i];
+            }
+            vkUpdateDescriptorSets(m_context->getDevice(), 7, writes, 0, nullptr);
+        }
+    }
+
+    void RtDenoiser::record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params) {
+        if (!m_ready) return;
+
+        // All images live permanently in GENERAL (storage writes + sampled reads in the PBR pass).
+        if (m_needsLayoutInit) {
+            const Image* all[6] = { &m_imgS, &m_imgA, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1] };
+            VkImageMemoryBarrier2 bars[6]{};
+            for (int i = 0; i < 6; ++i) {
+                bars[i] = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                bars[i].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                bars[i].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                bars[i].dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+                bars[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                bars[i].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                bars[i].srcQueueFamilyIndex = bars[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bars[i].image = all[i]->image;
+                bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            }
+            VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dep.imageMemoryBarrierCount = 6;
+            dep.pImageMemoryBarriers = bars;
+            vkCmdPipelineBarrier2(cmd, &dep);
+            m_needsLayoutInit = false;
+            m_historyValid = false;
+        }
+
+        // Depth (prepass) + everything the previous frame left behind -> this frame's compute.
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | kStorageRW);
+
+        const VkDescriptorSet sets[2] = { sceneSet, m_sets[m_parity] };
+        const uint32_t gx = (m_width + 7u) / 8u;
+        const uint32_t gy = (m_height + 7u) / 8u;
+        const auto sync = [&]() {
+            memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, kStorageRW,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, kStorageRW);
+        };
+        const auto bind = [&](VkPipeline pipeline, const PushData& pd) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
+            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData), &pd);
+            vkCmdDispatch(cmd, gx, gy, 1);
+        };
+
+        const uint32_t samples = std::clamp(params.samples, 1u, 16u);
+        PushData pd{};
+        pd.m = m_prevViewProj;
+        pd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(samples),
+                         m_historyValid ? 1.0f : 0.0f, 0.0f);
+        pd.u[0] = samples;
+        pd.u[1] = params.frameIndex;
+        pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u);
+        pd.u[3] = std::clamp(params.bounces, 1u, 15u);
+
+        bind(m_tracePipelineHandle, pd);   // 1. trace
+        sync();
+        bind(m_temporalPipeline, pd); // 2. temporal accumulation
+        sync();
+        pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
+        bind(m_atrousPipelines[0], pd); // 3. a-trous, step 1  (hist -> A)
+        sync();
+        bind(m_atrousPipelines[1], pd); // 4. a-trous, step 2  (A -> S, final)
+
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+        m_prevViewProj = params.viewProj;
+        m_historyValid = true;
+        m_parity ^= 1u;
+    }
+}

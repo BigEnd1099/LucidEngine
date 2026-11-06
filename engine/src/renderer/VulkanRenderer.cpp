@@ -65,6 +65,7 @@ namespace engine::renderer {
         createGraphicsPipeline();
         createParticlePipeline();
         createPostProcessResources();
+        initRtDenoiser();
         initCaptureResources();
 
 #ifdef USE_GLFW
@@ -89,6 +90,7 @@ namespace engine::renderer {
             VkDevice dev = m_context->getDevice();
             vkDeviceWaitIdle(dev);
 
+            m_rtDenoiser.cleanup();
             m_accelerationStructure.cleanup();
             cleanupCaptureResources();
             cleanupParticlePipeline();
@@ -155,6 +157,11 @@ namespace engine::renderer {
 
         createOffscreenTarget();
         updatePostProcessDescriptorSets();
+        if (m_rtDenoiser.isReady()) {
+            m_rtDenoiser.resize(m_width, m_height, m_depthImageView,
+                                m_depthSampler ? m_depthSampler : m_linearSampler);
+            refreshRtIndirectDescriptors();
+        }
         initCaptureResources();
 
         core::Logger::info("Render resolution updated to " + std::to_string(m_width) + "x" + std::to_string(m_height));
@@ -329,21 +336,22 @@ namespace engine::renderer {
             bindings[i].binding = i;
             bindings[i].descriptorCount = 1;
             bindings[i].descriptorType = (i == 1) ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[i].stageFlags = (i == 1) ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT) : VK_SHADER_STAGE_FRAGMENT_BIT;
+            bindings[i].stageFlags = (i == 1) ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT)
+                                             : VK_SHADER_STAGE_FRAGMENT_BIT;
         }
         if (m_context->isRayTracingSupported()) {
             VkDescriptorSetLayoutBinding rtBinding{};
             rtBinding.binding = 11;
             rtBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
             rtBinding.descriptorCount = 1;
-            rtBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            rtBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
             bindings.push_back(rtBinding);
 
             VkDescriptorSetLayoutBinding rtInstanceBinding{};
             rtInstanceBinding.binding = 12;
             rtInstanceBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             rtInstanceBinding.descriptorCount = 1;
-            rtInstanceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            rtInstanceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
             bindings.push_back(rtInstanceBinding);
 
             for (uint32_t binding = 13; binding <= 15; ++binding) {
@@ -351,9 +359,17 @@ namespace engine::renderer {
                 textureArrayBinding.binding = binding;
                 textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 textureArrayBinding.descriptorCount = RT_MATERIAL_TEXTURE_COUNT;
-                textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
                 bindings.push_back(textureArrayBinding);
             }
+
+            // Binding 16: denoised RT indirect lighting (GI radiance + AO) from the RT compute passes.
+            VkDescriptorSetLayoutBinding rtIndirectBinding{};
+            rtIndirectBinding.binding = 16;
+            rtIndirectBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            rtIndirectBinding.descriptorCount = 1;
+            rtIndirectBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            bindings.push_back(rtIndirectBinding);
         }
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -416,6 +432,32 @@ namespace engine::renderer {
         }
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
         updateRayTracingDescriptorSet(m_descriptorSet);
+    }
+
+    void VulkanRenderer::initRtDenoiser() {
+        if (!m_context || !m_context->isRayTracingSupported()) return;
+        m_rtDenoiser.init(m_context, m_descriptorSetLayout, m_width, m_height, m_depthImageView,
+                          m_depthSampler ? m_depthSampler : m_linearSampler);
+        refreshRtIndirectDescriptors();
+    }
+
+    void VulkanRenderer::updateRtIndirectDescriptor(VkDescriptorSet descriptorSet) {
+        if (!m_rtDenoiser.isReady() || descriptorSet == VK_NULL_HANDLE) return;
+        VkDescriptorImageInfo info{ m_rtDenoiser.outputSampler(), m_rtDenoiser.outputView(), VK_IMAGE_LAYOUT_GENERAL };
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = descriptorSet;
+        write.dstBinding = 16;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &info;
+        vkUpdateDescriptorSets(m_context->getDevice(), 1, &write, 0, nullptr);
+    }
+
+    void VulkanRenderer::refreshRtIndirectDescriptors() {
+        updateRtIndirectDescriptor(m_descriptorSet);
+        for (const auto& materialSet : m_materialDescriptorSets) {
+            updateRtIndirectDescriptor(materialSet.second);
+        }
     }
 
     void VulkanRenderer::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet) {
@@ -588,6 +630,7 @@ namespace engine::renderer {
         }
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
         updateRayTracingDescriptorSet(newSet);
+        updateRtIndirectDescriptor(newSet);
 
         m_materialDescriptorSets[materialId] = newSet;
         m_rtTextureDescriptorCount = UINT32_MAX;
@@ -1197,7 +1240,7 @@ namespace engine::renderer {
                 0.0f,
                 m_rtShadowsEnabled ? 1.0f : 0.0f,
                 m_rtAoEnabled ? 1.0f : 0.0f,
-                m_rtReflectionsEnabled ? 1.0f : 0.0f
+                m_rtReflectionsEnabled ? static_cast<float>(std::clamp(m_rtReflectionSamples, 1, 16)) : 0.0f
             );
             ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, m_rtGiIntensity, static_cast<float>(std::clamp(m_rtGiBounces, 1, 15)));
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
@@ -1707,6 +1750,34 @@ namespace engine::renderer {
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        }
+
+        // =========================================================================
+        // PASS 2C: RT INDIRECT (diffuse GI + AO): trace -> temporal accumulation -> a-trous
+        // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
+        // =========================================================================
+        {
+            const bool tlasReady = m_sceneUboMappedPtr &&
+                static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
+            const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
+                m_rtGraphicsPipeline != VK_NULL_HANDLE &&
+                m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&
+                tlasReady && m_descriptorSet != VK_NULL_HANDLE &&
+                (m_rtGiEnabled || m_rtAoEnabled);
+            if (rtIndirectActive) {
+                RtDenoiser::Params rtp;
+                rtp.viewProj = vp;
+                rtp.samples = static_cast<uint32_t>(std::clamp(m_rtGiSamples, 1, 16));
+                rtp.frameIndex = m_frameCounter;
+                rtp.giEnabled = m_rtGiEnabled;
+                rtp.aoEnabled = m_rtAoEnabled;
+                rtp.bounces = static_cast<uint32_t>(std::clamp(m_rtGiBounces, 1, 15));
+                rtp.maxHistory = m_rtDenoiseEnabled ? static_cast<float>(m_rtMaxHistory) : 1.0f;
+                rtp.spatialStrength = m_rtDenoiseEnabled ? m_rtSpatialStrength : 0.0f;
+                m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
+            } else {
+                m_rtDenoiser.invalidateHistory();
+            }
         }
 
         // =========================================================================

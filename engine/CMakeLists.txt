@@ -136,6 +136,9 @@ set(SHADER_FILES
     src/shaders/gtao.frag
     src/shaders/gtao_blur.frag
     src/shaders/gi_trace.comp
+    src/shaders/rt_indirect.comp
+    src/shaders/rt_temporal.comp
+    src/shaders/rt_atrous.comp
     src/shaders/composite.frag
     src/shaders/fxaa.frag
     src/shaders/skybox.frag
@@ -149,6 +152,8 @@ foreach(SHADER ${SHADER_FILES})
         OUTPUT ${SPV_FILE}
         COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.3 ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${SPV_FILE}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/rt_common.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/rt_screen.glsl
         COMMENT "Compiling ${FILE_NAME} to SPIR-V"
     )
     list(APPEND SPV_FILES ${SPV_FILE})

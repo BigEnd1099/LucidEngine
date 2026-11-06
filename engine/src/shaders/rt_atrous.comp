@@ -1,0 +1,73 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
+
+// Passes 3-4/4: edge-avoiding a-trous wavelet filter (5x5 B3-spline, step 1 then 2),
+// guided by view-space plane distance and normals. The filter strength fades out as
+// the temporal history grows, so converged pixels keep their detail.
+//   PASS 0: imgHistCur -> imgA        PASS 1: imgA -> imgS (final output, sampled by pbr_rt.frag)
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(constant_id = 0) const int PASS = 0;
+
+#include "rt_common.glsl"
+#include "rt_screen.glsl"
+
+layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
+layout(set = 1, binding = 2, rgba16f) uniform image2D imgA;
+layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
+layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
+
+layout(push_constant) uniform PC {
+    mat4 unused;
+    vec4 f;   // x = spatial strength (0..1)
+    uvec4 u;
+} pc;
+
+vec4 loadSrc(ivec2 p) { return (PASS == 0) ? imageLoad(imgHistCur, p) : imageLoad(imgA, p); }
+void storeDst(ivec2 p, vec4 v) { if (PASS == 0) imageStore(imgA, p, v); else imageStore(imgS, p, v); }
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 isize = imageSize(imgS);
+    if (any(greaterThanEqual(px, isize))) return;
+    vec2 size = vec2(isize);
+
+    vec4 center = loadSrc(px);
+    vec4 gC = imageLoad(imgGeomCur, px);
+    if (gC.z < 0.0 || pc.f.x <= 0.001) { storeDst(px, center); return; }
+
+    vec3 nC = rtOctDecode(gC.xy);
+    vec3 nCv = mat3(ubo.view) * nC;
+    vec3 pCv = rtViewPosFromLinear(vec2(px) + 0.5, gC.z, size);
+    float depthTol = 0.012 * gC.z + 0.003;
+    const int step = 1 << PASS;
+    const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
+
+    vec4 sum = center * (h[0] * h[0]);
+    float wTotal = h[0] * h[0];
+    for (int j = -2; j <= 2; ++j) {
+        for (int i = -2; i <= 2; ++i) {
+            if (i == 0 && j == 0) continue;
+            ivec2 q = px + ivec2(i, j) * step;
+            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+            vec4 gQ = imageLoad(imgGeomCur, q);
+            if (gQ.z < 0.0) continue;
+            vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
+            float planeDist = abs(dot(nCv, pQv - pCv));
+            float wd = exp(-planeDist / (depthTol * float(step)));
+            float wn = pow(clamp(dot(nC, rtOctDecode(gQ.xy)), 0.0, 1.0), 24.0);
+            float w = h[abs(i)] * h[abs(j)] * wd * wn;
+            sum += loadSrc(q) * w;
+            wTotal += w;
+        }
+    }
+    vec4 filtered = sum / wTotal;
+
+    // Short history -> trust the spatial estimate; long history -> keep the temporal detail.
+    float s = clamp(pc.f.x * (1.0 / (1.0 + gC.w * 0.15)), 0.0, 1.0);
+    storeDst(px, mix(center, filtered, s));
+}

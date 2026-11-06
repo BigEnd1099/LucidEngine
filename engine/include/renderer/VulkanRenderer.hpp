@@ -1,6 +1,7 @@
 #pragma once
 #include "renderer/VulkanContext.hpp"
 #include "renderer/AccelerationStructure.hpp"
+#include "renderer/RtDenoiser.hpp"
 #include "ecs/Registry.hpp"
 #include <vector>
 #include <string>
@@ -72,6 +73,25 @@ namespace engine::renderer {
         bool isRayTracingEnabled() const { return m_rayTracingEnabled && m_context && m_context->isRayTracingSupported(); }
         VkAccelerationStructureKHR getRayTracingTLAS() const { return m_accelerationStructure.getTLAS(); }
 
+        // ---- Ray-traced indirect lighting quality (GI/AO are traced in compute, accumulated and denoised)
+        // Paths traced per pixel per frame for diffuse GI + AO (1..16). With temporal accumulation
+        // 1 is usually enough for static views; raise it for fast-moving cameras/lights.
+        void setRtGiSamples(int n) { m_rtGiSamples = std::clamp(n, 1, 16); }
+        int  getRtGiSamples() const { return m_rtGiSamples; }
+        // Rays per pixel per frame for RT reflections (1..16).
+        void setRtReflectionSamples(int n) { m_rtReflectionSamples = std::clamp(n, 1, 16); }
+        int  getRtReflectionSamples() const { return m_rtReflectionSamples; }
+        void setRtGiBounces(int n) { m_rtGiBounces = std::clamp(n, 1, 15); }
+        int  getRtGiBounces() const { return m_rtGiBounces; }
+        // Temporal history length in effective samples (4..256). Lower = faster reaction to moving lights.
+        void setRtMaxHistory(int n) { m_rtMaxHistory = std::clamp(n, 4, 256); }
+        int  getRtMaxHistory() const { return m_rtMaxHistory; }
+        void setRtSpatialStrength(float s) { m_rtSpatialStrength = std::clamp(s, 0.0f, 1.0f); }
+        float getRtSpatialStrength() const { return m_rtSpatialStrength; }
+        // false = show the raw noisy trace (debug).
+        void setRtDenoiseEnabled(bool e) { m_rtDenoiseEnabled = e; }
+        bool isRtDenoiseEnabled() const { return m_rtDenoiseEnabled; }
+
         void setFogEnabled(bool enabled) { m_fogEnabled = enabled; }
         bool isFogEnabled() const { return m_fogEnabled; }
 
@@ -101,6 +121,9 @@ namespace engine::renderer {
                              const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips);
         void createParticlePipeline();
         void cleanupParticlePipeline();
+        void initRtDenoiser();
+        void updateRtIndirectDescriptor(VkDescriptorSet descriptorSet);
+        void refreshRtIndirectDescriptors();
         void createPostProcessResources();
         void updatePostProcessDescriptorSets();
         void cleanupPostProcessResources();
@@ -130,6 +153,12 @@ namespace engine::renderer {
         bool m_rtGiEnabled{true};
         float m_rtGiIntensity{1.0f};
         int m_rtGiBounces{2};
+        int m_rtGiSamples{1};
+        int m_rtReflectionSamples{4};
+        int m_rtMaxHistory{32};
+        float m_rtSpatialStrength{1.0f};
+        bool m_rtDenoiseEnabled{true};
+        RtDenoiser m_rtDenoiser;
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
         static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;

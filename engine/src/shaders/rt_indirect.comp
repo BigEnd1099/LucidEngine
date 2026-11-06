@@ -1,0 +1,143 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
+
+// Pass 1/4 of the RT indirect pipeline: traces diffuse GI paths and ambient
+// visibility from the depth buffer. Output is *demodulated* (no albedo) and
+// noisy by design; rt_temporal / rt_atrous turn it into a clean signal.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "rt_common.glsl"
+#include "rt_screen.glsl"
+
+layout(set = 1, binding = 0) uniform sampler2D uDepth;
+layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;        // out: rgb = GI radiance, a = AO visibility
+layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;  // out: xy = oct normal, z = linear depth (<0 = sky), w = history length
+
+layout(push_constant) uniform PC {
+    mat4  unused;
+    vec4  f;   // unused here
+    uvec4 u;   // x = samples per pixel (1..16), y = frame index, z = flags (bit0 GI, bit1 AO), w = max bounces (1..15)
+} pc;
+
+const float AO_DISTANCE     = 1.75;
+const float MAX_RAY_DIST    = 20.0;
+const float FIREFLY_CLAMP   = 24.0;   // per-path radiance clamp (max component)
+const int   MAX_BOUNCES     = 15;
+
+vec2 hash2(uvec2 p) {
+    uint h = pcgHash(p.x + pcgHash(p.y ^ 0x9E3779B9u));
+    uint h2 = pcgHash(h);
+    return vec2(float(h >> 8u), float(h2 >> 8u)) * (1.0 / 16777216.0);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 isize = imageSize(imgS);
+    if (any(greaterThanEqual(px, isize))) return;
+    vec2 size = vec2(isize);
+
+    float d = texelFetch(uDepth, px, 0).r;
+    if (d >= 1.0) { // sky
+        imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
+        return;
+    }
+
+    // ---- geometric normal from depth (picks the closer neighbour per axis: edge safe)
+    ivec2 mx = isize - 1;
+    ivec2 pL = clamp(px + ivec2(-1, 0), ivec2(0), mx), pR = clamp(px + ivec2(1, 0), ivec2(0), mx);
+    ivec2 pU = clamp(px + ivec2(0, -1), ivec2(0), mx), pD = clamp(px + ivec2(0, 1), ivec2(0), mx);
+    float dL = texelFetch(uDepth, pL, 0).r, dR = texelFetch(uDepth, pR, 0).r;
+    float dU = texelFetch(uDepth, pU, 0).r, dD = texelFetch(uDepth, pD, 0).r;
+    float zC = rtLinearDepth(d);
+
+    vec3 P  = rtWorldPos(vec2(px) + 0.5, d, size);
+    vec3 pl = rtWorldPos(vec2(pL) + 0.5, dL, size), pr = rtWorldPos(vec2(pR) + 0.5, dR, size);
+    vec3 pu = rtWorldPos(vec2(pU) + 0.5, dU, size), pd = rtWorldPos(vec2(pD) + 0.5, dD, size);
+    vec3 dx = (abs(rtLinearDepth(dR) - zC) < abs(rtLinearDepth(dL) - zC)) ? (pr - P) : (P - pl);
+    vec3 dy = (abs(rtLinearDepth(dD) - zC) < abs(rtLinearDepth(dU) - zC)) ? (pd - P) : (P - pu);
+    vec3 toCam = ubo.cameraPos.xyz - P;
+    vec3 N = cross(dx, dy);
+    N = (dot(N, N) > 1e-14) ? normalize(N) : normalize(toCam);
+    if (dot(N, toCam) < 0.0) N = -N;
+
+    imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
+
+    if (ubo.rtParams.x < 0.5) { // TLAS not ready this frame
+        imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+
+    const int  samples = int(clamp(pc.u.x, 1u, 16u));
+    const uint frame   = pc.u.y;
+    const bool doGI    = (pc.u.z & 1u) != 0u;
+    const int  bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
+
+    rngInit(uvec2(px), frame);
+    // First-bounce directions: R2 low-discrepancy sequence advanced every frame, with a
+    // per-pixel random (Cranley-Patterson) offset. White in space, well-stratified in time,
+    // which is exactly what temporal accumulation converges fastest on.
+    vec2 shift = hash2(uvec2(px));
+    const vec2 R2 = vec2(0.75487766624669276, 0.56984029099805327);
+
+    float bias = 0.010 + 0.0006 * length(toCam);       // grows with distance (depth precision)
+    vec3 origin = P + N * bias;
+
+    vec3  gi  = vec3(0.0);
+    float occ = 0.0;
+
+    for (int s = 0; s < samples; ++s) {
+        uint  idx = (frame * uint(samples) + uint(s)) & 1023u;
+        vec2  u0  = fract(shift + float(idx) * R2);
+
+        vec3 rayOrigin = origin;
+        vec3 rayNormal = N;
+        vec3 throughput = vec3(1.0);
+        vec3 pathRadiance = vec3(0.0);
+
+        for (int b = 0; b < MAX_BOUNCES; ++b) {
+            if (b >= bounces) break;
+            vec3 dir = sampleCosineHemisphere(rayNormal, (b == 0) ? u0 : rand2());
+
+            RtInstanceData hit;
+            vec3 hitPosition, hitNormal;
+            vec2 hitUv;
+            vec4 hitTangent;
+            float hitDistance;
+            bool found = traceSceneSurface(rayOrigin, dir, (b == 0) ? MAX_RAY_DIST : MAX_RAY_DIST,
+                                           hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance);
+            if (b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
+            if (!found || !doGI) break;
+
+            pathRadiance += throughput * shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent);
+
+            vec3 hitAlbedo = hit.baseColor.rgb *
+                pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0).rgb, vec3(0.0)), vec3(2.2));
+            float hitMetallic = clamp(hit.material.x *
+                textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).b, 0.0, 1.0);
+            throughput *= hitAlbedo * (1.0 - hitMetallic);
+
+            // Russian roulette from the third bounce: unbiased, and it makes high
+            // bounce counts affordable.
+            if (b >= 2) {
+                float p = clamp(max(max(throughput.r, throughput.g), throughput.b), 0.1, 1.0);
+                if (rand1() > p) break;
+                throughput /= p;
+            }
+            if (max(max(throughput.r, throughput.g), throughput.b) < 0.003) break;
+
+            rayNormal = normalize(hitNormal);
+            rayOrigin = hitPosition + rayNormal * 0.014;
+        }
+        gi += clampFirefly(pathRadiance, FIREFLY_CLAMP);
+    }
+
+    gi  = sanitizeHDR(gi / float(samples));
+    float vis = 1.0 - occ / float(samples);
+    imageStore(imgS, px, vec4(gi, vis));
+}

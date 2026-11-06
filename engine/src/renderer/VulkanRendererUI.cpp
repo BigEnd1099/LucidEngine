@@ -1492,11 +1492,28 @@ namespace engine::renderer {
                         ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtShadowsEnabled);
                         ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtAoEnabled);
                         ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtReflectionsEnabled);
+                        ImGui::BeginDisabled(!m_rtReflectionsEnabled);
+                        ImGui::SliderInt("RT Reflection Samples", &m_rtReflectionSamples, 1, 16, "%d");
+                        ImGui::EndDisabled();
                         ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtGiEnabled);
                         ImGui::BeginDisabled(!m_rtGiEnabled);
                         ImGui::SliderFloat("RT GI Intensity", &m_rtGiIntensity, 0.0f, 3.0f, "%.2f");
                         ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtGiBounces, 1, 15, "%d");
                         ImGui::EndDisabled();
+
+                        // GI + AO are traced in compute, then temporally accumulated and denoised.
+                        ImGui::SeparatorText("RT Sampling & Denoising");
+                        ImGui::BeginDisabled(!m_rtGiEnabled && !m_rtAoEnabled);
+                        ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtGiSamples, 1, 16, "%d");
+                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtDenoiseEnabled);
+                        ImGui::BeginDisabled(!m_rtDenoiseEnabled);
+                        ImGui::SliderInt("Temporal History (samples)", &m_rtMaxHistory, 4, 256, "%d");
+                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSpatialStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::EndDisabled();
+                        ImGui::EndDisabled();
+                        m_rtGiSamples = std::clamp(m_rtGiSamples, 1, 16);
+                        m_rtReflectionSamples = std::clamp(m_rtReflectionSamples, 1, 16);
+                        m_rtMaxHistory = std::clamp(m_rtMaxHistory, 4, 256);
                         ImGui::EndDisabled();
                         ImGui::EndDisabled();
                     }
