@@ -51,6 +51,7 @@ namespace engine::core {
         MeshAsset* getMesh(uint32_t id);
         MaterialAsset* getMaterial(uint32_t id);
         TextureAsset* getTexture(uint32_t id);
+        uint32_t getTextureCount() const { return m_nextTextureId - 1; }
 
         // Uploads buffer data to GPU (creates staging buffer, copies, then destroys staging)
         void uploadBuffer(VkBuffer& dstBuffer, VmaAllocation& dstAlloc, const void* data, size_t size, VkBufferUsageFlags usage);
