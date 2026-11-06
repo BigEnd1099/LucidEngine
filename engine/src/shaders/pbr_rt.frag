@@ -1,5 +1,8 @@
 #version 460
 #extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -42,6 +45,7 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     int frameIndex;
     int skyboxMode;
     OccluderData occluders[32];
+    vec4 rtFeatureParams; // x = diffuse GI, y = RT instance count, z = GI intensity
 } ubo;
 layout(set = 0, binding = 2) uniform samplerCube pointShadowMap;
 layout(set = 0, binding = 4) uniform samplerCube irradianceMap;
@@ -52,6 +56,34 @@ layout(set = 0, binding = 8) uniform sampler2D albedoMap;
 layout(set = 0, binding = 9) uniform sampler2D normalMap;
 layout(set = 0, binding = 10) uniform sampler2D ormMap;
 layout(set = 0, binding = 11) uniform accelerationStructureEXT sceneTLAS;
+
+struct RtInstanceData {
+    mat4 model;
+    mat4 normalMatrix;
+    vec4 baseColor;
+    vec4 material; // metallic, roughness, emissive, AO
+    uint64_t vertexAddress;
+    uint64_t indexAddress;
+    uint vertexCount;
+    uint indexCount;
+    uvec2 padding;
+};
+layout(set = 0, binding = 12, std430) readonly buffer RtInstanceBuffer {
+    RtInstanceData instances[];
+} rtScene;
+
+struct RtVertex {
+    vec3 position;
+    vec3 normal;
+    vec2 texCoord;
+    vec4 tangent;
+};
+layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer RtVertexBuffer {
+    RtVertex values[];
+};
+layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer RtIndexBuffer {
+    uint values[];
+};
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -285,6 +317,150 @@ bool rayQueryOccluded(vec3 origin, vec3 direction, float maxDistance) {
     return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
+bool traceSceneSurface(
+    vec3 origin, vec3 direction, float maxDistance,
+    out RtInstanceData hitInstance, out vec3 hitPosition,
+    out vec3 hitNormal, out vec2 hitUv, out float hitDistance
+) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(
+        query, sceneTLAS,
+        gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+        0xFF, origin, 0.003, normalize(direction), maxDistance
+    );
+    while (rayQueryProceedEXT(query)) { }
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT)
+        return false;
+
+    uint instanceIndex = rayQueryGetIntersectionInstanceCustomIndexEXT(query, true);
+    uint instanceCount = uint(max(ubo.rtFeatureParams.y, 0.0));
+    if (instanceIndex >= instanceCount) return false;
+
+    hitInstance = rtScene.instances[instanceIndex];
+    uint primitiveIndex = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+    uint firstIndex = primitiveIndex * 3u;
+    if (firstIndex + 2u >= hitInstance.indexCount) return false;
+
+    RtIndexBuffer indices = RtIndexBuffer(hitInstance.indexAddress);
+    RtVertexBuffer vertices = RtVertexBuffer(hitInstance.vertexAddress);
+    uint i0 = indices.values[firstIndex + 0u];
+    uint i1 = indices.values[firstIndex + 1u];
+    uint i2 = indices.values[firstIndex + 2u];
+    if (i0 >= hitInstance.vertexCount || i1 >= hitInstance.vertexCount || i2 >= hitInstance.vertexCount)
+        return false;
+
+    RtVertex v0 = vertices.values[i0];
+    RtVertex v1 = vertices.values[i1];
+    RtVertex v2 = vertices.values[i2];
+    vec2 bary2 = rayQueryGetIntersectionBarycentricsEXT(query, true);
+    vec3 bary = vec3(1.0 - bary2.x - bary2.y, bary2.x, bary2.y);
+
+    vec3 localNormal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
+    hitNormal = normalize(mat3(hitInstance.normalMatrix) * localNormal);
+    hitDistance = rayQueryGetIntersectionTEXT(query, true);
+    hitPosition = origin + normalize(direction) * hitDistance;
+    hitUv = v0.texCoord * bary.x + v1.texCoord * bary.y + v2.texCoord * bary.z;
+    if (dot(hitNormal, direction) > 0.0) hitNormal = -hitNormal;
+    return true;
+}
+
+vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal) {
+    vec3 albedo = clamp(hit.baseColor.rgb, vec3(0.0), vec3(1.0));
+    float metallic = clamp(hit.material.x, 0.0, 1.0);
+    float emissive = max(hit.material.z, 0.0);
+    vec3 diffuseResponse = albedo * (1.0 - metallic) / PI;
+    vec3 radiance = albedo * emissive * 3.5 + albedo * 0.012;
+
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    float sunNdotL = max(dot(hitNormal, sunDir), 0.0);
+    float sunIntensity = max(ubo.sunDirection.w, 0.0);
+    if (sunNdotL > 0.0 && sunIntensity > 0.001 &&
+        !rayQueryOccluded(hitPosition + hitNormal * 0.008, sunDir, 10000.0)) {
+        radiance += diffuseResponse * ubo.sunColor.rgb * sunIntensity * sunNdotL;
+    }
+
+    for (int i = 0; i < min(ubo.numLights, 8); ++i) {
+        vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
+        float distanceToLight = length(toLight);
+        float range = max(ubo.lightsPos[i].w, 0.1);
+        float intensity = max(ubo.lightsCol[i].w, 0.0);
+        if (distanceToLight >= range || intensity <= 0.001) continue;
+        vec3 L = toLight / max(distanceToLight, 1e-4);
+        float ndotl = max(dot(hitNormal, L), 0.0);
+        if (ndotl <= 0.0) continue;
+
+        float ratio = distanceToLight / range;
+        float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
+        float attenuation = window * window / (distanceToLight * distanceToLight + 1.0);
+        int type = int(round(ubo.lightsDir[i].w));
+        if (type == 1) {
+            float cone = dot(-L, normalize(ubo.lightsDir[i].xyz));
+            attenuation *= smoothstep(ubo.lightsParams[i].y, ubo.lightsParams[i].x, cone);
+        }
+        if (attenuation <= 1e-5 ||
+            rayQueryOccluded(hitPosition + hitNormal * 0.008, L, max(distanceToLight - 0.02, 0.003)))
+            continue;
+        radiance += diffuseResponse * ubo.lightsCol[i].rgb *
+                    (intensity * 4.0 * attenuation * ndotl);
+    }
+    return sanitizeHDR(radiance);
+}
+
+vec3 traceRtReflection(vec3 worldPosition, vec3 normal, vec3 viewDirection,
+                       float roughness, vec3 F0, float ao, float noise) {
+    vec3 idealDirection = normalize(reflect(-viewDirection, normal));
+    vec3 up = abs(idealDirection.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, idealDirection));
+    vec3 bitangent = cross(idealDirection, tangent);
+    const int SAMPLE_COUNT = 4;
+    vec3 accumulated = vec3(0.0);
+    for (int i = 0; i < SAMPLE_COUNT; ++i) {
+        vec2 disk = vogelDiskSample(i, SAMPLE_COUNT, noise * 2.0 * PI);
+        float spread = roughness * roughness * 0.65;
+        vec3 direction = normalize(idealDirection + tangent * disk.x * spread + bitangent * disk.y * spread);
+        RtInstanceData hit;
+        vec3 hitPosition, hitNormal;
+        vec2 hitUv;
+        float hitDistance;
+        if (traceSceneSurface(worldPosition + normal * 0.012, direction, 10000.0,
+                              hit, hitPosition, hitNormal, hitUv, hitDistance)) {
+            accumulated += shadeRtHit(hit, hitPosition, hitNormal);
+        } else if ((ubo.skyboxMode & 2) != 0) {
+            accumulated += sanitizeHDR(textureLod(prefilterMap, direction, roughness * MAX_REFLECTION_LOD).rgb)
+                           * max(ubo.ambientColor.w, 0.0);
+        }
+    }
+    vec3 fresnel = fresnelSchlickRoughness(max(dot(normal, viewDirection), 0.0), F0, roughness);
+    return (accumulated / float(SAMPLE_COUNT)) * fresnel * computeSpecularAO(
+        max(dot(normal, viewDirection), 0.0), ao, roughness
+    );
+}
+
+vec3 traceRtDiffuseBounce(vec3 worldPosition, vec3 normal, vec3 albedo,
+                          float metallic, float noise) {
+    vec3 up = abs(normal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    const int SAMPLE_COUNT = 2;
+    vec3 incoming = vec3(0.0);
+    for (int i = 0; i < SAMPLE_COUNT; ++i) {
+        vec2 disk = vogelDiskSample(i, SAMPLE_COUNT, noise * 2.0 * PI + float(i) * 2.39996323);
+        float z = sqrt(max(1.0 - dot(disk, disk), 0.0));
+        vec3 direction = normalize(tangent * disk.x + bitangent * disk.y + normal * z);
+        RtInstanceData hit;
+        vec3 hitPosition, hitNormal;
+        vec2 hitUv;
+        float hitDistance;
+        if (traceSceneSurface(worldPosition + normal * 0.012, direction, 20.0,
+                              hit, hitPosition, hitNormal, hitUv, hitDistance)) {
+            incoming += shadeRtHit(hit, hitPosition, hitNormal);
+        }
+    }
+    incoming /= float(SAMPLE_COUNT);
+    return sanitizeHDR(albedo * (1.0 - metallic) * incoming);
+}
+
 float rayTracedAmbientVisibility(vec3 worldPos, vec3 normal, float noise) {
     const int SAMPLE_COUNT = 4;
     const float AO_DISTANCE = 1.75;
@@ -460,6 +636,7 @@ void main() {
         : 0.0;
 
     vec3 ambientLighting = vec3(0.0);
+    vec3 specularIBL = vec3(0.0);
     if (iblIntensity > 0.0001) {
         vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
@@ -475,9 +652,15 @@ void main() {
         vec3 prefilteredColor = sanitizeHDR(textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb);
         vec3 specularBRDF = (F0 * dfg.x + dfg.y) * energyCompensation;
         float specAO = computeSpecularAO(NdotV, combinedAO, roughness);
-        vec3 specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade;
+        specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade;
 
         ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
+    }
+    if (ubo.rtParams.x > 0.5 && ubo.rtParams.w > 0.5) {
+        vec3 rtSpecular = traceRtReflection(
+            fragWorldPos, N, V, roughness, F0, combinedAO, ign
+        );
+        ambientLighting += rtSpecular - specularIBL * iblIntensity;
     }
 
     // 3B. Indirect Diffuse GI: SSGI + analityczny Ground Bounce
@@ -568,10 +751,17 @@ void main() {
         bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
 
+    // 3C. One-bounce scene GI: the ray hit is shaded from actual scene lights.
+    vec3 rtDiffuseGI = vec3(0.0);
+    if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5) {
+        rtDiffuseGI = traceRtDiffuseBounce(fragWorldPos, geomN, albedo, metallic, ign)
+                    * max(ubo.rtFeatureParams.z, 0.0);
+    }
+
     // 4. Emisja
     vec3 emissiveColor = albedo * emissive * 3.5;
 
-    vec3 hdrColor = directLighting + ambientLighting + bounceLighting + emissiveColor;
+    vec3 hdrColor = directLighting + ambientLighting + bounceLighting + rtDiffuseGI + emissiveColor;
 
     // 5. Eksponencjalna mgła wysokościowa + rozpraszanie słoneczne Mie
     if (ubo.fogParams.x > 0.5) {
