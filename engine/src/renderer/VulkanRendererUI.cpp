@@ -1480,6 +1480,21 @@ namespace engine::renderer {
                         }
                     }
                 } else {
+                    // Hardware ray-query effects are optional; raster shadows remain the fallback.
+                    if (ImGui::CollapsingHeader("Hardware Ray Tracing (Vulkan Ray Query)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        const bool rtSupported = m_context && m_context->isRayTracingSupported();
+                        if (!rtSupported) {
+                            ImGui::TextDisabled("Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features.");
+                        }
+                        ImGui::BeginDisabled(!rtSupported);
+                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rayTracingEnabled);
+                        ImGui::BeginDisabled(!m_rayTracingEnabled);
+                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtShadowsEnabled);
+                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtAoEnabled);
+                        ImGui::EndDisabled();
+                        ImGui::EndDisabled();
+                    }
+
                     // Zakładka World & Graphics Settings (wszystkie nowe systemy Vulkan 1.3)
                     if (ImGui::CollapsingHeader("GPU Cubemap IBL & Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
                         const char* hdriItems[] = {
@@ -1561,6 +1576,7 @@ namespace engine::renderer {
                         }
 
                         ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled);
+                        ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled);
 
                         if (engine) {
                             auto env = engine->getEnvironmentSettings();
