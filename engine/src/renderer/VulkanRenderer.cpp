@@ -303,6 +303,22 @@ namespace engine::renderer {
         }
         m_sceneUboMappedPtr = uboResultInfo.pMappedData;
 
+        if (m_context->isRayTracingSupported()) {
+            VkBufferCreateInfo rtDataInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+            rtDataInfo.size = sizeof(RtInstanceGpuData) * RT_MAX_INSTANCE_COUNT;
+            rtDataInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            VmaAllocationCreateInfo rtDataAllocInfo{};
+            rtDataAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+            rtDataAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                    VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            VmaAllocationInfo rtDataResult{};
+            if (vmaCreateBuffer(m_context->getAllocator(), &rtDataInfo, &rtDataAllocInfo,
+                                &m_rtInstanceDataBuffer, &m_rtInstanceDataAllocation, &rtDataResult) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create RT instance material buffer!");
+            }
+            m_rtInstanceDataMapped = rtDataResult.pMappedData;
+        }
+
         // Bindings 0..10 are the raster PBR resources. Binding 11 is added only
         // on devices that expose VK_KHR_ray_query / acceleration structures.
         std::vector<VkDescriptorSetLayoutBinding> bindings(11);
@@ -319,6 +335,13 @@ namespace engine::renderer {
             rtBinding.descriptorCount = 1;
             rtBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             bindings.push_back(rtBinding);
+
+            VkDescriptorSetLayoutBinding rtInstanceBinding{};
+            rtInstanceBinding.binding = 12;
+            rtInstanceBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            rtInstanceBinding.descriptorCount = 1;
+            rtInstanceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            bindings.push_back(rtInstanceBinding);
         }
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -333,6 +356,7 @@ namespace engine::renderer {
         };
         if (m_context->isRayTracingSupported()) {
             poolSizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 64 });
+            poolSizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 });
         }
 
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -399,7 +423,20 @@ namespace engine::renderer {
         write.dstBinding = 11;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-        vkUpdateDescriptorSets(m_context->getDevice(), 1, &write, 0, nullptr);
+
+        VkDescriptorBufferInfo rtDataInfo{
+            m_rtInstanceDataBuffer, 0,
+            sizeof(RtInstanceGpuData) * RT_MAX_INSTANCE_COUNT
+        };
+        VkWriteDescriptorSet rtDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        rtDataWrite.dstSet = descriptorSet;
+        rtDataWrite.dstBinding = 12;
+        rtDataWrite.descriptorCount = 1;
+        rtDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        rtDataWrite.pBufferInfo = &rtDataInfo;
+
+        const VkWriteDescriptorSet rtWrites[] = { write, rtDataWrite };
+        vkUpdateDescriptorSets(m_context->getDevice(), 2, rtWrites, 0, nullptr);
     }
 
     VkDescriptorSet VulkanRenderer::getOrCreateMaterialDescriptorSet(uint32_t materialId, core::AssetManager* assetManager) {
@@ -591,6 +628,12 @@ namespace engine::renderer {
             m_sceneUboBuffer = VK_NULL_HANDLE;
             m_sceneUboAlloc = VK_NULL_HANDLE;
             m_sceneUboMappedPtr = nullptr;
+        }
+        if (m_rtInstanceDataBuffer) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_rtInstanceDataBuffer, m_rtInstanceDataAllocation);
+            m_rtInstanceDataBuffer = VK_NULL_HANDLE;
+            m_rtInstanceDataAllocation = VK_NULL_HANDLE;
+            m_rtInstanceDataMapped = nullptr;
         }
         if (m_shadowImage) {
             vmaDestroyImage(m_context->getAllocator(), m_shadowImage, m_shadowAllocation);
@@ -1086,8 +1129,9 @@ namespace engine::renderer {
                 0.0f,
                 m_rtShadowsEnabled ? 1.0f : 0.0f,
                 m_rtAoEnabled ? 1.0f : 0.0f,
-                0.0f
+                m_rtReflectionsEnabled ? 1.0f : 0.0f
             );
+            ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, 1.0f, 0.0f);
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
             // Bit 0 controls skybox rendering metadata; bit 1 independently
             // controls environment lighting (diffuse IBL + specular reflections).
@@ -1130,10 +1174,12 @@ namespace engine::renderer {
         // Budowa listy rysowania PBR (wspólna dla Depth Prepass oraz Main PBR Pass)
         std::vector<DrawItem> drawItems;
         std::vector<AccelerationStructure::Instance> rtInstances;
+        std::vector<RtInstanceGpuData> rtGpuInstances;
         if (assetManager) {
             auto meshEntities = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
             drawItems.reserve(64);
             rtInstances.reserve(64);
+            rtGpuInstances.reserve(64);
             for (auto entity : meshEntities) {
                 const auto& transform = meshEntities.get<ecs::TransformComponent>(entity);
                 const auto& meshComp  = meshEntities.get<ecs::MeshComponent>(entity);
@@ -1222,18 +1268,48 @@ namespace engine::renderer {
                 item.pcs.normalCol2 = glm::vec4(normalMat[2], emissive);
                 item.pcs.baseColorFactor = glm::vec4(glm::vec3(baseColor), 1.0f);
                 drawItems.push_back(item);
-                if (isRayTracingEnabled()) {
+                if (isRayTracingEnabled() && rtGpuInstances.size() < RT_MAX_INSTANCE_COUNT) {
                     if (m_accelerationStructure.ensureBLAS(m_commandBuffer, meshComp.meshId, *meshAsset)) {
-                        AccelerationStructure::Instance instance{};
-                        instance.meshId = meshComp.meshId;
-                        instance.customIndex = static_cast<uint32_t>(entity);
-                        instance.transform = model;
-                        rtInstances.push_back(instance);
+                        VkBufferDeviceAddressInfo vertexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+                        vertexAddressInfo.buffer = meshAsset->vertexBuffer;
+                        VkBufferDeviceAddressInfo indexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+                        indexAddressInfo.buffer = meshAsset->indexBuffer;
+                        const VkDeviceAddress vertexAddress = vkGetBufferDeviceAddress(m_context->getDevice(), &vertexAddressInfo);
+                        const VkDeviceAddress indexAddress = vkGetBufferDeviceAddress(m_context->getDevice(), &indexAddressInfo);
+
+                        if (vertexAddress != 0 && indexAddress != 0) {
+                            const uint32_t rtIndex = static_cast<uint32_t>(rtGpuInstances.size());
+                            AccelerationStructure::Instance instance{};
+                            instance.meshId = meshComp.meshId;
+                            instance.customIndex = rtIndex;
+                            instance.transform = model;
+                            rtInstances.push_back(instance);
+
+                            RtInstanceGpuData gpu{};
+                            gpu.model = model;
+                            gpu.normalMatrix = glm::transpose(glm::inverse(model));
+                            gpu.baseColor = glm::vec4(glm::vec3(baseColor), 1.0f);
+                            gpu.material = glm::vec4(
+                                glm::clamp(metallic, 0.0f, 1.0f),
+                                glm::clamp(roughness, 0.045f, 1.0f),
+                                std::max(emissive, 0.0f),
+                                1.0f
+                            );
+                            gpu.vertexAddress = vertexAddress;
+                            gpu.indexAddress = indexAddress;
+                            gpu.vertexCount = meshAsset->vertexCount;
+                            gpu.indexCount = meshAsset->indexCount;
+                            rtGpuInstances.push_back(gpu);
+                        }
                     }
                 }
             }
             bool rtSceneReady = false;
-            if (isRayTracingEnabled() && !rtInstances.empty()) {
+            if (isRayTracingEnabled() && !rtInstances.empty() &&
+                rtGpuInstances.size() <= RT_MAX_INSTANCE_COUNT && m_rtInstanceDataMapped) {
+                const VkDeviceSize rtDataBytes = sizeof(RtInstanceGpuData) * rtGpuInstances.size();
+                std::memcpy(m_rtInstanceDataMapped, rtGpuInstances.data(), static_cast<size_t>(rtDataBytes));
+                vmaFlushAllocation(m_context->getAllocator(), m_rtInstanceDataAllocation, 0, rtDataBytes);
                 rtSceneReady = m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances);
                 if (rtSceneReady) {
                     updateRayTracingDescriptorSet(m_descriptorSet);
@@ -1245,6 +1321,7 @@ namespace engine::renderer {
             if (m_sceneUboMappedPtr) {
                 auto* sceneUbo = static_cast<SceneUboData*>(m_sceneUboMappedPtr);
                 sceneUbo->rtParams.x = rtSceneReady ? 1.0f : 0.0f;
+                sceneUbo->rtFeatureParams.y = static_cast<float>(rtGpuInstances.size());
             }
         }
 
