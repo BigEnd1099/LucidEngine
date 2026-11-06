@@ -120,6 +120,10 @@ namespace engine::renderer {
                 vkDestroyPipeline(dev, m_graphicsPipeline, nullptr);
                 m_graphicsPipeline = VK_NULL_HANDLE;
             }
+            if (m_rtGraphicsPipeline) {
+                vkDestroyPipeline(dev, m_rtGraphicsPipeline, nullptr);
+                m_rtGraphicsPipeline = VK_NULL_HANDLE;
+            }
             if (m_pipelineLayout) {
                 vkDestroyPipelineLayout(dev, m_pipelineLayout, nullptr);
                 m_pipelineLayout = VK_NULL_HANDLE;
@@ -598,10 +602,11 @@ namespace engine::renderer {
     void VulkanRenderer::createGraphicsPipeline() {
         VkDevice dev = m_context->getDevice();
         VkShaderModule vertShaderModule = createShaderModule(utils::readFile("pbr.vert.spv"));
-        const char* pbrFragmentShader = m_context->isRayTracingSupported()
-            ? "pbr_rt.frag.spv"
-            : "pbr.frag.spv";
-        VkShaderModule fragShaderModule = createShaderModule(utils::readFile(pbrFragmentShader));
+        VkShaderModule fragShaderModule = createShaderModule(utils::readFile("pbr.frag.spv"));
+        VkShaderModule rtFragShaderModule = VK_NULL_HANDLE;
+        if (m_context->isRayTracingSupported()) {
+            rtFragShaderModule = createShaderModule(utils::readFile("pbr_rt.frag.spv"));
+        }
 
         VkPipelineShaderStageCreateInfo shaderStages[2]{};
         shaderStages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShaderModule, "main", nullptr };
@@ -683,6 +688,13 @@ namespace engine::renderer {
         if (vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
             throw std::runtime_error("failed to create PBR graphics pipeline!");
         }
+        if (rtFragShaderModule) {
+            shaderStages[1].module = rtFragShaderModule;
+            if (vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_rtGraphicsPipeline) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create ray-query PBR graphics pipeline!");
+            }
+            shaderStages[1].module = fragShaderModule;
+        }
 
         // Depth Prepass Pipeline (tylko pbr.vert, 0 załączników koloru, pełny zapis Z dla GTAO oraz Early-Z)
         VkPipelineDepthStencilStateCreateInfo prepassDepth = depthStencil;
@@ -703,6 +715,7 @@ namespace engine::renderer {
             throw std::runtime_error("failed to create Depth Prepass pipeline!");
         }
 
+        if (rtFragShaderModule) vkDestroyShaderModule(dev, rtFragShaderModule, nullptr);
         vkDestroyShaderModule(dev, fragShaderModule, nullptr);
         vkDestroyShaderModule(dev, vertShaderModule, nullptr);
     }
@@ -1068,8 +1081,9 @@ namespace engine::renderer {
                 srgbToLinear(m_lightBounceGroundColor.b)
             );
             ubo.bounceColor = glm::vec4(linearGroundColor, 1.0f);
+            // RT is enabled only after this frame's TLAS has been built.
             ubo.rtParams = glm::vec4(
-                isRayTracingEnabled() ? 1.0f : 0.0f,
+                0.0f,
                 m_rtShadowsEnabled ? 1.0f : 0.0f,
                 m_rtAoEnabled ? 1.0f : 0.0f,
                 0.0f
@@ -1218,13 +1232,19 @@ namespace engine::renderer {
                     }
                 }
             }
+            bool rtSceneReady = false;
             if (isRayTracingEnabled() && !rtInstances.empty()) {
-                if (m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances)) {
+                rtSceneReady = m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances);
+                if (rtSceneReady) {
                     updateRayTracingDescriptorSet(m_descriptorSet);
                     for (const auto& materialSet : m_materialDescriptorSets) {
                         updateRayTracingDescriptorSet(materialSet.second);
                     }
                 }
+            }
+            if (m_sceneUboMappedPtr) {
+                auto* sceneUbo = static_cast<SceneUboData*>(m_sceneUboMappedPtr);
+                sceneUbo->rtParams.x = rtSceneReady ? 1.0f : 0.0f;
             }
         }
 
@@ -1571,7 +1591,11 @@ namespace engine::renderer {
             vkCmdSetScissor(m_commandBuffer, 0, 1, &fullSc);
 
             if (m_graphicsPipeline && m_descriptorSet) {
-                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+                const bool useRayQuery = isRayTracingEnabled() &&
+                    m_rtGraphicsPipeline != VK_NULL_HANDLE &&
+                    m_accelerationStructure.getTLAS() != VK_NULL_HANDLE;
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    useRayQuery ? m_rtGraphicsPipeline : m_graphicsPipeline);
                 VkDescriptorSet currentBoundSet = VK_NULL_HANDLE;
                 for (const auto& item : drawItems) {
                     VkDescriptorSet set = m_descriptorSet;
