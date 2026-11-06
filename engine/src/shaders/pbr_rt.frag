@@ -494,26 +494,63 @@ vec3 traceRtReflection(vec3 worldPosition, vec3 normal, vec3 viewDirection,
 
 vec3 traceRtDiffuseBounce(vec3 worldPosition, vec3 normal, vec3 albedo,
                           float metallic, float noise) {
-    vec3 up = abs(normal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(up, normal));
-    vec3 bitangent = cross(normal, tangent);
     const int SAMPLE_COUNT = 2;
+    const int MAX_DIFFUSE_BOUNCES = 15;
+    const float MAX_RAY_DISTANCE = 20.0;
+    int bounceCount = clamp(int(round(ubo.rtFeatureParams.w)), 1, MAX_DIFFUSE_BOUNCES);
     vec3 incoming = vec3(0.0);
-    for (int i = 0; i < SAMPLE_COUNT; ++i) {
-        vec2 disk = vogelDiskSample(i, SAMPLE_COUNT, noise * 2.0 * PI + float(i) * 2.39996323);
-        float z = sqrt(max(1.0 - dot(disk, disk), 0.0));
-        vec3 direction = normalize(tangent * disk.x + bitangent * disk.y + normal * z);
-        RtInstanceData hit;
-        vec3 hitPosition, hitNormal;
-        vec2 hitUv;
-        vec4 hitTangent;
-        float hitDistance;
-        if (traceSceneSurface(worldPosition + normal * 0.012, direction, 20.0,
-                              hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance)) {
-            incoming += shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent);
-            incoming += 0.35 * traceRtSecondaryBounce(hit, hitPosition, hitNormal, hitUv, noise + float(i) * 0.61);
+
+    for (int sampleIndex = 0; sampleIndex < SAMPLE_COUNT; ++sampleIndex) {
+        vec3 rayOrigin = worldPosition + normal * 0.012;
+        vec3 rayNormal = normalize(normal);
+        vec3 throughput = vec3(1.0);
+        vec3 sampleRadiance = vec3(0.0);
+        float rotation = noise * 2.0 * PI + float(sampleIndex) * 2.39996323;
+
+        // Iterative path traversal avoids recursive shader calls and supports
+        // a user-controlled number of diffuse surface interactions (1..15).
+        for (int bounce = 0; bounce < MAX_DIFFUSE_BOUNCES; ++bounce) {
+            if (bounce >= bounceCount || max(max(throughput.r, throughput.g), throughput.b) < 0.005)
+                break;
+
+            vec3 up = abs(rayNormal.y) < 0.99
+                ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            vec3 tangent = normalize(cross(up, rayNormal));
+            vec3 bitangent = cross(rayNormal, tangent);
+            float angle = rotation + float(bounce) * 2.39996323;
+            vec2 disk = vogelDiskSample(sampleIndex, SAMPLE_COUNT, angle);
+            float z = sqrt(max(1.0 - dot(disk, disk), 0.0));
+            vec3 direction = normalize(tangent * disk.x + bitangent * disk.y + rayNormal * z);
+
+            RtInstanceData hit;
+            vec3 hitPosition, hitNormal;
+            vec2 hitUv;
+            vec4 hitTangent;
+            float hitDistance;
+            if (!traceSceneSurface(rayOrigin, direction, MAX_RAY_DISTANCE,
+                                   hit, hitPosition, hitNormal, hitUv,
+                                   hitTangent, hitDistance))
+                break;
+
+            sampleRadiance += throughput * shadeRtHit(
+                hit, hitPosition, hitNormal, hitUv, hitTangent);
+
+            vec3 hitAlbedo = hit.baseColor.rgb *
+                pow(max(texture(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv).rgb,
+                        vec3(0.0)), vec3(2.2));
+            vec3 hitOrm = texture(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv).rgb;
+            float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
+
+            // Cosine-weighted diffuse path throughput. Metallic surfaces do not
+            // continue this diffuse path; their specular response is handled by RT reflections.
+            throughput *= hitAlbedo * (1.0 - hitMetallic);
+            throughput = min(throughput, vec3(4.0));
+            rayNormal = normalize(hitNormal);
+            rayOrigin = hitPosition + rayNormal * 0.014;
         }
+        incoming += sampleRadiance;
     }
+
     incoming /= float(SAMPLE_COUNT);
     return sanitizeHDR(albedo * (1.0 - metallic) * incoming);
 }
