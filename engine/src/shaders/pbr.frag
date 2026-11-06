@@ -60,6 +60,12 @@ layout(push_constant) uniform PushConstants {
 
 const float PI = 3.14159265359;
 const float MAX_REFLECTION_LOD = 4.0;
+const float MAX_HDR_VALUE = 65504.0;
+
+vec3 sanitizeHDR(vec3 c) {
+    if (any(isnan(c)) || any(isinf(c))) return vec3(0.0);
+    return clamp(c, vec3(0.0), vec3(MAX_HDR_VALUE));
+}
 
 float interleavedGradientNoise(vec2 screenPos) {
     return fract(52.9829189 * fract(dot(screenPos, vec2(0.06711056, 0.00583715))));
@@ -74,7 +80,9 @@ vec2 vogelDiskSample(int sampleIdx, int samplesCount, float phi) {
 
 vec3 computeNormal(vec3 N) {
     vec3 tangentNormal = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
-    if (dot(tangentNormal.xy, tangentNormal.xy) < 1e-5) {
+    // Próg 1e-3 odfiltrowuje domyślne płaskie tekstury 8-bit (128/255 -> błąd ~3.1e-5),
+    // zapobiegając uruchamianiu płaskich pochodnych dFdx/dFdy na gładkich kulach
+    if (dot(tangentNormal.xy, tangentNormal.xy) < 1e-3) {
         return N;
     }
     if (abs(fragTangent.w) > 0.5) {
@@ -132,7 +140,8 @@ float computeSpecularAO(float NdotV, float ao, float roughness) {
 float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float phi) {
     float cRadius = max(ubo.cascadeRadii[cascadeIdx], 1.0);
     float texelWorldSize = (2.0 * cRadius) / float(textureSize(shadowMap, 0).x);
-    float sinTheta = sqrt(max(0.0, 1.0 - max(dot(geomN, L), 0.0) * max(dot(geomN, L), 0.0)));
+    float NdotL = max(dot(geomN, L), 0.0);
+    float sinTheta = sqrt(max(0.0, 1.0 - NdotL * NdotL));
     vec3 offsetPos = worldPos + geomN * (texelWorldSize * (1.2 + 2.0 * sinTheta));
 
     vec4 lsPos = ubo.cascadeLightSpace[cascadeIdx] * vec4(offsetPos, 1.0);
@@ -145,7 +154,7 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
 
     float depthBias = 0.00025 + 0.0006 * sinTheta;
 
-    // === PCSS Krok 1: Blocker Search (szukanie przeszkód rzucających cień) ===
+    // === PCSS Krok 1: Blocker Search ===
     float searchRadius = clamp(0.06 / (2.0 * cRadius), 0.0015, 0.008);
     float avgBlockerDepth = 0.0;
     int numBlockers = 0;
@@ -159,20 +168,17 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
         }
     }
 
-    // Brak przeszkód pomiędzy słońcem a punktem = pełne oświetlenie
     if (numBlockers == 0) return 1.0;
 
-    // === PCSS Krok 2: Estymacja szerokości półcienia (Penumbra Estimation) ===
+    // === PCSS Krok 2: Penumbra Estimation ===
     avgBlockerDepth /= float(numBlockers);
     float blockerDist = max(proj.z - avgBlockerDepth, 0.0);
 
-    // Contact Hardening: na styku cień jest ostry (minFilterRadius),
-    // a w miarę oddalania od przeszkody miękko i naturalnie się rozmywa
     float minFilterRadius = 1.0 / float(textureSize(shadowMap, 0).x);
     const float penumbraScale = 0.06;
     float uvFilterRadius = clamp(minFilterRadius + blockerDist * penumbraScale, minFilterRadius, 0.0065);
 
-    // === PCSS Krok 3: Vogel Disk PCF z dynamicznym promieniem ===
+    // === PCSS Krok 3: Vogel Disk PCF ===
     float visibility = 0.0;
     const int SAMPLES = 16;
     for (int i = 0; i < SAMPLES; ++i) {
@@ -194,7 +200,6 @@ float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDept
     float phi = ign * 2.0 * PI;
     float shadow = sampleCascadePCF(cascadeIdx, worldPos, geomN, L, phi);
 
-    // Płynne przenikanie na ostatnich 15% zasięgu kaskady (brak widocznych szwów CSM)
     if (cascadeIdx < 3) {
         float splitEnd = ubo.cascadeSplits[cascadeIdx];
         float splitStart = (cascadeIdx == 0) ? 0.0 : ubo.cascadeSplits[cascadeIdx - 1];
@@ -217,13 +222,8 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
 
     vec3 L = normalize(toLight);
     float NdotL = max(dot(geomN, L), 0.0);
-
-    // Lekki offset wzdluz normalnej zapobiegajacy trądzikowi cienia na skosach
     vec3 dir = -toLight + geomN * (0.015 * (1.0 - NdotL));
 
-    // Frisvad 2012: stabilna, w 100% symetryczna baza ortonormalna z jednego wektora.
-    // Eliminuje degenerację cross(up, dir) wokół osi Y, dzięki czemu rozmycie cienia
-    // jest idealnie izotropowe we wszystkich osiach (koniec rozmycia tylko w osi X).
     vec3 ndir = normalize(dir);
     vec3 right, bitan;
     if (ndir.z < -0.9999) {
@@ -320,10 +320,8 @@ void main() {
     roughness = alpha;
     alpha = roughness * roughness;
 
-    // Fizyczny model energetyczny glTF 2.0 / Filament (mnożenie przez 1 - metallic dokładnie raz w kD)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    // Kulla-Conty / Lagarde kompensacja wielokrotnego rozpraszania GGX
     vec2 dfg = texture(brdfLut, vec2(NdotV, roughness)).rg;
     vec3 energyCompensation = 1.0 + F0 * (1.0 / max(dfg.x + dfg.y, 1e-3) - 1.0);
 
@@ -332,8 +330,8 @@ void main() {
 
     vec3 directLighting = vec3(0.0);
 
-    // 1. Światło kierunkowe (Słońce + 4-kaskadowe cienie CSM Vogel PCF)
-    float sunIntensity = ubo.sunDirection.w;
+    // 1. Światło kierunkowe (Słońce + CSM PCSS)
+    float sunIntensity = max(ubo.sunDirection.w, 0.0);
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     if (sunIntensity > 0.001 && dot(geomN, sunDir) > -0.05) {
         float sunShadow = computeDirectionalShadow(fragWorldPos, geomN, sunDir, viewDepth, ign);
@@ -354,7 +352,6 @@ void main() {
 
         vec3 toLight = lPos - fragWorldPos;
         if (lType == 2) {
-            // Światło powierzchniowe Area Light (metoda najbliższego punktu na prostokącie Karis 2013)
             vec3 lForward = normalize(ubo.lightsDir[i].xyz);
             vec3 lRight = normalize(cross(lForward, abs(lForward.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
             vec3 lUp = cross(lRight, lForward);
@@ -371,13 +368,11 @@ void main() {
         if (dist >= lRange || lIntensity <= 0.001) continue;
         vec3 L = toLight / max(dist, 1e-4);
 
-        // Fizyczny zanik Karis/UE5 (okno 1 - (d/R)^4)^2 / (d^2 + 1)
         float distRatio = dist / lRange;
         float window = clamp(1.0 - pow(distRatio, 4.0), 0.0, 1.0);
         float attenuation = (window * window) / (dist * dist + 1.0);
 
         if (lType == 1) {
-            // Stożek reflektora Spot Light
             vec3 spotDir = normalize(ubo.lightsDir[i].xyz);
             float cosTheta = dot(-L, spotDir);
             float innerCos = ubo.lightsParams[i].x;
@@ -390,76 +385,68 @@ void main() {
         float shadowVis = 1.0;
         if (i == shadowedPointIdx && (lType == 0 || lType == 1)) {
             shadowVis = samplePointLightShadow(toLight, dist, geomN, ign);
-        } else {
-            shadowVis = 1.0;  // Brak mapy cieni — pomijamy cienie analityczne
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
         directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alpha, energyCompensation);
     }
 
-    // 3. Prekalkulowane na GPU oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
-    vec2 screenUV = gl_FragCoord.xy * ubo.screenParams.zw;
+    // 3. Oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
+    vec2 screenUV = clamp(gl_FragCoord.xy * ubo.screenParams.zw, vec2(0.0), vec2(1.0));
     vec4 gtaoData = texture(ssaoMap, screenUV);
-    float ssao = gtaoData.a;
-    vec3 ssgiDiffuse = gtaoData.rgb;
+    float ssao = clamp(gtaoData.a, 0.0, 1.0);
+    vec3 ssgiDiffuse = sanitizeHDR(gtaoData.rgb);
     float matAO = (pcs.baseColorFactor.a > 0.001) ? min(orm.r, pcs.baseColorFactor.a) : orm.r;
     float combinedAO = clamp(ssao * matAO, 0.0, 1.0);
 
-    vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+    // Wyzerowanie wpływu tekstur zastępczych (fallback IBL), gdy HDRI / Skybox jest wyłączony (skyboxMode <= 0)
+    float iblIntensity = (ubo.skyboxMode > 0) ? max(ubo.ambientColor.w, 0.0) : 0.0;
+    vec3 ambientLighting = vec3(0.0);
 
-    vec3 irradiance = texture(irradianceMap, N).rgb;
-    vec3 ambientTint = mix(vec3(1.0), ubo.ambientColor.rgb * 2.2, 0.35);
-    vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo);
+    if (iblIntensity > 0.0001) {
+        vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-    vec3 R = reflect(-V, N);
-    // Tłumienie horyzontu odbić (zapobiega przeciekom światła spod powierzchni)
-    float horizonFade = clamp(1.0 + dot(R, geomN), 0.0, 1.0);
-    horizonFade *= horizonFade;
+        vec3 irradiance = sanitizeHDR(texture(irradianceMap, N).rgb);
+        vec3 ambientTint = mix(vec3(1.0), ubo.ambientColor.rgb * 2.2, 0.35);
+        vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo);
 
-    vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
-    vec3 specularBRDF = (F0 * dfg.x + dfg.y) * energyCompensation;
-    float specAO = computeSpecularAO(NdotV, combinedAO, roughness);
-    vec3 specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade;
+        vec3 R = reflect(-V, N);
+        float horizonFade = clamp(1.0 + dot(R, geomN), 0.0, 1.0);
+        horizonFade *= horizonFade;
 
-    float iblIntensity = max(ubo.ambientColor.w, 0.0);
-    vec3 ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
+        vec3 prefilteredColor = sanitizeHDR(textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb);
+        vec3 specularBRDF = (F0 * dfg.x + dfg.y) * energyCompensation;
+        float specAO = computeSpecularAO(NdotV, combinedAO, roughness);
+        vec3 specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade;
 
-    // 3B. Indirect Diffuse GI: Color Bleed od kazdego elementu (SSGI) + analityczny Ground Bounce
+        ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
+    }
+
+    // 3B. Indirect Diffuse GI: SSGI + analityczny Ground Bounce
     vec3 bounceLighting = vec3(0.0);
     if (ubo.bounceParams.x > 0.5) {
-        float bounceIntensity = ubo.bounceParams.y;
-        float groundAlbedo = ubo.bounceParams.z;
-        vec3 groundTint = ubo.bounceColor.rgb;
+        float bounceIntensity = max(ubo.bounceParams.y, 0.0);
+        float groundAlbedo = clamp(ubo.bounceParams.z, 0.0, 1.0);
+        vec3 groundTint = max(ubo.bounceColor.rgb, vec3(0.0));
 
-        // Wspolczynnik kD dla swiatla posredniego wyliczany z F_SchlickRoughness(N.V)
         vec3 F_bounce = fresnelSchlickRoughness(NdotV, F0, roughness);
         vec3 kD_bounce = (vec3(1.0) - F_bounce) * (1.0 - metallic);
 
-        // 1. SCREEN-SPACE DIFFUSE GI (COLOR BLEEDING OD KAZDEGO WIDOCZNEGO ELEMENTU WRAZ Z JEGO TEKSTURA)
-        // Dzielenie przez PI dla zachowania energii (Lambert BRDF rho / PI)
         vec3 ssgiBounce = (kD_bounce * albedo / PI) * ssgiDiffuse;
-
-        // Wskaznik pokrycia ekranowego SSGI - wygasza fallback ground bounce aby uniknac podwojnego liczenia podlogi
         float ssgiScreenCoverage = clamp(length(ssgiDiffuse) * 1.5, 0.0, 1.0);
 
-        // 2. ANALITYCZNY GROUND BOUNCE (Far-field / Fallback GI z dzieleniem przez PI)
         vec3 groundBounce = vec3(0.0);
         float groundY = 0.0;
         float hemisphereWeight = clamp((1.0 - N.y) * 0.5, 0.0, 1.0);
         float hFrag = max(fragWorldPos.y - groundY, 0.0);
 
-        // A. Wtorne odbicie sloneczne od podloza z okluzja cienia
         if (sunIntensity > 0.001 && hemisphereWeight > 0.001) {
             vec3 floorPt = vec3(fragWorldPos.x, groundY, fragWorldPos.z) + vec3(N.x, 0.0, N.z) * 0.5;
             vec3 floorN = vec3(0.0, 1.0, 0.0);
-            
-            // Metryka glebokosci wzdluz osi Z kamery (-view.z), a nie odleglosc radialna
+
             float floorViewZ = -(ubo.view * vec4(floorPt, 1.0)).z;
             float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewZ, ign);
-            
-            // Wygaszanie cienia wraz z wysokoscia fragmentu nad ziemia (dla bryl uniesionych)
             floorSunShadow = mix(floorSunShadow, 1.0, clamp(hFrag / 4.0, 0.0, 1.0));
 
             float sunOnGround = max(sunDir.y, 0.0) * sunIntensity * floorSunShadow;
@@ -468,7 +455,6 @@ void main() {
             groundBounce += (kD_bounce * albedo / PI) * groundExitance * hemisphereWeight * combinedAO;
         }
 
-        // B. Wtorne odbicie od podloza dla swiatel lokalnych (Point & Spot)
         for (int i = 0; i < lightCount; ++i) {
             vec3 lPos = ubo.lightsPos[i].xyz;
             float lRange = max(ubo.lightsPos[i].w, 0.1);
@@ -481,7 +467,6 @@ void main() {
 
             int lType = int(ubo.lightsDir[i].w + 0.5);
 
-            // B.1. SPOT LIGHT JAKO VPL W SRODKU PLAMY NA PODLODZE
             if (lType == 1) {
                 vec3 spotDir = normalize(ubo.lightsDir[i].xyz);
                 if (spotDir.y < -0.05) {
@@ -496,7 +481,6 @@ void main() {
                         float rangeFade = clamp(1.0 - dist / lRange, 0.0, 1.0);
                         rangeFade *= rangeFade;
 
-                        // Kat brylkowy stozka ~ (1 - outerCos)
                         float coneFluxWeight = clamp(1.0 - ubo.lightsParams[i].y, 0.02, 1.0);
                         float incidentAtten = (-spotDir.y) / (1.0 + tFloor * tFloor);
                         float formFactor = max(bounceDir.y, 0.0) * max(dot(N, bounceDir), 0.0) / (1.0 + distSq);
@@ -509,7 +493,6 @@ void main() {
                 continue;
             }
 
-            // B.2. POINT LIGHT (wirtualne odbicie lustrzane wzgledem podlogi)
             vec2 dXZ = fragWorldPos.xz - lPos.xz;
             float dBounceSq = dot(dXZ, dXZ) + (hL + hFrag) * (hL + hFrag);
 
@@ -523,17 +506,16 @@ void main() {
             groundBounce += (kD_bounce * albedo / PI) * localGroundExitance * hemisphereWeight * combinedAO;
         }
 
-        // Wygaszanie fallbacku ground bounce gdy obszar jest pokryty przez SSGI
         groundBounce *= (1.0 - ssgiScreenCoverage);
-
         bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
-    // 4. Emisja (nie podlega tłumieniu przez AO!)
+
+    // 4. Emisja
     vec3 emissiveColor = albedo * emissive * 3.5;
 
     vec3 hdrColor = directLighting + ambientLighting + bounceLighting + emissiveColor;
 
-    // 5. Eksponencjalna mgła wysokościowa + rozpraszanie słoneczne Mie (Henyey-Greenstein)
+    // 5. Eksponencjalna mgła wysokościowa + rozpraszanie słoneczne Mie (bez świecenia w nocy przy sunIntensity == 0)
     if (ubo.fogParams.x > 0.5) {
         float fogDensity = ubo.fogParams.y;
         float heightFalloff = max(ubo.fogParams.z, 1e-4);
@@ -549,13 +531,13 @@ void main() {
         }
         float fogTransmittance = exp(-clamp(opticalDepth, 0.0, 20.0));
 
-        // Faza Mie wokół tarczy słonecznej
         float cosSun = max(dot(rayDir, sunDir), 0.0);
         const float g = 0.76;
         float miePhase = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * cosSun, 1.5));
-        vec3 inscatterColor = mix(ubo.fogColor.rgb, ubo.sunColor.rgb * max(sunIntensity * 0.35, 0.2), clamp(miePhase * 0.45, 0.0, 0.75));
+        float mieWeight = (sunIntensity > 0.001) ? clamp(miePhase * 0.45, 0.0, 0.75) : 0.0;
+        vec3 inscatterColor = mix(ubo.fogColor.rgb, ubo.sunColor.rgb * (sunIntensity * 0.35), mieWeight);
         hdrColor = mix(inscatterColor, hdrColor, fogTransmittance);
     }
 
-    outColor = vec4(max(hdrColor, vec3(0.0)), 1.0);
+    outColor = vec4(sanitizeHDR(hdrColor), 1.0);
 }

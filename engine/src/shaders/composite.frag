@@ -11,6 +11,8 @@ layout(push_constant) uniform CompositePush {
     vec4 params2; // x = useFxaa (1.0 = true, 0.0 = false)
 } pcs;
 
+const float MAX_HDR_VALUE = 65504.0;
+
 // Macierze przestrzeni barw ACES (Stephen Hill RRT + ODT Fit: sRGB -> AP1 -> RRT+ODT -> sRGB)
 const mat3 ACES_INPUT_MAT = mat3(
     0.59719, 0.07600, 0.02840,
@@ -24,6 +26,11 @@ const mat3 ACES_OUTPUT_MAT = mat3(
     -0.07367, -0.00605,  1.07602
 );
 
+vec3 sanitizeHDR(vec3 c) {
+    if (any(isnan(c)) || any(isinf(c))) return vec3(0.0);
+    return clamp(c, vec3(0.0), vec3(MAX_HDR_VALUE));
+}
+
 vec3 rrtAndOdtFit(vec3 v) {
     vec3 a = v * (v + 0.0245786) - 0.000090537;
     vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
@@ -31,13 +38,13 @@ vec3 rrtAndOdtFit(vec3 v) {
 }
 
 vec3 acesFitted(vec3 color) {
-    color = ACES_INPUT_MAT * color;
+    color = max(ACES_INPUT_MAT * color, vec3(0.0));
     color = rrtAndOdtFit(color);
     color = ACES_OUTPUT_MAT * color;
     return clamp(color, 0.0, 1.0);
 }
 
-// Dokladna krzywa elektro-optyczna IEC 61966-2-1 sRGB
+// Dokładna krzywa elektro-optyczna IEC 61966-2-1 sRGB
 vec3 linearToSRGB(vec3 x) {
     bvec3 cutoff = lessThanEqual(x, vec3(0.0031308));
     vec3 lower = x * 12.92;
@@ -50,21 +57,24 @@ float ignDither(vec2 pos, float frame) {
 }
 
 void main() {
-    vec3 hdr = texture(hdrSceneTex, fragUV).rgb;
+    vec2 sceneTexel = 1.0 / vec2(max(textureSize(hdrSceneTex, 0), ivec2(1)));
+    vec2 sceneUV = clamp(fragUV, sceneTexel * 0.5, vec2(1.0) - sceneTexel * 0.5);
+    vec3 hdr = sanitizeHDR(texture(hdrSceneTex, sceneUV).rgb);
+
     if (pcs.params.z > 0.5) {
-        vec3 bloom = texture(bloomTex, fragUV).rgb;
-        hdr += bloom * pcs.params.x;
+        vec2 bloomTexel = 1.0 / vec2(max(textureSize(bloomTex, 0), ivec2(1)));
+        vec2 bloomUV = clamp(fragUV, bloomTexel * 0.5, vec2(1.0) - bloomTexel * 0.5);
+        vec3 bloom = sanitizeHDR(texture(bloomTex, bloomUV).rgb);
+        hdr += bloom * max(pcs.params.x, 0.0);
     }
 
     hdr *= max(pcs.params.y, 0.01);
     vec3 mapped = acesFitted(hdr);
     vec3 srgb = linearToSRGB(mapped);
 
-    // Dithering 8-bit zapobiegajacy pasmowaniu (banding) na ciemnym niebie i mgle
+    // Dithering 8-bit zapobiegający pasmowaniu (banding) na ciemnym niebie i mgle
     srgb = clamp(srgb + ignDither(gl_FragCoord.xy, pcs.params.w) / 255.0, 0.0, 1.0);
 
-    // Gdy FXAA jest aktywne, zapisujemy percepcyjna luminancje w kanale alfa.
-    // Gdy FXAA jest wylaczone, zapisujemy scisle alpha = 1.0, aby ImGui nie mieszal przezroczystosci!
     float luma = dot(srgb, vec3(0.299, 0.587, 0.114));
     float outAlpha = (pcs.params2.x > 0.5) ? luma : 1.0;
     outColor = vec4(srgb, outAlpha);

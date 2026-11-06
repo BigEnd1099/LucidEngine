@@ -9,48 +9,69 @@ layout(push_constant) uniform BloomDownPush {
     vec4 params; // x = srcTexelW, y = srcTexelH, z = threshold, w = mipLevel (0 = prefilter + Karis)
 } pcs;
 
+const float MAX_HDR_VALUE = 65504.0;
+
 float luminance(vec3 c) {
-    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0);
 }
 
 float karisWeight(vec3 c) {
     return 1.0 / (1.0 + luminance(c));
 }
 
+vec3 sanitizeSample(vec3 c) {
+    if (any(isnan(c)) || any(isinf(c))) return vec3(0.0);
+    return clamp(c, vec3(0.0), vec3(MAX_HDR_VALUE));
+}
+
+// Bezpieczne próbkowanie z przycięciem do środków skrajnych tekseli źródłowej mipmapy.
+// Eliminuje duchy z zawijania (REPEAT/MIRROR) oraz poziome pasy przy krawędzi ekranu.
+vec3 sampleClamped(vec2 uv, vec2 uvMin, vec2 uvMax) {
+    return sanitizeSample(texture(srcTex, clamp(uv, uvMin, uvMax)).rgb);
+}
+
 vec3 softThreshold(vec3 color, float threshold) {
+    color = sanitizeSample(color);
     float br = max(color.r, max(color.g, color.b));
-    float knee = threshold * 0.5 + 1e-4;
-    float soft = clamp(br - threshold + knee, 0.0, 2.0 * knee);
+    if (br <= 1e-5) return vec3(0.0);
+
+    float th = max(threshold, 0.0);
+    float knee = th * 0.5 + 1e-4;
+    float soft = clamp(br - th + knee, 0.0, 2.0 * knee);
     soft = (soft * soft) / (4.0 * knee);
-    float contrib = max(soft, br - threshold) / max(br, 1e-4);
+    float contrib = max(soft, br - th) / max(br, 1e-4);
     return color * max(contrib, 0.0);
 }
 
 void main() {
-    vec2 t = pcs.params.xy;
+    // Wyznaczenie rzeczywistego rozmiaru teksela bezpośrednio z powiązanego widoku mipmapy
+    vec2 texSize = vec2(max(textureSize(srcTex, 0), ivec2(1)));
+    vec2 t = 1.0 / texSize;
+    vec2 uvMin = t * 0.5;
+    vec2 uvMax = vec2(1.0) - t * 0.5;
 
     // Siatka 13-tap Jimenez (Call of Duty: Advanced Warfare / UE5)
-    vec3 a = texture(srcTex, fragUV + vec2(-2.0, -2.0) * t).rgb;
-    vec3 b = texture(srcTex, fragUV + vec2( 0.0, -2.0) * t).rgb;
-    vec3 c = texture(srcTex, fragUV + vec2( 2.0, -2.0) * t).rgb;
+    vec3 a = sampleClamped(fragUV + vec2(-2.0, -2.0) * t, uvMin, uvMax);
+    vec3 b = sampleClamped(fragUV + vec2( 0.0, -2.0) * t, uvMin, uvMax);
+    vec3 c = sampleClamped(fragUV + vec2( 2.0, -2.0) * t, uvMin, uvMax);
 
-    vec3 d = texture(srcTex, fragUV + vec2(-1.0, -1.0) * t).rgb;
-    vec3 e = texture(srcTex, fragUV).rgb;
-    vec3 f = texture(srcTex, fragUV + vec2( 1.0, -1.0) * t).rgb;
+    vec3 d = sampleClamped(fragUV + vec2(-1.0, -1.0) * t, uvMin, uvMax);
+    vec3 e = sampleClamped(fragUV,                        uvMin, uvMax);
+    vec3 f = sampleClamped(fragUV + vec2( 1.0, -1.0) * t, uvMin, uvMax);
 
-    vec3 g = texture(srcTex, fragUV + vec2(-2.0,  0.0) * t).rgb;
-    vec3 h = texture(srcTex, fragUV + vec2( 2.0,  0.0) * t).rgb;
+    vec3 g = sampleClamped(fragUV + vec2(-2.0,  0.0) * t, uvMin, uvMax);
+    vec3 h = sampleClamped(fragUV + vec2( 2.0,  0.0) * t, uvMin, uvMax);
 
-    vec3 i = texture(srcTex, fragUV + vec2(-1.0,  1.0) * t).rgb;
-    vec3 j = texture(srcTex, fragUV + vec2( 1.0,  1.0) * t).rgb;
+    vec3 i = sampleClamped(fragUV + vec2(-1.0,  1.0) * t, uvMin, uvMax);
+    vec3 j = sampleClamped(fragUV + vec2( 1.0,  1.0) * t, uvMin, uvMax);
 
-    vec3 k = texture(srcTex, fragUV + vec2(-2.0,  2.0) * t).rgb;
-    vec3 l = texture(srcTex, fragUV + vec2( 0.0,  2.0) * t).rgb;
-    vec3 m = texture(srcTex, fragUV + vec2( 2.0,  2.0) * t).rgb;
+    vec3 k = sampleClamped(fragUV + vec2(-2.0,  2.0) * t, uvMin, uvMax);
+    vec3 l = sampleClamped(fragUV + vec2( 0.0,  2.0) * t, uvMin, uvMax);
+    vec3 m = sampleClamped(fragUV + vec2( 2.0,  2.0) * t, uvMin, uvMax);
 
     vec3 result;
     if (pcs.params.w < 0.5) {
-        // Pierwszy stopień piramidy: progowanie miękkim kolanem + 5-grupowa średnia Karisa tłumiąca subpikselowe piki
+        // Pierwszy stopień piramidy: progowanie miękkim kolanem + 5-grupowa średnia Karisa
         float th = pcs.params.z;
         vec3 g0 = softThreshold((d + f + i + j) * 0.25, th);
         vec3 g1 = softThreshold((a + b + g + e) * 0.25, th);
@@ -72,5 +93,5 @@ void main() {
         result += (d + f + i + j) * 0.125;
     }
 
-    outColor = vec4(max(result, vec3(0.0)), 1.0);
+    outColor = vec4(sanitizeSample(result), 1.0);
 }
