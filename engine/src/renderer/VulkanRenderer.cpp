@@ -1014,7 +1014,7 @@ namespace engine::renderer {
                 m_lightBounceEnabled ? 1.0f : 0.0f,
                 m_lightBounceIntensity,
                 m_lightBounceGroundReflectance,
-                m_lightBounceMultiBounce
+                m_softShadows ? 1.0f : 0.0f
             );
             auto srgbToLinear = [](float c) {
                 return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);

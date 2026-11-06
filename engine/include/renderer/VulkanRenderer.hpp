@@ -121,6 +121,10 @@ namespace engine::renderer {
         float m_resolutionScale{1.0f};
         float m_uiScale{1.0f};
         float m_shadowDistance{140.0f};
+        bool m_softShadows{true};
+
+        void setSoftShadows(bool enabled) { m_softShadows = enabled; }
+        bool areSoftShadowsEnabled() const { return m_softShadows; }
         int m_antiAliasingMode{2};
         bool m_standaloneGameMode{false};
         uint32_t m_frameCounter{0};

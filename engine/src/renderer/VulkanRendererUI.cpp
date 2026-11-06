@@ -1685,6 +1685,7 @@ namespace engine::renderer {
                     }
 
                     if (ImGui::CollapsingHeader("Shadows (4096px 4-Cascade Vogel PCF)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::Checkbox("Soft Shadows", &m_softShadows);
                         ImGui::SliderFloat("CSM Distance", &m_shadowDistance, 25.0f, 200.0f, "%.1f m");
                     }
 

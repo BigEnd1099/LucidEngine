@@ -33,7 +33,7 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     vec4 lightsDir[8];
     vec4 lightsParams[8];
     vec4 pointShadowParams;
-    vec4 bounceParams;
+    vec4 bounceParams; // x = enabled, y = intensity, z = groundAlbedo, w = softShadows (1.0 = ON, 0.0 = OFF)
     vec4 bounceColor;
     int numLights;
     int numOccluders;
@@ -80,8 +80,6 @@ vec2 vogelDiskSample(int sampleIdx, int samplesCount, float phi) {
 
 vec3 computeNormal(vec3 N) {
     vec3 tangentNormal = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
-    // Próg 1e-3 odfiltrowuje domyślne płaskie tekstury 8-bit (128/255 -> błąd ~3.1e-5),
-    // zapobiegając uruchamianiu płaskich pochodnych dFdx/dFdy na gładkich kulach
     if (dot(tangentNormal.xy, tangentNormal.xy) < 1e-3) {
         return N;
     }
@@ -132,12 +130,12 @@ vec3 gtaoMultiBounce(float visibility, vec3 albedo) {
     return max(vec3(visibility), ((visibility * a + b) * visibility + c) * visibility);
 }
 
-// Lagarde 2014: Fizyczna okluzja odbić zwierciadlanych (eliminuje świecące krawędzie w cieniu)
+// Lagarde 2014: Fizyczna okluzja odbić zwierciadlanych
 float computeSpecularAO(float NdotV, float ao, float roughness) {
     return clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
 }
 
-float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float phi) {
+float sampleCascadeShadow(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float phi, bool softShadows) {
     float cRadius = max(ubo.cascadeRadii[cascadeIdx], 1.0);
     float texelWorldSize = (2.0 * cRadius) / float(textureSize(shadowMap, 0).x);
     float NdotL = max(dot(geomN, L), 0.0);
@@ -154,7 +152,13 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
 
     float depthBias = 0.00025 + 0.0006 * sinTheta;
 
-    // === PCSS Krok 1: Blocker Search ===
+    // Tryb ostrych cieni ([ ] Soft Shadows odznaczone)
+    if (!softShadows) {
+        float closestDepth = texture(shadowMap, vec3(proj.xy, float(cascadeIdx))).r;
+        return (proj.z - depthBias <= closestDepth) ? 1.0 : 0.0;
+    }
+
+    // Tryb miękkich cieni PCSS ([x] Soft Shadows zaznaczone)
     float searchRadius = clamp(0.06 / (2.0 * cRadius), 0.0015, 0.008);
     float avgBlockerDepth = 0.0;
     int numBlockers = 0;
@@ -170,7 +174,6 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
 
     if (numBlockers == 0) return 1.0;
 
-    // === PCSS Krok 2: Penumbra Estimation ===
     avgBlockerDepth /= float(numBlockers);
     float blockerDist = max(proj.z - avgBlockerDepth, 0.0);
 
@@ -178,7 +181,6 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
     const float penumbraScale = 0.06;
     float uvFilterRadius = clamp(minFilterRadius + blockerDist * penumbraScale, minFilterRadius, 0.0065);
 
-    // === PCSS Krok 3: Vogel Disk PCF ===
     float visibility = 0.0;
     const int SAMPLES = 16;
     for (int i = 0; i < SAMPLES; ++i) {
@@ -189,7 +191,7 @@ float sampleCascadePCF(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, float 
     return visibility / float(SAMPLES);
 }
 
-float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDepth, float ign) {
+float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDepth, float ign, bool softShadows) {
     if (viewDepth >= ubo.cascadeSplits.w) return 1.0;
 
     int cascadeIdx = 3;
@@ -198,15 +200,15 @@ float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDept
     else if (viewDepth < ubo.cascadeSplits.z) cascadeIdx = 2;
 
     float phi = ign * 2.0 * PI;
-    float shadow = sampleCascadePCF(cascadeIdx, worldPos, geomN, L, phi);
+    float shadow = sampleCascadeShadow(cascadeIdx, worldPos, geomN, L, phi, softShadows);
 
-    if (cascadeIdx < 3) {
+    if (softShadows && cascadeIdx < 3) {
         float splitEnd = ubo.cascadeSplits[cascadeIdx];
         float splitStart = (cascadeIdx == 0) ? 0.0 : ubo.cascadeSplits[cascadeIdx - 1];
         float blendBand = (splitEnd - splitStart) * 0.15;
         float blendFactor = clamp((viewDepth - (splitEnd - blendBand)) / max(blendBand, 0.01), 0.0, 1.0);
         if (blendFactor > 0.001) {
-            float nextShadow = sampleCascadePCF(cascadeIdx + 1, worldPos, geomN, L, phi);
+            float nextShadow = sampleCascadeShadow(cascadeIdx + 1, worldPos, geomN, L, phi, true);
             shadow = mix(shadow, nextShadow, blendFactor);
         }
     }
@@ -215,7 +217,7 @@ float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDept
     return mix(1.0, shadow, distFade);
 }
 
-float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float ign) {
+float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float ign, bool softShadows) {
     float nearPlane = max(ubo.pointShadowParams.y, 0.01);
     float farPlane = max(ubo.pointShadowParams.z, 1.0);
     if (currentDist >= farPlane) return 1.0;
@@ -223,7 +225,17 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
     vec3 L = normalize(toLight);
     float NdotL = max(dot(geomN, L), 0.0);
     vec3 dir = -toLight + geomN * (0.015 * (1.0 - NdotL));
+    float bias = max(0.03 * (1.0 - NdotL), ubo.pointShadowParams.w);
 
+    // Tryb ostrych cieni punktowych/reflektorowych
+    if (!softShadows) {
+        float sampledDepth = texture(pointShadowMap, dir).r;
+        float linearDepth = (nearPlane * farPlane) / max(farPlane - sampledDepth * (farPlane - nearPlane), 1e-4);
+        float z_sample = max(abs(dir.x), max(abs(dir.y), abs(dir.z)));
+        return (z_sample - bias <= linearDepth) ? 1.0 : 0.0;
+    }
+
+    // Tryb miękkich cieni z bazą Frisvada i dyskiem Vogla
     vec3 ndir = normalize(dir);
     vec3 right, bitan;
     if (ndir.z < -0.9999) {
@@ -237,7 +249,6 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
     }
 
     float diskRadius = (0.015 + 0.02 * (currentDist / farPlane));
-    float bias = max(0.03 * (1.0 - NdotL), ubo.pointShadowParams.w);
     float phi = ign * 2.0 * PI;
 
     float vis = 0.0;
@@ -253,50 +264,31 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
     return vis / float(SAMPLES);
 }
 
-float computeAnalyticOcclusion(vec3 p, vec3 lightPos) {
-    vec3 seg = lightPos - p;
-    float segLen = length(seg);
-    if (segLen < 0.05) return 1.0;
-    vec3 rd = seg / segLen;
-    float visibility = 1.0;
+vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, float roughness, vec3 energyComp, bool softShadows) {
+    float rawNdotL = dot(N, L);
+    float wrap = softShadows ? (0.14 * (1.0 - metallic) * roughness) : 0.0;
+    float wrappedNdotL = clamp((rawNdotL + wrap) / ((1.0 + wrap) * (1.0 + wrap)), 0.0, 1.0);
+    if (wrappedNdotL <= 0.0) return vec3(0.0);
 
-    int count = min(ubo.numOccluders, 32);
-    for (int i = 0; i < count; ++i) {
-        vec3 center = ubo.occluders[i].centerRadius.xyz;
-        float rad = ubo.occluders[i].centerRadius.w;
-        vec3 oc = center - p;
-        if (length(oc) < rad * 1.02) continue;
-        float tClosest = dot(oc, rd);
-        if (tClosest <= 0.05 || tClosest >= segLen - 0.05) continue;
-        float d2 = dot(oc, oc) - tClosest * tClosest;
-        float softRad = rad * 0.85;
-        if (d2 < softRad * softRad) {
-            float penumbra = smoothstep(softRad * 0.45, softRad, sqrt(max(0.0, d2)));
-            visibility = min(visibility, penumbra);
-        }
-    }
-    return visibility;
-}
-
-vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, vec3 energyComp) {
-    float NdotL = max(dot(N, L), 0.0);
-    if (NdotL <= 0.0) return vec3(0.0);
+    float NdotL = max(rawNdotL, 0.0);
     float NdotV = max(dot(N, V), 1e-4);
     vec3 H = normalize(V + L);
     float NdotH = max(dot(N, H), 0.0);
     float VdotH = max(dot(V, H), 0.0);
 
     float D = distributionGGX(NdotH, alpha);
-    float Vis = visibilitySmithGGXCorrelated(NdotV, NdotL, alpha);
+    float Vis = visibilitySmithGGXCorrelated(NdotV, max(NdotL, 1e-4), alpha);
     vec3 F = fresnelSchlick(VdotH, F0);
 
-    vec3 specular = (D * Vis) * F * energyComp;
+    vec3 specular = (D * Vis) * F * energyComp * NdotL;
     vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-    vec3 diffuse = kD * (albedo / PI);
-    return (diffuse + specular) * radiance * NdotL;
+    vec3 diffuse = kD * (albedo / PI) * wrappedNdotL;
+    return (diffuse + specular) * radiance;
 }
 
 void main() {
+    bool softShadows = (ubo.bounceParams.w > 0.5);
+
     vec3 geomN = normalize(fragNormal);
     vec3 N = computeNormal(geomN);
     vec3 V = normalize(ubo.cameraPos.xyz - fragWorldPos);
@@ -311,7 +303,6 @@ void main() {
     float roughness = clamp(pcs.normalCol1.w * orm.g, 0.045, 1.0);
     float emissive = max(pcs.normalCol2.w, 0.0);
 
-    // Geometryczne wygładzanie normalnych (Toksvig / Kaplanyan Specular Anti-Aliasing)
     vec3 dndu = dFdx(N);
     vec3 dndv = dFdy(N);
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
@@ -330,24 +321,27 @@ void main() {
 
     vec3 directLighting = vec3(0.0);
 
-    // 1. Światło kierunkowe (Słońce + CSM PCSS)
+    // 1. Światło kierunkowe (Słońce + przełącznik Soft/Hard Shadows)
     float sunIntensity = max(ubo.sunDirection.w, 0.0);
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    if (sunIntensity > 0.001 && dot(geomN, sunDir) > -0.05) {
-        float sunShadow = computeDirectionalShadow(fragWorldPos, geomN, sunDir, viewDepth, ign);
+    float minSunDot = softShadows ? -0.18 : -0.02;
+    if (sunIntensity > 0.001 && dot(geomN, sunDir) > minSunDot) {
+        float sunShadow = computeDirectionalShadow(fragWorldPos, geomN, sunDir, viewDepth, ign, softShadows);
         vec3 sunRadiance = ubo.sunColor.rgb * sunIntensity * sunShadow;
-        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alpha, energyCompensation);
+        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alpha, roughness, energyCompensation, softShadows);
     }
 
     // 2. Lokalnie cieniowane światła Point, Spot oraz Area
     int lightCount = min(ubo.numLights, 8);
     int shadowedPointIdx = int(round(ubo.pointShadowParams.x));
+    float localLightEnergy = 0.0;
 
     for (int i = 0; i < lightCount; ++i) {
         vec3 lPos = ubo.lightsPos[i].xyz;
         float lRange = max(ubo.lightsPos[i].w, 0.1);
         vec3 lCol = ubo.lightsCol[i].rgb;
-        float lIntensity = ubo.lightsCol[i].w;
+        float lIntensity = max(ubo.lightsCol[i].w, 0.0);
+        localLightEnergy += lIntensity;
         int lType = int(round(ubo.lightsDir[i].w));
 
         vec3 toLight = lPos - fragWorldPos;
@@ -384,25 +378,35 @@ void main() {
 
         float shadowVis = 1.0;
         if (i == shadowedPointIdx && (lType == 0 || lType == 1)) {
-            shadowVis = samplePointLightShadow(toLight, dist, geomN, ign);
+            shadowVis = samplePointLightShadow(toLight, dist, geomN, ign, softShadows);
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
-        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alpha, energyCompensation);
+        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alpha, roughness, energyCompensation, softShadows);
     }
 
     // 3. Oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
     vec2 screenUV = clamp(gl_FragCoord.xy * ubo.screenParams.zw, vec2(0.0), vec2(1.0));
-    vec4 gtaoData = texture(ssaoMap, screenUV);
+    vec2 ssaoTexel = 1.0 / vec2(max(textureSize(ssaoMap, 0), ivec2(1)));
+    float curvature = length(dFdx(geomN)) + length(dFdy(geomN));
+    vec2 aoOff = ssaoTexel * clamp(curvature * 8.0, 0.0, 1.25);
+
+    vec4 gtaoData = texture(ssaoMap, screenUV) * 0.4
+        + texture(ssaoMap, clamp(screenUV + vec2( aoOff.x,  aoOff.y), vec2(0.0), vec2(1.0))) * 0.15
+        + texture(ssaoMap, clamp(screenUV + vec2(-aoOff.x,  aoOff.y), vec2(0.0), vec2(1.0))) * 0.15
+        + texture(ssaoMap, clamp(screenUV + vec2( aoOff.x, -aoOff.y), vec2(0.0), vec2(1.0))) * 0.15
+        + texture(ssaoMap, clamp(screenUV + vec2(-aoOff.x, -aoOff.y), vec2(0.0), vec2(1.0))) * 0.15;
+
     float ssao = clamp(gtaoData.a, 0.0, 1.0);
     vec3 ssgiDiffuse = sanitizeHDR(gtaoData.rgb);
     float matAO = (pcs.baseColorFactor.a > 0.001) ? min(orm.r, pcs.baseColorFactor.a) : orm.r;
     float combinedAO = clamp(ssao * matAO, 0.0, 1.0);
 
-    // Wyzerowanie wpływu tekstur zastępczych (fallback IBL), gdy HDRI / Skybox jest wyłączony (skyboxMode <= 0)
-    float iblIntensity = (ubo.skyboxMode > 0) ? max(ubo.ambientColor.w, 0.0) : 0.0;
-    vec3 ambientLighting = vec3(0.0);
+    float totalSceneLight = sunIntensity + localLightEnergy * 0.25;
+    float lightDrivenSkyWeight = smoothstep(0.0, 0.35, totalSceneLight);
+    float iblIntensity = max(ubo.ambientColor.w, 0.0) * ((ubo.skyboxMode > 0) ? 1.0 : lightDrivenSkyWeight);
 
+    vec3 ambientLighting = vec3(0.0);
     if (iblIntensity > 0.0001) {
         vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
@@ -424,8 +428,9 @@ void main() {
     }
 
     // 3B. Indirect Diffuse GI: SSGI + analityczny Ground Bounce
+    float anySceneEnergy = clamp(totalSceneLight + iblIntensity, 0.0, 1.0);
     vec3 bounceLighting = vec3(0.0);
-    if (ubo.bounceParams.x > 0.5) {
+    if (ubo.bounceParams.x > 0.5 && anySceneEnergy > 0.0001) {
         float bounceIntensity = max(ubo.bounceParams.y, 0.0);
         float groundAlbedo = clamp(ubo.bounceParams.z, 0.0, 1.0);
         vec3 groundTint = max(ubo.bounceColor.rgb, vec3(0.0));
@@ -433,7 +438,7 @@ void main() {
         vec3 F_bounce = fresnelSchlickRoughness(NdotV, F0, roughness);
         vec3 kD_bounce = (vec3(1.0) - F_bounce) * (1.0 - metallic);
 
-        vec3 ssgiBounce = (kD_bounce * albedo / PI) * ssgiDiffuse;
+        vec3 ssgiBounce = (kD_bounce * albedo / PI) * ssgiDiffuse * smoothstep(0.0, 0.25, anySceneEnergy);
         float ssgiScreenCoverage = clamp(length(ssgiDiffuse) * 1.5, 0.0, 1.0);
 
         vec3 groundBounce = vec3(0.0);
@@ -446,7 +451,7 @@ void main() {
             vec3 floorN = vec3(0.0, 1.0, 0.0);
 
             float floorViewZ = -(ubo.view * vec4(floorPt, 1.0)).z;
-            float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewZ, ign);
+            float floorSunShadow = computeDirectionalShadow(floorPt, floorN, sunDir, floorViewZ, ign, softShadows);
             floorSunShadow = mix(floorSunShadow, 1.0, clamp(hFrag / 4.0, 0.0, 1.0));
 
             float sunOnGround = max(sunDir.y, 0.0) * sunIntensity * floorSunShadow;
@@ -515,7 +520,7 @@ void main() {
 
     vec3 hdrColor = directLighting + ambientLighting + bounceLighting + emissiveColor;
 
-    // 5. Eksponencjalna mgła wysokościowa + rozpraszanie słoneczne Mie (bez świecenia w nocy przy sunIntensity == 0)
+    // 5. Eksponencjalna mgła wysokościowa + rozpraszanie słoneczne Mie
     if (ubo.fogParams.x > 0.5) {
         float fogDensity = ubo.fogParams.y;
         float heightFalloff = max(ubo.fogParams.z, 1e-4);
@@ -535,7 +540,7 @@ void main() {
         const float g = 0.76;
         float miePhase = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * cosSun, 1.5));
         float mieWeight = (sunIntensity > 0.001) ? clamp(miePhase * 0.45, 0.0, 0.75) : 0.0;
-        vec3 inscatterColor = mix(ubo.fogColor.rgb, ubo.sunColor.rgb * (sunIntensity * 0.35), mieWeight);
+        vec3 inscatterColor = mix(ubo.fogColor.rgb * anySceneEnergy, ubo.sunColor.rgb * (sunIntensity * 0.35), mieWeight);
         hdrColor = mix(inscatterColor, hdrColor, fogTransmittance);
     }
 
