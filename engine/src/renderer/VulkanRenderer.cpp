@@ -299,14 +299,22 @@ namespace engine::renderer {
         }
         m_sceneUboMappedPtr = uboResultInfo.pMappedData;
 
-        // 11 bindowań (0: CSM Array, 1: SceneUbo, 2: PointShadowCube, 3: SkyCube, 4: IrradianceCube,
-        // 5: PrefilterCube, 6: BrdfLut2D, 7: GTAO, 8: Albedo, 9: Normal, 10: ORM)
-        std::array<VkDescriptorSetLayoutBinding, 11> bindings{};
+        // Bindings 0..10 are the raster PBR resources. Binding 11 is added only
+        // on devices that expose VK_KHR_ray_query / acceleration structures.
+        std::vector<VkDescriptorSetLayoutBinding> bindings(11);
         for (uint32_t i = 0; i < 11; ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorCount = 1;
             bindings[i].descriptorType = (i == 1) ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             bindings[i].stageFlags = (i == 1) ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT) : VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
+        if (m_context->isRayTracingSupported()) {
+            VkDescriptorSetLayoutBinding rtBinding{};
+            rtBinding.binding = 11;
+            rtBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+            rtBinding.descriptorCount = 1;
+            rtBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            bindings.push_back(rtBinding);
         }
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -315,10 +323,13 @@ namespace engine::renderer {
         layoutInfo.pBindings = bindings.data();
         vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &m_descriptorSetLayout);
 
-        std::array<VkDescriptorPoolSize, 2> poolSizes = {{
+        std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024 },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 64 }
-        }};
+        };
+        if (m_context->isRayTracingSupported()) {
+            poolSizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 64 });
+        }
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -364,6 +375,27 @@ namespace engine::renderer {
             }
         }
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        updateRayTracingDescriptorSet(m_descriptorSet);
+    }
+
+    void VulkanRenderer::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet) {
+        if (!m_context || !m_context->isRayTracingSupported() || descriptorSet == VK_NULL_HANDLE) return;
+        const VkAccelerationStructureKHR tlas = m_accelerationStructure.getTLAS();
+        if (tlas == VK_NULL_HANDLE) return;
+
+        VkWriteDescriptorSetAccelerationStructureKHR asInfo{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR
+        };
+        asInfo.accelerationStructureCount = 1;
+        asInfo.pAccelerationStructures = &tlas;
+
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.pNext = &asInfo;
+        write.dstSet = descriptorSet;
+        write.dstBinding = 11;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        vkUpdateDescriptorSets(m_context->getDevice(), 1, &write, 0, nullptr);
     }
 
     VkDescriptorSet VulkanRenderer::getOrCreateMaterialDescriptorSet(uint32_t materialId, core::AssetManager* assetManager) {
@@ -449,6 +481,7 @@ namespace engine::renderer {
             }
         }
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        updateRayTracingDescriptorSet(newSet);
 
         m_materialDescriptorSets[materialId] = newSet;
         return newSet;
@@ -565,7 +598,10 @@ namespace engine::renderer {
     void VulkanRenderer::createGraphicsPipeline() {
         VkDevice dev = m_context->getDevice();
         VkShaderModule vertShaderModule = createShaderModule(utils::readFile("pbr.vert.spv"));
-        VkShaderModule fragShaderModule = createShaderModule(utils::readFile("pbr.frag.spv"));
+        const char* pbrFragmentShader = m_context->isRayTracingSupported()
+            ? "pbr_rt.frag.spv"
+            : "pbr.frag.spv";
+        VkShaderModule fragShaderModule = createShaderModule(utils::readFile(pbrFragmentShader));
 
         VkPipelineShaderStageCreateInfo shaderStages[2]{};
         shaderStages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShaderModule, "main", nullptr };
@@ -826,6 +862,11 @@ namespace engine::renderer {
         }
 #endif
 
+        // The previous frame has completed (fence on the window path, queue-idle
+        // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
+        // be released safely, before any new build commands are recorded.
+        m_accelerationStructure.releaseCompletedScratch();
+
         vkResetCommandBuffer(m_commandBuffer, 0);
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
@@ -1027,8 +1068,16 @@ namespace engine::renderer {
                 srgbToLinear(m_lightBounceGroundColor.b)
             );
             ubo.bounceColor = glm::vec4(linearGroundColor, 1.0f);
+            ubo.rtParams = glm::vec4(
+                isRayTracingEnabled() ? 1.0f : 0.0f,
+                m_rtShadowsEnabled ? 1.0f : 0.0f,
+                m_rtAoEnabled ? 1.0f : 0.0f,
+                0.0f
+            );
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
-            ubo.skyboxMode = m_skyboxEnabled ? 1 : 0;
+            // Bit 0 controls skybox rendering metadata; bit 1 independently
+            // controls environment lighting (diffuse IBL + specular reflections).
+            ubo.skyboxMode = (m_skyboxEnabled ? 1 : 0) | (m_iblEnabled ? 2 : 0);
 
             auto lightView = registry.get().view<ecs::TransformComponent, ecs::LightComponent>();
             int lightIdx = 0;
@@ -1170,7 +1219,12 @@ namespace engine::renderer {
                 }
             }
             if (isRayTracingEnabled() && !rtInstances.empty()) {
-                m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances);
+                if (m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances)) {
+                    updateRayTracingDescriptorSet(m_descriptorSet);
+                    for (const auto& materialSet : m_materialDescriptorSets) {
+                        updateRayTracingDescriptorSet(materialSet.second);
+                    }
+                }
             }
         }
 
