@@ -214,6 +214,7 @@ namespace engine::renderer {
         float m_lightBounceMultiBounce{1.0f};
         glm::vec3 m_lightBounceGroundColor{0.16f, 0.19f, 0.25f};
         glm::mat4 m_prevViewProj{1.0f};
+        bool m_hasPreviousViewProj{false}; // Prevents sampling undefined history on the first frame or after resize.
 
         void setLightBounceEnabled(bool enabled) { m_lightBounceEnabled = enabled; }
         bool isLightBounceEnabled() const { return m_lightBounceEnabled; }
