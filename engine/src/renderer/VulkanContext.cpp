@@ -312,7 +312,7 @@ namespace engine::renderer {
         allocatorInfo.physicalDevice = m_physicalDevice;
         allocatorInfo.device = m_device;
         allocatorInfo.instance = m_instance;
-        allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+        allocatorInfo.flags = m_rayTracingSupported ? VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT : 0;
 
         if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
             throw std::runtime_error("failed to create VMA allocator!");

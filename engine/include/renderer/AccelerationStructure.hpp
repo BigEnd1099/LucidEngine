@@ -26,6 +26,7 @@ namespace engine::renderer {
 
         bool ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh);
         bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances);
+        void releaseCompletedScratch();
 
     private:
         struct AccelResource {
@@ -42,7 +43,6 @@ namespace engine::renderer {
 
         VulkanContext* m_context{nullptr};
         bool m_ready{false};
-        bool m_hasBuiltTlas{false};
         PFN_vkCreateAccelerationStructureKHR m_createAS{nullptr};
         PFN_vkDestroyAccelerationStructureKHR m_destroyAS{nullptr};
         PFN_vkGetAccelerationStructureBuildSizesKHR m_getBuildSizes{nullptr};

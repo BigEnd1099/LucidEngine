@@ -65,6 +65,9 @@ namespace engine::renderer {
         void setSkyboxEnabled(bool enabled) { m_skyboxEnabled = enabled; }
         bool isSkyboxEnabled() const { return m_skyboxEnabled; }
 
+        void setIblEnabled(bool enabled) { m_iblEnabled = enabled; }
+        bool isIblEnabled() const { return m_iblEnabled; }
+
         void setRayTracingEnabled(bool enabled) { m_rayTracingEnabled = enabled; }
         bool isRayTracingEnabled() const { return m_rayTracingEnabled && m_context && m_context->isRayTracingSupported(); }
         VkAccelerationStructureKHR getRayTracingTLAS() const { return m_accelerationStructure.getTLAS(); }
@@ -121,6 +124,10 @@ namespace engine::renderer {
         VulkanContext* m_context{nullptr};
         AccelerationStructure m_accelerationStructure;
         bool m_rayTracingEnabled{true};
+        bool m_rtShadowsEnabled{true};
+        bool m_rtAoEnabled{true};
+        VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
+        bool m_iblEnabled{true};
         uint32_t m_width{1920};
         uint32_t m_height{1080};
         uint32_t m_baseWidth{1920};
@@ -355,6 +362,7 @@ namespace engine::renderer {
             glm::vec4 pointShadowParams{-1.0f, 0.1f, 25.0f, 0.005f};
             glm::vec4 bounceParams{1.0f, 0.80f, 0.60f, 1.0f};
             glm::vec4 bounceColor{0.85f, 0.80f, 0.72f, 1.0f};
+            glm::vec4 rtParams{0.0f}; // x = RT active, y = RT shadows, z = RT AO
             int numLights{0};
             int numOccluders{0};
             int frameIndex{0};
@@ -370,6 +378,7 @@ namespace engine::renderer {
         VkDescriptorSet m_descriptorSet{VK_NULL_HANDLE};
         std::unordered_map<uint32_t, VkDescriptorSet> m_materialDescriptorSets;
         VkDescriptorSet getOrCreateMaterialDescriptorSet(uint32_t materialId, core::AssetManager* assetManager);
+        void updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet);
 
         VkCommandBuffer m_commandBuffer{VK_NULL_HANDLE};
 

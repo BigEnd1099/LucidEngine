@@ -121,6 +121,7 @@ set(SHADER_FILES
     src/shaders/triangle.frag
     src/shaders/pbr.vert
     src/shaders/pbr.frag
+    src/shaders/pbr_rt.frag
     src/shaders/shadow_depth.vert
     src/shaders/shadow_depth.frag
     src/shaders/particle.vert
