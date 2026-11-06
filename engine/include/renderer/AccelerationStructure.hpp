@@ -22,7 +22,7 @@ namespace engine::renderer {
         void init(VulkanContext* context);
         void cleanup();
         bool isReady() const { return m_ready; }
-        VkAccelerationStructureKHR getTLAS() const { return m_tlas; }
+        VkAccelerationStructureKHR getTLAS() const { return m_tlas.handle; }
 
         bool ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh);
         bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances);
