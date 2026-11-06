@@ -128,6 +128,7 @@ namespace engine::renderer {
         bool m_rtAoEnabled{true};
         bool m_rtReflectionsEnabled{true};
         bool m_rtGiEnabled{true};
+        float m_rtGiIntensity{1.0f};
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
         static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;
