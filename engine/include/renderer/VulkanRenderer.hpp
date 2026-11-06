@@ -126,7 +126,26 @@ namespace engine::renderer {
         bool m_rayTracingEnabled{true};
         bool m_rtShadowsEnabled{true};
         bool m_rtAoEnabled{true};
+        bool m_rtReflectionsEnabled{true};
+        bool m_rtGiEnabled{true};
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
+
+        static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;
+        struct alignas(16) RtInstanceGpuData {
+            glm::mat4 model{1.0f};
+            glm::mat4 normalMatrix{1.0f};
+            glm::vec4 baseColor{1.0f};
+            glm::vec4 material{0.0f}; // metallic, roughness, emissive, AO
+            VkDeviceAddress vertexAddress{0};
+            VkDeviceAddress indexAddress{0};
+            uint32_t vertexCount{0};
+            uint32_t indexCount{0};
+            uint32_t padding[2]{0, 0};
+        };
+        static_assert(sizeof(RtInstanceGpuData) == 192, "RT instance data must match std430 shader layout");
+        VkBuffer m_rtInstanceDataBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_rtInstanceDataAllocation{VK_NULL_HANDLE};
+        void* m_rtInstanceDataMapped{nullptr};
         bool m_iblEnabled{true};
         uint32_t m_width{1920};
         uint32_t m_height{1080};
@@ -362,12 +381,13 @@ namespace engine::renderer {
             glm::vec4 pointShadowParams{-1.0f, 0.1f, 25.0f, 0.005f};
             glm::vec4 bounceParams{1.0f, 0.80f, 0.60f, 1.0f};
             glm::vec4 bounceColor{0.85f, 0.80f, 0.72f, 1.0f};
-            glm::vec4 rtParams{0.0f}; // x = RT active, y = RT shadows, z = RT AO
+            glm::vec4 rtParams{0.0f}; // x = RT active, y = RT shadows, z = RT AO, w = RT reflections
             int numLights{0};
             int numOccluders{0};
             int frameIndex{0};
             int skyboxMode{1};
             OccluderData occluders[32]{};
+            glm::vec4 rtFeatureParams{0.0f}; // x = diffuse GI, y = RT instance count, z = GI intensity, w = reserved
         };
 
         VkBuffer m_sceneUboBuffer{VK_NULL_HANDLE};
