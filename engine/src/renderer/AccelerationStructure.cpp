@@ -132,13 +132,6 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
 
 bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances) {
     if (!m_ready) return false;
-    // The renderer serializes frames (queue idle / in-flight fence) before this
-    // method is reached again, so scratch from the preceding build is now safe to release.
-    if (m_hasBuiltTlas) {
-        for (auto& scratch : m_retainedScratch)
-            if (scratch.first) vmaDestroyBuffer(m_context->getAllocator(), scratch.first, scratch.second);
-        m_retainedScratch.clear();
-    }
     VkDevice dev = m_context->getDevice();
 
     std::vector<VkAccelerationStructureInstanceKHR> vkInstances;
@@ -241,8 +234,15 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
     dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(cmd, &dep);
-    m_hasBuiltTlas = true;
     return true;
+}
+
+void AccelerationStructure::releaseCompletedScratch() {
+    if (!m_context || !m_context->getAllocator()) return;
+    for (auto& scratch : m_retainedScratch) {
+        if (scratch.first) vmaDestroyBuffer(m_context->getAllocator(), scratch.first, scratch.second);
+    }
+    m_retainedScratch.clear();
 }
 
 void AccelerationStructure::cleanup() {
@@ -257,6 +257,5 @@ void AccelerationStructure::cleanup() {
         if (scratch.first) vmaDestroyBuffer(m_context->getAllocator(), scratch.first, scratch.second);
     m_retainedScratch.clear();
     m_ready = false;
-    m_hasBuiltTlas = false;
 }
 }
