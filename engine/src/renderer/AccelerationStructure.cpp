@@ -234,7 +234,6 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
     dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(cmd, &dep);
-    m_hasBuiltTlas = true;
     return true;
 }
 
@@ -258,6 +257,5 @@ void AccelerationStructure::cleanup() {
         if (scratch.first) vmaDestroyBuffer(m_context->getAllocator(), scratch.first, scratch.second);
     m_retainedScratch.clear();
     m_ready = false;
-    m_hasBuiltTlas = false;
 }
 }
