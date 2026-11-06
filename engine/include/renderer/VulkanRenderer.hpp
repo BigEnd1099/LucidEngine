@@ -126,6 +126,7 @@ namespace engine::renderer {
         bool m_rayTracingEnabled{true};
         bool m_rtShadowsEnabled{true};
         bool m_rtAoEnabled{true};
+        VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
         bool m_iblEnabled{true};
         uint32_t m_width{1920};
         uint32_t m_height{1080};
