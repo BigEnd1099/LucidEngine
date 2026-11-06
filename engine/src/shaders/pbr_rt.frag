@@ -3,6 +3,7 @@
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -67,10 +68,14 @@ struct RtInstanceData {
     uint vertexCount;
     uint indexCount;
     uvec2 padding;
+    uvec4 textureIndices;
 };
 layout(set = 0, binding = 12, std430) readonly buffer RtInstanceBuffer {
     RtInstanceData instances[];
 } rtScene;
+layout(set = 0, binding = 13) uniform sampler2D rtAlbedoTextures[256];
+layout(set = 0, binding = 14) uniform sampler2D rtNormalTextures[256];
+layout(set = 0, binding = 15) uniform sampler2D rtOrmTextures[256];
 
 struct RtVertex {
     vec3 position;
@@ -320,7 +325,7 @@ bool rayQueryOccluded(vec3 origin, vec3 direction, float maxDistance) {
 bool traceSceneSurface(
     vec3 origin, vec3 direction, float maxDistance,
     out RtInstanceData hitInstance, out vec3 hitPosition,
-    out vec3 hitNormal, out vec2 hitUv, out float hitDistance
+    out vec3 hitNormal, out vec2 hitUv, out vec4 hitTangent, out float hitDistance
 ) {
     rayQueryEXT query;
     rayQueryInitializeEXT(
@@ -361,16 +366,33 @@ bool traceSceneSurface(
     hitDistance = rayQueryGetIntersectionTEXT(query, true);
     hitPosition = origin + normalize(direction) * hitDistance;
     hitUv = v0.texCoord * bary.x + v1.texCoord * bary.y + v2.texCoord * bary.z;
+    vec4 localTangent = v0.tangent * bary.x + v1.tangent * bary.y + v2.tangent * bary.z;
+    vec3 worldTangent = mat3(hitInstance.model) * localTangent.xyz;
+    worldTangent = normalize(worldTangent - hitNormal * dot(worldTangent, hitNormal));
+    hitTangent = vec4(worldTangent, localTangent.w);
     if (dot(hitNormal, direction) > 0.0) hitNormal = -hitNormal;
     return true;
 }
 
-vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal) {
-    vec3 albedo = clamp(hit.baseColor.rgb, vec3(0.0), vec3(1.0));
-    float metallic = clamp(hit.material.x, 0.0, 1.0);
+vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent) {
+    vec4 albedoSample = texture(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv);
+    vec3 texLinear = pow(max(albedoSample.rgb, vec3(0.0)), vec3(2.2));
+    vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
+    vec3 orm = texture(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv).rgb;
+    float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
+    float roughness = clamp(hit.material.y * orm.g, 0.045, 1.0);
+
+    vec3 shadingNormal = normalize(hitNormal);
+    vec3 tangentNormal = texture(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv).xyz * 2.0 - 1.0;
+    if (dot(tangentNormal.xy, tangentNormal.xy) > 1e-4) {
+        vec3 T = normalize(hitTangent.xyz - dot(hitTangent.xyz, shadingNormal) * shadingNormal);
+        vec3 B = cross(shadingNormal, T) * (abs(hitTangent.w) > 0.5 ? sign(hitTangent.w) : 1.0);
+        shadingNormal = normalize(mat3(T, B, shadingNormal) * tangentNormal);
+    }
+    hitNormal = shadingNormal;
     float emissive = max(hit.material.z, 0.0);
     vec3 diffuseResponse = albedo * (1.0 - metallic) / PI;
-    vec3 radiance = albedo * emissive * 3.5 + albedo * 0.012;
+    vec3 radiance = albedo * emissive * 3.5 + albedo * 0.012 * (1.0 - roughness * 0.25);
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float sunNdotL = max(dot(hitNormal, sunDir), 0.0);
@@ -407,6 +429,37 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal) {
     return sanitizeHDR(radiance);
 }
 
+vec3 traceRtSecondaryBounce(RtInstanceData firstHit, vec3 firstPosition, vec3 firstNormal,
+                               vec2 firstUv, float noise) {
+    vec3 firstAlbedo = firstHit.baseColor.rgb *
+        pow(max(texture(rtAlbedoTextures[nonuniformEXT(firstHit.textureIndices.x)], firstUv).rgb, vec3(0.0)), vec3(2.2));
+    vec3 firstOrm = texture(rtOrmTextures[nonuniformEXT(firstHit.textureIndices.z)], firstUv).rgb;
+    float firstMetallic = clamp(firstHit.material.x * firstOrm.b, 0.0, 1.0);
+
+    vec3 up = abs(firstNormal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, firstNormal));
+    vec3 bitangent = cross(firstNormal, tangent);
+    float phi = noise * 2.0 * PI;
+    const float radial = 0.70710678;
+    vec3 direction = normalize(tangent * (cos(phi) * radial) +
+                               bitangent * (sin(phi) * radial) +
+                               firstNormal * radial);
+
+    RtInstanceData secondHit;
+    vec3 secondPosition, secondNormal;
+    vec2 secondUv;
+    vec4 secondTangent;
+    float secondDistance;
+    if (!traceSceneSurface(firstPosition + firstNormal * 0.014, direction, 20.0,
+                           secondHit, secondPosition, secondNormal, secondUv,
+                           secondTangent, secondDistance)) {
+        return vec3(0.0);
+    }
+    // One additional diffuse segment; throughput is the first hit's Lambertian albedo.
+    return sanitizeHDR(firstAlbedo * (1.0 - firstMetallic) *
+                      shadeRtHit(secondHit, secondPosition, secondNormal, secondUv, secondTangent));
+}
+
 vec3 traceRtReflection(vec3 worldPosition, vec3 normal, vec3 viewDirection,
                        float roughness, vec3 F0, float ao, float noise) {
     vec3 idealDirection = normalize(reflect(-viewDirection, normal));
@@ -422,10 +475,12 @@ vec3 traceRtReflection(vec3 worldPosition, vec3 normal, vec3 viewDirection,
         RtInstanceData hit;
         vec3 hitPosition, hitNormal;
         vec2 hitUv;
+        vec4 hitTangent;
         float hitDistance;
         if (traceSceneSurface(worldPosition + normal * 0.012, direction, 10000.0,
-                              hit, hitPosition, hitNormal, hitUv, hitDistance)) {
-            accumulated += shadeRtHit(hit, hitPosition, hitNormal);
+                              hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance)) {
+            accumulated += shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent);
+            accumulated += 0.35 * traceRtSecondaryBounce(hit, hitPosition, hitNormal, hitUv, noise + float(i) * 0.37);
         } else if ((ubo.skyboxMode & 2) != 0) {
             accumulated += sanitizeHDR(textureLod(prefilterMap, direction, roughness * MAX_REFLECTION_LOD).rgb)
                            * max(ubo.ambientColor.w, 0.0);
@@ -451,10 +506,12 @@ vec3 traceRtDiffuseBounce(vec3 worldPosition, vec3 normal, vec3 albedo,
         RtInstanceData hit;
         vec3 hitPosition, hitNormal;
         vec2 hitUv;
+        vec4 hitTangent;
         float hitDistance;
         if (traceSceneSurface(worldPosition + normal * 0.012, direction, 20.0,
-                              hit, hitPosition, hitNormal, hitUv, hitDistance)) {
-            incoming += shadeRtHit(hit, hitPosition, hitNormal);
+                              hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance)) {
+            incoming += shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent);
+            incoming += 0.35 * traceRtSecondaryBounce(hit, hitPosition, hitNormal, hitUv, noise + float(i) * 0.61);
         }
     }
     incoming /= float(SAMPLE_COUNT);
