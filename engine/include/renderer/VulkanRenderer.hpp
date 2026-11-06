@@ -132,6 +132,7 @@ namespace engine::renderer {
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
         static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;
+        static constexpr uint32_t RT_MATERIAL_TEXTURE_COUNT = 256;
         struct alignas(16) RtInstanceGpuData {
             glm::mat4 model{1.0f};
             glm::mat4 normalMatrix{1.0f};
@@ -142,8 +143,9 @@ namespace engine::renderer {
             uint32_t vertexCount{0};
             uint32_t indexCount{0};
             uint32_t padding[2]{0, 0};
+            glm::uvec4 textureIndices{0}; // albedo, normal, ORM, reserved; 0 = fallback texture
         };
-        static_assert(sizeof(RtInstanceGpuData) == 192, "RT instance data must match std430 shader layout");
+        static_assert(sizeof(RtInstanceGpuData) == 208, "RT instance data must match std430 shader layout");
         VkBuffer m_rtInstanceDataBuffer{VK_NULL_HANDLE};
         VmaAllocation m_rtInstanceDataAllocation{VK_NULL_HANDLE};
         void* m_rtInstanceDataMapped{nullptr};
@@ -400,6 +402,8 @@ namespace engine::renderer {
         std::unordered_map<uint32_t, VkDescriptorSet> m_materialDescriptorSets;
         VkDescriptorSet getOrCreateMaterialDescriptorSet(uint32_t materialId, core::AssetManager* assetManager);
         void updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet);
+        void updateRayTracingTextureDescriptors(core::AssetManager* assetManager);
+        uint32_t m_rtTextureDescriptorCount{UINT32_MAX};
 
         VkCommandBuffer m_commandBuffer{VK_NULL_HANDLE};
 
