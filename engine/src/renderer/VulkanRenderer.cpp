@@ -1131,7 +1131,7 @@ namespace engine::renderer {
                 m_rtAoEnabled ? 1.0f : 0.0f,
                 m_rtReflectionsEnabled ? 1.0f : 0.0f
             );
-            ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, 1.0f, 0.0f);
+            ubo.rtFeatureParams = glm::vec4(m_rtGiEnabled ? 1.0f : 0.0f, 0.0f, m_rtGiIntensity, 0.0f);
             ubo.frameIndex = static_cast<int>(m_frameCounter++);
             // Bit 0 controls skybox rendering metadata; bit 1 independently
             // controls environment lighting (diffuse IBL + specular reflections).
