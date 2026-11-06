@@ -247,7 +247,8 @@ namespace engine::renderer {
             supportedFeatures12.bufferDeviceAddress &&
             supportedAS.accelerationStructure &&
             supportedRayQuery.rayQuery &&
-            supportedFeatures2.features.shaderInt64;
+            supportedFeatures2.features.shaderInt64 &&
+            supportedFeatures12.scalarBlockLayout;
 
         float queuePriority = 1.0f;
         VkDeviceQueueCreateInfo queueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
@@ -267,6 +268,7 @@ namespace engine::renderer {
         features12.descriptorBindingPartiallyBound = supportedFeatures12.descriptorBindingPartiallyBound;
         features12.descriptorBindingVariableDescriptorCount = supportedFeatures12.descriptorBindingVariableDescriptorCount;
         features12.bufferDeviceAddress = supportedFeatures12.bufferDeviceAddress;
+        features12.scalarBlockLayout = supportedFeatures12.scalarBlockLayout;
         features12.pNext = m_rayTracingSupported ? &asFeatures : nullptr;
 
         VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
