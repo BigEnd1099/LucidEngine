@@ -35,6 +35,7 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     vec4 pointShadowParams;
     vec4 bounceParams; // x = enabled, y = intensity, z = groundAlbedo, w = softShadows (1.0 = ON, 0.0 = OFF)
     vec4 bounceColor;
+    vec4 rtParams; // x = RT active, y = RT shadows, z = RT AO
     int numLights;
     int numOccluders;
     int frameIndex;
@@ -404,7 +405,11 @@ void main() {
 
     float totalSceneLight = sunIntensity + localLightEnergy * 0.25;
     float lightDrivenSkyWeight = smoothstep(0.0, 0.35, totalSceneLight);
-    float iblIntensity = max(ubo.ambientColor.w, 0.0) * ((ubo.skyboxMode > 0) ? 1.0 : lightDrivenSkyWeight);
+    // Local lights must never enable environment lighting. Skybox visibility and
+    // IBL are independent switches (bit 1 in skyboxMode).
+    float iblIntensity = ((ubo.skyboxMode & 2) != 0)
+        ? max(ubo.ambientColor.w, 0.0)
+        : 0.0;
 
     vec3 ambientLighting = vec3(0.0);
     if (iblIntensity > 0.0001) {
