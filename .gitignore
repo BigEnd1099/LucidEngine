@@ -32,6 +32,7 @@ crash.log
 err.log
 out.log
 electron.log
+tree.md
 
 # Environment and OS files
 .env*
