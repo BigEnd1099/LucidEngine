@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <cstddef>
 
 namespace engine::renderer {
     struct Vertex {
