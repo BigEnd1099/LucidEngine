@@ -1,5 +1,6 @@
 #pragma once
 #include "renderer/VulkanContext.hpp"
+#include "renderer/AccelerationStructure.hpp"
 #include "ecs/Registry.hpp"
 #include <vector>
 #include <string>
@@ -64,6 +65,10 @@ namespace engine::renderer {
         void setSkyboxEnabled(bool enabled) { m_skyboxEnabled = enabled; }
         bool isSkyboxEnabled() const { return m_skyboxEnabled; }
 
+        void setRayTracingEnabled(bool enabled) { m_rayTracingEnabled = enabled; }
+        bool isRayTracingEnabled() const { return m_rayTracingEnabled && m_context && m_context->isRayTracingSupported(); }
+        VkAccelerationStructureKHR getRayTracingTLAS() const { return m_accelerationStructure.getTLAS(); }
+
         void setFogEnabled(bool enabled) { m_fogEnabled = enabled; }
         bool isFogEnabled() const { return m_fogEnabled; }
 
@@ -114,6 +119,8 @@ namespace engine::renderer {
 #endif
 
         VulkanContext* m_context{nullptr};
+        AccelerationStructure m_accelerationStructure;
+        bool m_rayTracingEnabled{true};
         uint32_t m_width{1920};
         uint32_t m_height{1080};
         uint32_t m_baseWidth{1920};

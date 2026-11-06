@@ -51,6 +51,7 @@ namespace engine::renderer {
 
     VulkanRenderer::VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height)
         : m_context(context), m_width(width), m_height(height), m_baseWidth(width), m_baseHeight(height) {
+        m_accelerationStructure.init(m_context);
         createOffscreenTarget();
         createCommandBuffer();
         createShadowResources();
@@ -88,6 +89,7 @@ namespace engine::renderer {
             VkDevice dev = m_context->getDevice();
             vkDeviceWaitIdle(dev);
 
+            m_accelerationStructure.cleanup();
             cleanupCaptureResources();
             cleanupParticlePipeline();
             cleanupSkyboxPipeline();
@@ -1064,9 +1066,11 @@ namespace engine::renderer {
 
         // Budowa listy rysowania PBR (wspólna dla Depth Prepass oraz Main PBR Pass)
         std::vector<DrawItem> drawItems;
+        std::vector<AccelerationStructure::Instance> rtInstances;
         if (assetManager) {
             auto meshEntities = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
             drawItems.reserve(64);
+            rtInstances.reserve(64);
             for (auto entity : meshEntities) {
                 const auto& transform = meshEntities.get<ecs::TransformComponent>(entity);
                 const auto& meshComp  = meshEntities.get<ecs::MeshComponent>(entity);
@@ -1155,6 +1159,18 @@ namespace engine::renderer {
                 item.pcs.normalCol2 = glm::vec4(normalMat[2], emissive);
                 item.pcs.baseColorFactor = glm::vec4(glm::vec3(baseColor), 1.0f);
                 drawItems.push_back(item);
+                if (isRayTracingEnabled()) {
+                    if (m_accelerationStructure.ensureBLAS(m_commandBuffer, meshComp.meshId, *meshAsset)) {
+                        AccelerationStructure::Instance instance{};
+                        instance.meshId = meshComp.meshId;
+                        instance.customIndex = static_cast<uint32_t>(entity);
+                        instance.transform = model;
+                        rtInstances.push_back(instance);
+                    }
+                }
+            }
+            if (isRayTracingEnabled() && !rtInstances.empty()) {
+                m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances);
             }
         }
 

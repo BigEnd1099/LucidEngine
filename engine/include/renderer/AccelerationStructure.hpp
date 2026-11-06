@@ -1,19 +1,57 @@
 #pragma once
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
+#include <cstdint>
+#include <unordered_map>
+#include <vector>
+#include <utility>
 #include "renderer/VulkanContext.hpp"
+
+namespace engine::core { struct MeshAsset; }
 
 namespace engine::renderer {
     class AccelerationStructure {
     public:
+        struct Instance {
+            uint32_t meshId{0};
+            uint32_t customIndex{0};
+            glm::mat4 transform{1.0f};
+        };
+
         void init(VulkanContext* context);
         void cleanup();
-        void buildBLAS(VkCommandBuffer cmd, VkBuffer vertexBuffer, uint32_t vertexCount, VkBuffer indexBuffer, uint32_t indexCount);
-        void buildTLAS(VkCommandBuffer cmd);
-        
+        bool isReady() const { return m_ready; }
+        VkAccelerationStructureKHR getTLAS() const { return m_tlas; }
+
+        bool ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh);
+        bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances);
+
     private:
-        VulkanContext* m_context;
-        VkAccelerationStructureKHR m_tlas{VK_NULL_HANDLE};
-        VkBuffer m_tlasBuffer{VK_NULL_HANDLE};
-        // VMA allocations would be here for TLAS and BLAS buffers
+        struct AccelResource {
+            VkAccelerationStructureKHR handle{VK_NULL_HANDLE};
+            VkBuffer buffer{VK_NULL_HANDLE};
+            VmaAllocation allocation{VK_NULL_HANDLE};
+            VkDeviceAddress address{0};
+        };
+        struct BlasRecord { AccelResource resource; };
+
+        bool createAccelerationBuffer(VkDeviceSize size, VkBuffer& buffer, VmaAllocation& allocation);
+        VkDeviceAddress getBufferAddress(VkBuffer buffer) const;
+        void destroyResource(AccelResource& resource);
+
+        VulkanContext* m_context{nullptr};
+        bool m_ready{false};
+        bool m_hasBuiltTlas{false};
+        PFN_vkCreateAccelerationStructureKHR m_createAS{nullptr};
+        PFN_vkDestroyAccelerationStructureKHR m_destroyAS{nullptr};
+        PFN_vkGetAccelerationStructureBuildSizesKHR m_getBuildSizes{nullptr};
+        PFN_vkCmdBuildAccelerationStructuresKHR m_cmdBuildAS{nullptr};
+        PFN_vkGetAccelerationStructureDeviceAddressKHR m_getASAddress{nullptr};
+        std::unordered_map<uint32_t, BlasRecord> m_blas;
+        AccelResource m_tlas;
+        VkBuffer m_instanceBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_instanceAllocation{VK_NULL_HANDLE};
+        std::vector<std::pair<VkBuffer, VmaAllocation>> m_retainedScratch;
     };
 }

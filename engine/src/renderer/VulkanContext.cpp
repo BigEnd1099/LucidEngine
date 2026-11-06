@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <limits>
+#include <cstring>
 
 namespace engine::renderer {
 
@@ -212,46 +213,67 @@ namespace engine::renderer {
         VkPhysicalDeviceProperties devProps{};
         vkGetPhysicalDeviceProperties(m_physicalDevice, &devProps);
 
-        VkPhysicalDeviceVulkan12Features supportedFeatures12{};
-        supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-
-        VkPhysicalDeviceVulkan13Features supportedFeatures13{};
-        supportedFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        // Query core 1.2/1.3 and optional KHR ray-tracing features as one pNext chain.
+        VkPhysicalDeviceRayQueryFeaturesKHR supportedRayQuery{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR supportedAS{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+        supportedAS.pNext = &supportedRayQuery;
+        VkPhysicalDeviceVulkan12Features supportedFeatures12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        supportedFeatures12.pNext = &supportedAS;
+        VkPhysicalDeviceVulkan13Features supportedFeatures13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
         supportedFeatures13.pNext = &supportedFeatures12;
-
-        VkPhysicalDeviceFeatures2 supportedFeatures2{};
-        supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        VkPhysicalDeviceFeatures2 supportedFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         supportedFeatures2.pNext = &supportedFeatures13;
         vkGetPhysicalDeviceFeatures2(m_physicalDevice, &supportedFeatures2);
 
         if (!supportedFeatures13.dynamicRendering || !supportedFeatures13.synchronization2) {
             core::Logger::error("GPU does not support required Vulkan 1.3 features: dynamicRendering and synchronization2!");
-            throw std::runtime_error("failed to find Vulkan 1.3 dynamicRendering/synchronization2 support!");
+            throw std::runtime_error("Vulkan 1.3 dynamicRendering/synchronization2 support is required.");
         }
 
+        // The extension trio is optional: rasterization remains available on unsupported GPUs.
+        uint32_t extCount = 0;
+        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, nullptr);
+        std::vector<VkExtensionProperties> availableExts(extCount);
+        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, availableExts.data());
+        auto hasExt = [&availableExts](const char* name) {
+            return std::any_of(availableExts.begin(), availableExts.end(),
+                [name](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; });
+        };
+        const bool hasRtExtensions =
+            hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+            hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+            hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        m_rayTracingSupported = hasRtExtensions &&
+            supportedFeatures12.bufferDeviceAddress &&
+            supportedAS.accelerationStructure &&
+            supportedRayQuery.rayQuery;
+
         float queuePriority = 1.0f;
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        VkDeviceQueueCreateInfo queueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
         queueCreateInfo.queueFamilyIndex = m_graphicsQueueFamily;
         queueCreateInfo.queueCount = 1;
         queueCreateInfo.pQueuePriorities = &queuePriority;
 
-        VkPhysicalDeviceVulkan12Features features12{};
-        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+        rayQueryFeatures.rayQuery = m_rayTracingSupported ? VK_TRUE : VK_FALSE;
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+        asFeatures.accelerationStructure = m_rayTracingSupported ? VK_TRUE : VK_FALSE;
+        asFeatures.pNext = m_rayTracingSupported ? &rayQueryFeatures : nullptr;
+
+        VkPhysicalDeviceVulkan12Features features12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
         features12.descriptorIndexing = supportedFeatures12.descriptorIndexing;
         features12.runtimeDescriptorArray = supportedFeatures12.runtimeDescriptorArray;
         features12.descriptorBindingPartiallyBound = supportedFeatures12.descriptorBindingPartiallyBound;
         features12.descriptorBindingVariableDescriptorCount = supportedFeatures12.descriptorBindingVariableDescriptorCount;
         features12.bufferDeviceAddress = supportedFeatures12.bufferDeviceAddress;
+        features12.pNext = m_rayTracingSupported ? &asFeatures : nullptr;
 
-        VkPhysicalDeviceVulkan13Features features13{};
-        features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
         features13.dynamicRendering = VK_TRUE;
         features13.synchronization2 = VK_TRUE;
         features13.pNext = &features12;
 
-        VkPhysicalDeviceFeatures2 features2{};
-        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         features2.pNext = &features13;
         if (supportedFeatures2.features.samplerAnisotropy) {
             features2.features.samplerAnisotropy = VK_TRUE;
@@ -260,17 +282,21 @@ namespace engine::renderer {
             m_maxSamplerAnisotropy = 1.0f;
         }
 
-        VkDeviceCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        VkDeviceCreateInfo createInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
         createInfo.pNext = &features2;
         createInfo.pQueueCreateInfos = &queueCreateInfo;
         createInfo.queueCreateInfoCount = 1;
 
         std::vector<const char*> deviceExtensions;
-        if (!m_headless) {
-            deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        if (!m_headless) deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        if (m_rayTracingSupported) {
+            deviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+            deviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+            deviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+            core::Logger::info("Hardware ray tracing enabled (KHR acceleration structure + ray query).");
+        } else {
+            core::Logger::info("Hardware ray tracing unavailable; using rasterization fallback.");
         }
-
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 

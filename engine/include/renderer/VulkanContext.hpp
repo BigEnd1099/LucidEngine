@@ -37,6 +37,8 @@ namespace engine::renderer {
         VkCommandPool getCommandPool() const { return m_commandPool; }
         bool isHeadless() const { return m_headless; }
         float getMaxSamplerAnisotropy() const { return m_maxSamplerAnisotropy; }
+        bool isRayTracingSupported() const { return m_rayTracingSupported; }
+        bool isRayQuerySupported() const { return m_rayTracingSupported; }
 
 #ifdef USE_GLFW
         GLFWwindow* getWindow() const { return m_window; }
@@ -61,6 +63,7 @@ namespace engine::renderer {
 #endif
 
         bool m_headless{true};
+        bool m_rayTracingSupported{false};
         bool m_vsyncEnabled{true};
         float m_maxSamplerAnisotropy{1.0f};
         VkInstance m_instance{VK_NULL_HANDLE};

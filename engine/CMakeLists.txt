@@ -134,6 +134,7 @@ set(SHADER_FILES
     src/shaders/bloom_upsample.frag
     src/shaders/gtao.frag
     src/shaders/gtao_blur.frag
+    src/shaders/gi_trace.comp
     src/shaders/composite.frag
     src/shaders/fxaa.frag
     src/shaders/skybox.frag
@@ -145,7 +146,7 @@ foreach(SHADER ${SHADER_FILES})
     set(SPV_FILE "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.spv")
     add_custom_command(
         OUTPUT ${SPV_FILE}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${SPV_FILE}
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.3 ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${SPV_FILE}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}
         COMMENT "Compiling ${FILE_NAME} to SPIR-V"
     )
