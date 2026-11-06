@@ -1491,6 +1491,11 @@ namespace engine::renderer {
                         ImGui::BeginDisabled(!m_rayTracingEnabled);
                         ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtShadowsEnabled);
                         ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtAoEnabled);
+                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtReflectionsEnabled);
+                        ImGui::Checkbox("Ray-Traced Diffuse GI (One Bounce)", &m_rtGiEnabled);
+                        ImGui::BeginDisabled(!m_rtGiEnabled);
+                        ImGui::SliderFloat("RT GI Intensity", &m_rtGiIntensity, 0.0f, 3.0f, "%.2f");
+                        ImGui::EndDisabled();
                         ImGui::EndDisabled();
                         ImGui::EndDisabled();
                     }
