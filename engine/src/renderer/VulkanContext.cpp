@@ -246,7 +246,8 @@ namespace engine::renderer {
         m_rayTracingSupported = hasRtExtensions &&
             supportedFeatures12.bufferDeviceAddress &&
             supportedAS.accelerationStructure &&
-            supportedRayQuery.rayQuery;
+            supportedRayQuery.rayQuery &&
+            supportedFeatures2.features.shaderInt64;
 
         float queuePriority = 1.0f;
         VkDeviceQueueCreateInfo queueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
@@ -281,6 +282,10 @@ namespace engine::renderer {
         } else {
             m_maxSamplerAnisotropy = 1.0f;
         }
+        // Buffer-reference device addresses are 64-bit shader values.
+        // Disable the RT path on devices without shaderInt64 rather than
+        // creating a pipeline whose required shader feature was not enabled.
+        features2.features.shaderInt64 = m_rayTracingSupported ? VK_TRUE : VK_FALSE;
 
         VkDeviceCreateInfo createInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
         createInfo.pNext = &features2;
