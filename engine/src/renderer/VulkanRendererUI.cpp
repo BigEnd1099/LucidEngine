@@ -1495,6 +1495,18 @@ namespace engine::renderer {
                         ImGui::EndDisabled();
                     }
 
+                    if (ImGui::CollapsingHeader("Hardware Ray Tracing (Vulkan Ray Query)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        const bool rtSupported = m_context && m_context->isRayTracingSupported();
+                        if (!rtSupported) ImGui::TextDisabled("GPU/driver does not expose required Vulkan KHR ray-query features.");
+                        ImGui::BeginDisabled(!rtSupported);
+                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rayTracingEnabled);
+                        ImGui::BeginDisabled(!m_rayTracingEnabled);
+                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtShadowsEnabled);
+                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtAoEnabled);
+                        ImGui::EndDisabled();
+                        ImGui::EndDisabled();
+                    }
+
                     // Zakładka World & Graphics Settings (wszystkie nowe systemy Vulkan 1.3)
                     if (ImGui::CollapsingHeader("GPU Cubemap IBL & Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
                         const char* hdriItems[] = {
