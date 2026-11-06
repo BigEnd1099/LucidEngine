@@ -342,6 +342,15 @@ namespace engine::renderer {
             rtInstanceBinding.descriptorCount = 1;
             rtInstanceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             bindings.push_back(rtInstanceBinding);
+
+            for (uint32_t binding = 13; binding <= 15; ++binding) {
+                VkDescriptorSetLayoutBinding textureArrayBinding{};
+                textureArrayBinding.binding = binding;
+                textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                textureArrayBinding.descriptorCount = RT_MATERIAL_TEXTURE_COUNT;
+                textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                bindings.push_back(textureArrayBinding);
+            }
         }
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -351,7 +360,7 @@ namespace engine::renderer {
         vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &m_descriptorSetLayout);
 
         std::vector<VkDescriptorPoolSize> poolSizes = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 52000 },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 64 }
         };
         if (m_context->isRayTracingSupported()) {
@@ -437,6 +446,59 @@ namespace engine::renderer {
 
         const VkWriteDescriptorSet rtWrites[] = { write, rtDataWrite };
         vkUpdateDescriptorSets(m_context->getDevice(), 2, rtWrites, 0, nullptr);
+    }
+
+    void VulkanRenderer::updateRayTracingTextureDescriptors(core::AssetManager* assetManager) {
+        if (!m_context || !m_context->isRayTracingSupported() || !m_descriptorSet) return;
+        const uint32_t textureCount = assetManager ? assetManager->getTextureCount() : 0;
+        if (textureCount == m_rtTextureDescriptorCount) return;
+
+        std::array<VkDescriptorImageInfo, RT_MATERIAL_TEXTURE_COUNT> albedoInfos{};
+        std::array<VkDescriptorImageInfo, RT_MATERIAL_TEXTURE_COUNT> normalInfos{};
+        std::array<VkDescriptorImageInfo, RT_MATERIAL_TEXTURE_COUNT> ormInfos{};
+        for (uint32_t i = 0; i < RT_MATERIAL_TEXTURE_COUNT; ++i) {
+            albedoInfos[i] = { m_defaultTextureSampler, m_defaultAlbedoView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+            normalInfos[i] = { m_defaultTextureSampler, m_defaultNormalView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+            ormInfos[i] = { m_defaultTextureSampler, m_defaultOrmView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        }
+
+        if (assetManager) {
+            const uint32_t lastTextureId = std::min(textureCount, RT_MATERIAL_TEXTURE_COUNT - 1);
+            for (uint32_t id = 1; id <= lastTextureId; ++id) {
+                if (auto* texture = assetManager->getTexture(id)) {
+                    if (texture->imageView != VK_NULL_HANDLE) {
+                        const VkDescriptorImageInfo info{ m_defaultTextureSampler, texture->imageView,
+                                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+                        // The same glTF image can serve as albedo, normal, or ORM.
+                        albedoInfos[id] = info;
+                        normalInfos[id] = info;
+                        ormInfos[id] = info;
+                    }
+                }
+            }
+        }
+
+        auto writeTextureArrays = [&](VkDescriptorSet set) {
+            if (set == VK_NULL_HANDLE) return;
+            VkWriteDescriptorSet writes[3]{};
+            const VkDescriptorImageInfo* arrays[3] = { albedoInfos.data(), normalInfos.data(), ormInfos.data() };
+            for (uint32_t i = 0; i < 3; ++i) {
+                writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[i].dstSet = set;
+                writes[i].dstBinding = 13 + i;
+                writes[i].descriptorCount = RT_MATERIAL_TEXTURE_COUNT;
+                writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writes[i].pImageInfo = arrays[i];
+            }
+            vkUpdateDescriptorSets(m_context->getDevice(), 3, writes, 0, nullptr);
+        };
+
+        writeTextureArrays(m_descriptorSet);
+        for (const auto& entry : m_materialDescriptorSets) writeTextureArrays(entry.second);
+        if (textureCount >= RT_MATERIAL_TEXTURE_COUNT) {
+            core::Logger::warn("RT material texture table reached 256 entries; texture IDs above 255 use fallback maps.");
+        }
+        m_rtTextureDescriptorCount = textureCount;
     }
 
     VkDescriptorSet VulkanRenderer::getOrCreateMaterialDescriptorSet(uint32_t materialId, core::AssetManager* assetManager) {
@@ -525,6 +587,8 @@ namespace engine::renderer {
         updateRayTracingDescriptorSet(newSet);
 
         m_materialDescriptorSets[materialId] = newSet;
+        m_rtTextureDescriptorCount = UINT32_MAX;
+        updateRayTracingTextureDescriptors(assetManager);
         return newSet;
     }
 
@@ -922,6 +986,7 @@ namespace engine::renderer {
         // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
         // be released safely, before any new build commands are recorded.
         m_accelerationStructure.releaseCompletedScratch();
+        updateRayTracingTextureDescriptors(assetManager);
 
         vkResetCommandBuffer(m_commandBuffer, 0);
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -1299,6 +1364,14 @@ namespace engine::renderer {
                             gpu.indexAddress = indexAddress;
                             gpu.vertexCount = meshAsset->vertexCount;
                             gpu.indexCount = meshAsset->indexCount;
+                            if (auto* rtMaterial = assetManager->getMaterial(meshAsset->materialId)) {
+                                gpu.textureIndices = glm::uvec4(
+                                    rtMaterial->albedoTextureId < RT_MATERIAL_TEXTURE_COUNT ? rtMaterial->albedoTextureId : 0u,
+                                    rtMaterial->normalTextureId < RT_MATERIAL_TEXTURE_COUNT ? rtMaterial->normalTextureId : 0u,
+                                    rtMaterial->ormTextureId < RT_MATERIAL_TEXTURE_COUNT ? rtMaterial->ormTextureId : 0u,
+                                    0u
+                                );
+                            }
                             rtGpuInstances.push_back(gpu);
                         }
                     }
