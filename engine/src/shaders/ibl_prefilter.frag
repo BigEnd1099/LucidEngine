@@ -52,7 +52,7 @@ vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness) {
 }
 
 float distributionGGX(float NdotH, float roughness) {
-    float a = max(roughness * roughness, 0.002);
+    float a = max(roughness * roughness, 1e-5);
     float a2 = a * a;
     float denom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
     return a2 / max(PI * denom * denom, 1e-12);

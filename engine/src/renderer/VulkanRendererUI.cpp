@@ -1635,12 +1635,32 @@ namespace engine::renderer {
                         if (ImGui::Checkbox("HDRI Environment Enabled (Skybox + IBL)", &hdriEnvironmentEnabled)) {
                             m_skyboxEnabled = hdriEnvironmentEnabled;
                             m_iblEnabled = hdriEnvironmentEnabled;
+                            if (engine) {
+                                auto env = engine->getEnvironmentSettings();
+                                env.skyboxEnabled = hdriEnvironmentEnabled;
+                                env.iblEnabled = hdriEnvironmentEnabled;
+                                engine->setEnvironmentSettings(env);
+                            }
                         }
-                        ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled);
-                        ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled);
+                        if (ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled)) {
+                            if (engine) {
+                                auto env = engine->getEnvironmentSettings();
+                                env.skyboxEnabled = m_skyboxEnabled;
+                                engine->setEnvironmentSettings(env);
+                            }
+                        }
+                        if (ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled)) {
+                            if (engine) {
+                                auto env = engine->getEnvironmentSettings();
+                                env.iblEnabled = m_iblEnabled;
+                                engine->setEnvironmentSettings(env);
+                            }
+                        }
 
                         if (engine) {
                             auto env = engine->getEnvironmentSettings();
+                            env.skyboxEnabled = m_skyboxEnabled;
+                            env.iblEnabled = m_iblEnabled;
                             bool changed = false;
 
                             // Find Directional Light (Sun) entity in the scene

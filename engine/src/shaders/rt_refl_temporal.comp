@@ -96,12 +96,12 @@ void main() {
         m1 /= max(count, 1.0);
         m2 /= max(count, 1.0);
         vec4 sigma = sqrt(max(vec4(0.0), m2 - m1 * m1));
-        vec4 clampMin = max(boxMin, m1 - 1.5 * sigma) - vec4(0.02);
-        vec4 clampMax = min(boxMax, m1 + 1.5 * sigma) + vec4(0.02);
+        vec4 clampMin = min(boxMin, m1 - 2.5 * sigma) - vec4(0.05);
+        vec4 clampMax = max(boxMax, m1 + 2.5 * sigma) + vec4(0.05);
         hist = clamp(hist, clampMin, clampMax);
 
         // Firefly suppression on specular hits
-        raw.rgb = min(raw.rgb, hist.rgb * 4.0 + vec3(2.5));
+        raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(100.0));
         // Accumulation factor (keep ~85% history for smooth specular without excessive lag)
         float alpha = (pc.f.z > 0.5) ? 0.15 : 1.0;
         result = mix(hist, raw, alpha);

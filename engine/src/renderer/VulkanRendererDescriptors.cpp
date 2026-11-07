@@ -63,7 +63,7 @@ namespace engine::renderer {
             bindings[i].descriptorCount = 1;
             bindings[i].descriptorType = (i == 1) ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             bindings[i].stageFlags = (i == 1) ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT)
-                                             : VK_SHADER_STAGE_FRAGMENT_BIT;
+                                             : (VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
         }
         if (m_context->isRayTracingSupported()) {
             VkDescriptorSetLayoutBinding rtBinding{};

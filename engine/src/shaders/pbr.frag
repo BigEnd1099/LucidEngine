@@ -103,14 +103,14 @@ vec3 computeNormal(vec3 N) {
 
 // Heitz 2014 Height-Correlated Smith GGX
 float distributionGGX(float NdotH, float alpha) {
-    float a = max(alpha, 0.002);
+    float a = max(alpha, 1e-5);
     float a2 = a * a;
     float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
     return a2 / max(PI * d * d, 1e-12);
 }
 
 float visibilitySmithGGXCorrelated(float NdotV, float NdotL, float alpha) {
-    float a = max(alpha, 0.002);
+    float a = max(alpha, 1e-5);
     float a2 = a * a;
     float gv = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
     float gl = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);

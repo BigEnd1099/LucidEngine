@@ -208,7 +208,7 @@ vec3 sampleRtSkyRadiance(vec3 dir) {
         return vec3(0.0);
     }
     // Atmospheric analytical sky matching skybox.frag
-    vec3 sky = textureLod(envCubemap, dir, 0.0).rgb * max(ubo.ambientColor.w, 0.15);
+    vec3 sky = textureLod(envCubemap, dir, 0.0).rgb * max(ubo.ambientColor.w, 0.0);
     if (ubo.sunDirection.w > 0.05) {
         vec3 sunDir = normalize(ubo.sunDirection.xyz);
         float cosTheta = dot(normalize(dir), sunDir);
@@ -248,7 +248,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     vec3 radiance = albedo * (emissive * 6.0) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - roughness * 0.25)) : vec3(0.0));
 
     // Microfacet GGX parameters
-    float a = max(roughness * roughness, 0.002);
+    float a = max(roughness * roughness, 1e-5);
     float a2 = a * a;
     float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
 
@@ -274,7 +274,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     }
 
     int numActiveLights = min(ubo.numLights, 8);
-    if (numActiveLights <= 2) {
+
         for (int i = 0; i < numActiveLights; ++i) {
             vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
             float distanceToLight = length(toLight);
@@ -313,82 +313,6 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
             radiance += (kd * diffuseResponse + spec) * ubo.lightsCol[i].rgb *
                         (intensity * 4.0 * attenuation * ndotl);
         }
-    } else {
-        // Importance-sampled light selection (Monte Carlo light sampling with weighted candidate)
-        float weights[8];
-        float totalWeight = 0.0;
-        for (int i = 0; i < numActiveLights; ++i) {
-            vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
-            float distanceToLight = length(toLight);
-            float range = max(ubo.lightsPos[i].w, 0.1);
-            float intensity = max(ubo.lightsCol[i].w, 0.0);
-            if (distanceToLight >= range || intensity <= 0.001) {
-                weights[i] = 0.0;
-                continue;
-            }
-            vec3 L = toLight / max(distanceToLight, 1e-4);
-            float ndotl = max(dot(hitNormal, L), 0.0);
-            float ratio = distanceToLight / range;
-            float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
-            float attenuation = window * window / (distanceToLight * distanceToLight + 1.0);
-            float w = intensity * attenuation * ndotl;
-            weights[i] = w;
-            totalWeight += w;
-        }
-
-        if (totalWeight > 1e-5) {
-            float xi = rand1() * totalWeight;
-            float cum = 0.0;
-            int chosen = 0;
-            for (int i = 0; i < numActiveLights; ++i) {
-                cum += weights[i];
-                if (xi <= cum) {
-                    chosen = i;
-                    break;
-                }
-            }
-
-            float prob = weights[chosen] / totalWeight;
-            if (prob > 1e-6) {
-                int i = chosen;
-                vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
-                float distanceToLight = length(toLight);
-                float range = max(ubo.lightsPos[i].w, 0.1);
-                float intensity = max(ubo.lightsCol[i].w, 0.0);
-                vec3 L = toLight / max(distanceToLight, 1e-4);
-                float ndotl = max(dot(hitNormal, L), 0.0);
-
-                float ratio = distanceToLight / range;
-                float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
-                float attenuation = window * window / (distanceToLight * distanceToLight + 1.0);
-                int type = int(round(ubo.lightsDir[i].w));
-                if (type == 1) {
-                    float cone = dot(-L, normalize(ubo.lightsDir[i].xyz));
-                    attenuation *= smoothstep(ubo.lightsParams[i].y, ubo.lightsParams[i].x, cone);
-                }
-
-                if (attenuation > 1e-5 &&
-                    !rayQueryOccluded(hitPosition + hitNormal * 0.008, L, max(distanceToLight - 0.02, 0.003))) {
-                    vec3 H = normalize(V + L);
-                    float NdotH = max(dot(hitNormal, H), 0.0);
-                    float VdotH = max(dot(V, H), 0.0);
-
-                    float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-                    float D = a2 / max(PI * dDenom * dDenom, 1e-12);
-                    float g1v = NdotV / (NdotV * (1.0 - k) + k);
-                    float g1l = ndotl / (ndotl * (1.0 - k) + k);
-                    float G = g1v * g1l;
-                    vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-
-                    vec3 spec = (D * G * F) / max(4.0 * NdotV * ndotl, 1e-4);
-                    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-                    vec3 contrib = (kd * diffuseResponse + spec) * ubo.lightsCol[i].rgb *
-                                   (intensity * 4.0 * attenuation * ndotl);
-                    radiance += contrib / prob;
-                }
-            }
-        }
-    }
 
     // Ambient / Environment lighting at hit point
     if ((ubo.skyboxMode & 2) != 0) {

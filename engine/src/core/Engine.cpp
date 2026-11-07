@@ -1628,6 +1628,9 @@ function update(entities, dt, input, contacts) {
         if (json.contains("hdriPath") && json["hdriPath"].is_string()) {
             if (m_renderer) m_renderer->loadEnvironmentHdriFile(json["hdriPath"].get<std::string>());
         }
+        if (json.contains("rtDebugMode")) {
+            if (m_renderer) m_renderer->setRtDebugMode(static_cast<renderer::RtDebugMode>(json["rtDebugMode"].get<int>()));
+        }
 
         if (json.contains("uiScale")) {
             setUiScale(json["uiScale"].get<float>());

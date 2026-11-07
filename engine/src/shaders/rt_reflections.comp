@@ -120,7 +120,10 @@ void main() {
                         if (conePass) {
                             if (!rayQueryOccluded(rayOrig, dir, max(0.001, tHit - 0.02))) {
                                 closestBulbDist = tHit;
-                                bulbRadiance = ubo.lightsCol[li].rgb * max(intensity * 12.0, 25.0);
+                                float distRatio = tHit / range;
+                                float window = clamp(1.0 - pow(distRatio, 4.0), 0.0, 1.0);
+                                float attenuation = (window * window) / (tHit * tHit * 0.25 + 1.0);
+                                bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0 * attenuation);
                                 hitBulb = true;
                             }
                         }
@@ -134,25 +137,9 @@ void main() {
         } else if (hitGeo) {
             accumulated += shadeRtHit(hit, hitPos, hitNorm, hitUv, hitTangent, dir);
         } else {
-            // Missed geometry & light bulbs: check sun disk & sky
-            bool hitSun = false;
-            if (ubo.sunDirection.w > 0.05) {
-                vec3 sunDir = normalize(ubo.sunDirection.xyz);
-                float sunCos = dot(dir, sunDir);
-                if (sunCos > 0.9993) {
-                    if (!rayQueryOccluded(rayOrig, sunDir, 10000.0)) {
-                        float sunDisk = smoothstep(0.9993, 0.9998, sunCos);
-                        accumulated += ubo.sunColor.rgb * (ubo.sunDirection.w * 35.0 * sunDisk);
-                        hitSun = true;
-                    }
-                }
-            }
-            if (!hitSun) {
-                if ((ubo.skyboxMode & 3) != 0) {
-                    accumulated += sampleRtSkyRadiance(dir);
-                } else {
-                    // Sky/HDRI disabled
-                }
+            // Missed geometry & light bulbs: sample sky radiance (includes sun disk + corona + HDRI cubemap)
+            if ((ubo.skyboxMode & 3) != 0) {
+                accumulated += sampleRtSkyRadiance(dir);
             }
         }
     }

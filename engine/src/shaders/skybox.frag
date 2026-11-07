@@ -44,7 +44,7 @@ void main() {
     vec4 worldTarget = ubo.invViewProj * vec4(ndc, 1.0, 1.0);
     vec3 rayDir = normalize(worldTarget.xyz / worldTarget.w - ubo.cameraPos.xyz);
 
-    vec3 skyHdr = textureLod(envCubemap, rayDir, 0.0).rgb * max(ubo.ambientColor.w, 0.15);
+    vec3 skyHdr = textureLod(envCubemap, rayDir, 0.0).rgb * max(ubo.ambientColor.w, 0.0);
 
     // Analityczna tarcza słoneczna oraz aureola Mie zsynchronizowana z kierunkiem słońca
     if (ubo.sunDirection.w > 0.05) {

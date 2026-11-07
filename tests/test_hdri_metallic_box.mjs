@@ -56,6 +56,9 @@ await new Promise((resolve, reject) => {
 console.log('Connected to Lucid Engine via WebSocket.\n');
 
 try {
+  // Reset scene to completely EMPTY
+  await callRpc('engine.resetScene', { preset: 'empty' });
+
   // Test 1: Query environment settings
   console.log('[Test 1] Querying initial environment settings...');
   const initialEnv = await callRpc('engine.getEnvironment');
@@ -69,6 +72,7 @@ try {
   console.log('\n[Test 2] Disabling HDRI via engine.setEnvironment({ hdriEnabled: false })...');
   await callRpc('engine.setEnvironment', {
     hdriEnabled: false,
+    sunEnabled: false,
     sunIntensity: 0.0,
     ambientIntensity: 0.0
   });
@@ -98,6 +102,12 @@ try {
     }
   });
   console.log(`   Box spawned with ID: ${box.entityId}`);
+
+  // Position camera to look directly at the box
+  await callRpc('engine.setCamera', {
+    x: 0, y: 2.2, z: 4.5,
+    yaw: -90, pitch: -15, fov: 60
+  });
 
   // Capture frame with HDRI OFF and NO lights: verify it is dark
   for (let f = 0; f < 5; ++f) {
