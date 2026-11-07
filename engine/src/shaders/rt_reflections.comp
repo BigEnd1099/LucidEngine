@@ -17,6 +17,8 @@ layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
+// Screen-space SSGI radiance cache (same sampled image as the PBR SSAO/SSGI input).
+layout(set = 0, binding = 7) uniform sampler2D ssgiRadianceMap;
 
 layout(push_constant) uniform PC {
     mat4  unused;
@@ -147,16 +149,24 @@ void main() {
                     float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
                     if (abs(clipPos.z / clipPos.w - screenDepth) < 0.02) {
                         ivec2 hitPx = clamp(ivec2(hitUV * size), ivec2(0), isize - 1);
+                        // The RT GI cache is already BRDF weighted at its source pixel.
                         vec3 screenGI = imageLoad(imgGI, hitPx).rgb;
+                        hitRadiance += screenGI;
 
+                        // SSGI is diffuse irradiance. It becomes visible in a metal
+                        // reflection when the reflected ray hits a screen-visible
+                        // diffuse surface that received SSGI.
                         vec4 albSamp = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
                         vec3 texLinear = pow(max(albSamp.rgb, vec3(0.0)), vec3(2.2));
                         vec3 hitAlbedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
-                        float hitMetallic = clamp(hit.material.x * textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).b, 0.0, 1.0);
-
+                        vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+                        float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
                         vec3 F0_hit = mix(vec3(0.04), hitAlbedo, hitMetallic);
-                        vec3 kd_hit = (vec3(1.0) - F0_hit) * (1.0 - hitMetallic);
-                        hitRadiance += kd_hit * hitAlbedo * screenGI;
+                        float hitNdotV = max(dot(normalize(hitNorm), -dir), 0.0);
+                        vec3 F_hit = F0_hit + (1.0 - F0_hit) * pow(1.0 - hitNdotV, 5.0);
+                        vec3 kD_hit = (vec3(1.0) - F_hit) * (1.0 - hitMetallic);
+                        vec3 screenSSGI = max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+                        hitRadiance += (kD_hit * hitAlbedo / 3.14159265359) * screenSSGI;
                     }
                 }
             }
