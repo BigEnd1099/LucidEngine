@@ -531,19 +531,113 @@ namespace engine::renderer {
                 s_immersivePlay = !s_immersivePlay;
             }
 
+            static float s_userLeftPanelW = 260.0f;
+            static float s_userRightPanelW = 310.0f;
+            static float s_userOutlinerH = 240.0f;
+            static float s_userDrawerH = 220.0f;
+            static bool s_splittersInit = false;
+            static ImGuiID s_activeSplitterId = 0;
+            static bool s_anySplitterHovered = false;
+            static bool s_wasSplitterHoveredLastFrame = false;
+
+            if (!s_splittersInit) {
+                s_splittersInit = true;
+                s_userLeftPanelW  = 260.0f * s_uiScale;
+                s_userRightPanelW = 310.0f * s_uiScale;
+                s_userOutlinerH   = 240.0f * s_uiScale;
+                s_userDrawerH     = 220.0f * s_uiScale;
+            }
+
             const float topTitleBarH  = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
             const float topLevelTabsH = s_immersivePlay ? 0.0f : (26.0f * s_uiScale);
             const float topToolbarH   = 36.0f * s_uiScale;
             const float topTotalH     = topTitleBarH + topLevelTabsH + topToolbarH;
 
+            const float minPanelW = 130.0f * s_uiScale;
+            const float maxPanelW = std::max(minPanelW, (screenW - 200.0f * s_uiScale) * 0.5f);
+            s_userLeftPanelW  = std::clamp(s_userLeftPanelW, minPanelW, maxPanelW);
+            s_userRightPanelW = std::clamp(s_userRightPanelW, minPanelW, maxPanelW);
+
             const float bottomStatusH = s_immersivePlay ? 0.0f : (24.0f * s_uiScale);
-            const float drawerH       = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? std::min(220.0f * s_uiScale, screenH * 0.35f) : 0.0f;
+            const float maxDrawerH    = std::max(80.0f * s_uiScale, screenH * 0.70f);
+            s_userDrawerH             = std::clamp(s_userDrawerH, 80.0f * s_uiScale, maxDrawerH);
+
+            const float drawerH       = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? s_userDrawerH : 0.0f;
             const float bottomTotalH  = bottomStatusH + drawerH;
 
-            const float contentH        = std::max(180.0f, screenH - topTotalH - bottomTotalH);
-            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? std::min(260.0f * s_uiScale, screenW * 0.25f) : 0.0f;
-            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? std::min(295.0f * s_uiScale, screenW * 0.27f) : 0.0f;
-            const float centerViewportW = std::max(200.0f, screenW - leftPanelW - rightPanelW);
+            const float contentH        = std::max(120.0f, screenH - topTotalH - bottomTotalH);
+            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? s_userLeftPanelW : 0.0f;
+            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_userRightPanelW : 0.0f;
+            const float centerViewportW = std::max(100.0f, screenW - leftPanelW - rightPanelW);
+
+            const float minOutlinerH = 60.0f * s_uiScale;
+            const float maxOutlinerH = std::max(minOutlinerH, contentH - 60.0f * s_uiScale);
+            s_userOutlinerH = std::clamp(s_userOutlinerH, minOutlinerH, maxOutlinerH);
+            const float outlinerH = (s_showOutliner && s_showDetails) ? s_userOutlinerH : (s_showOutliner ? contentH : 0.0f);
+            const float detailsH  = (s_showOutliner && s_showDetails) ? (contentH - outlinerH) : (s_showDetails ? contentH : 0.0f);
+
+            s_anySplitterHovered = false;
+
+            auto handleSplitter = [&](const char* id, ImVec2 pos, ImVec2 size, bool vertical, float* targetSize, float deltaSign, float minVal, float maxVal, float defaultVal) {
+                ImGuiIO& io = ImGui::GetIO();
+                ImDrawList* fgDl = ImGui::GetForegroundDrawList();
+
+                const float grabMargin = 4.0f;
+                const float x0 = vertical ? (pos.x - grabMargin) : pos.x;
+                const float x1 = vertical ? (pos.x + size.x + grabMargin) : (pos.x + size.x);
+                const float y0 = vertical ? pos.y : (pos.y - grabMargin);
+                const float y1 = vertical ? (pos.y + size.y) : (pos.y + size.y + grabMargin);
+                const bool hovered = (io.MousePos.x >= x0 && io.MousePos.x <= x1 && io.MousePos.y >= y0 && io.MousePos.y <= y1);
+
+                ImGuiID myId = ImGui::GetID(id);
+                const bool isDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+                if (hovered && s_activeSplitterId == 0 && isDown) {
+                    s_activeSplitterId = myId;
+                }
+                if (s_activeSplitterId == myId && !isDown) {
+                    s_activeSplitterId = 0;
+                }
+
+                const bool active = (s_activeSplitterId == myId);
+                if (hovered) s_anySplitterHovered = true;
+
+                if (hovered || active) {
+                    ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+                }
+
+                if (active) {
+                    const float delta = vertical ? io.MouseDelta.x : io.MouseDelta.y;
+                    if (delta != 0.0f) {
+                        *targetSize = std::clamp(*targetSize + delta * deltaSign, minVal, maxVal);
+                    }
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                        *targetSize = defaultVal;
+                        s_activeSplitterId = 0;
+                    }
+                }
+
+                ImU32 col;
+                if (active) {
+                    col = IM_COL32(0, 140, 255, 255);
+                } else if (hovered) {
+                    col = IM_COL32(56, 160, 250, 220);
+                } else {
+                    col = IM_COL32(28, 34, 46, 255);
+                }
+
+                fgDl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), col);
+
+                if (hovered || active) {
+                    if (vertical) {
+                        const float midY = pos.y + size.y * 0.5f;
+                        fgDl->AddRectFilled(ImVec2(pos.x - 1.5f, midY - 14.0f), ImVec2(pos.x + size.x + 1.5f, midY + 14.0f), col, 2.0f);
+                    } else {
+                        const float midX = pos.x + size.x * 0.5f;
+                        fgDl->AddRectFilled(ImVec2(midX - 14.0f, pos.y - 1.5f), ImVec2(midX + 14.0f, pos.y + size.y + 1.5f), col, 2.0f);
+                    }
+                }
+            };
 
             static entt::entity selectedEnt = entt::null;
             static NativeGizmoMode s_gizmoMode = NativeGizmoMode::TRANSLATE;
@@ -669,6 +763,23 @@ namespace engine::renderer {
                         ImGui::MenuItem("Content Drawer", "Ctrl+Space", &s_showContentDrawer);
                         ImGui::MenuItem("Output Log", nullptr, &s_showOutputLog);
                         ImGui::MenuItem("Blueprints / Scripts", nullptr, &s_showScriptStudio);
+                        ImGui::Separator();
+                        if (ImGui::BeginMenu("Skala Interfejsu (UI Scale)")) {
+                            if (ImGui::MenuItem("85% (Kompaktowe)", nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
+                            if (ImGui::MenuItem("100% (Standard)", nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) m_uiScale = 1.0f;
+                            if (ImGui::MenuItem("125% (Duze)", nullptr, std::abs(m_uiScale - 1.25f) < 0.05f)) m_uiScale = 1.25f;
+                            if (ImGui::MenuItem("150% (Bardzo duze / 4K)", nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) m_uiScale = 1.50f;
+                            ImGui::EndMenu();
+                        }
+                        if (ImGui::MenuItem("Zresetuj uklad okien do domyslnego")) {
+                            s_userLeftPanelW  = 260.0f * s_uiScale;
+                            s_userRightPanelW = 310.0f * s_uiScale;
+                            s_userOutlinerH   = 240.0f * s_uiScale;
+                            s_userDrawerH     = 220.0f * s_uiScale;
+                            s_showPlaceActors = true;
+                            s_showOutliner    = true;
+                            s_showDetails     = true;
+                        }
                         ImGui::Separator();
                         if (ImGui::BeginMenu("FPS")) {
                             int curFps = engine ? engine->getTargetFps() : 0;
@@ -849,6 +960,9 @@ namespace engine::renderer {
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
+                ImGui::SameLine(placePanelW - 22.0f * s_uiScale);
+                if (ImGui::SmallButton("<")) s_showPlaceActors = false;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin panel Place Actors");
                 static char classSearch[64] = "";
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
@@ -1075,16 +1189,17 @@ namespace engine::renderer {
                 }
             }
 
-            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) { s_isRmbNavigating = true; ImGui::SetWindowFocus("Viewport"); }
+            const bool blockViewportClicks = (s_activeSplitterId != 0 || s_wasSplitterHoveredLastFrame);
+            if (!blockViewportClicks && isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) { s_isRmbNavigating = true; ImGui::SetWindowFocus("Viewport"); }
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) s_isRmbNavigating = false;
-            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) { s_isMmbPanning = true; ImGui::SetWindowFocus("Viewport"); }
+            if (!blockViewportClicks && isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) { s_isMmbPanning = true; ImGui::SetWindowFocus("Viewport"); }
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) s_isMmbPanning = false;
 
             const bool altDown = ImGui::IsKeyDown(ImGuiKey_LeftAlt) || ImGui::IsKeyDown(ImGuiKey_RightAlt);
-            if (isHovered && altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { s_isAltOrbiting = true; ImGui::SetWindowFocus("Viewport"); }
+            if (!blockViewportClicks && isHovered && altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { s_isAltOrbiting = true; ImGui::SetWindowFocus("Viewport"); }
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) { s_isAltOrbiting = false; s_draggingGizmoAxis = 0; }
 
-            if (isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            if (!blockViewportClicks && isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 if (hoveredGizmoAxis > 0 && hasSelectedTransform) {
                     s_draggingGizmoAxis = hoveredGizmoAxis;
                     auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
@@ -1275,7 +1390,13 @@ namespace engine::renderer {
                 ImGui::SetCursorPos(ImVec2(10.0f * s_uiScale, 10.0f * s_uiScale));
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
                 ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(270.0f * s_uiScale, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                const float leftOverlayW = (s_showPlaceActors ? 270.0f : 345.0f) * s_uiScale;
+                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(leftOverlayW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                if (!s_showPlaceActors) {
+                    if (ImGui::Button("> Aktorzy", ImVec2(0, 22.0f * s_uiScale))) s_showPlaceActors = true;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin panel Place Actors");
+                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
+                }
                 auto gizmoToolBtn = [&](const char* id, NativeGizmoMode mode, VectorIconType icon) {
                     const bool active = (s_gizmoMode == mode);
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.47f, 0.83f, 1.0f) : ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
@@ -1297,11 +1418,16 @@ namespace engine::renderer {
                 ImGui::PopStyleColor();
 
                 // Pigułka statusu (prawy górny róg Viewportu)
-                const float trPillW = 350.0f * s_uiScale;
+                const float trPillW = ((s_showOutliner || s_showDetails) ? 350.0f : 435.0f) * s_uiScale;
                 ImGui::SetCursorPos(ImVec2(std::max(10.0f, viewportPanelSize.x - trPillW - 10.0f * s_uiScale), 10.0f * s_uiScale));
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
                 ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
                 ImGui::BeginChild("VpOverlayTopRight", ImVec2(trPillW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                if (!s_showOutliner && !s_showDetails) {
+                    if (ImGui::Button("Inspektor <", ImVec2(0, 22.0f * s_uiScale))) { s_showOutliner = true; s_showDetails = true; }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin prawy panel inspektora");
+                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
+                }
                 ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Cubemap IBL + ACES");
                 ImGui::SameLine();
                 ImGui::TextDisabled("|");
@@ -1317,7 +1443,6 @@ namespace engine::renderer {
             ImGui::PopStyleVar();
 
             // 6. OUTLINER PANEL
-            const float outlinerH = s_showDetails ? (contentH * 0.42f) : contentH;
             if (!s_immersivePlay && s_showOutliner) {
                 ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(rightPanelW, outlinerH), ImGuiCond_Always);
@@ -1331,8 +1456,11 @@ namespace engine::renderer {
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Hierarchia Sceny");
 
                 auto viewAll = registry.get().view<ecs::TransformComponent>();
-                ImGui::SameLine(ImGui::GetWindowWidth() - 75.0f * s_uiScale);
+                ImGui::SameLine(ImGui::GetWindowWidth() - 95.0f * s_uiScale);
                 ImGui::TextDisabled("[%zu]", viewAll.size());
+                ImGui::SameLine(ImGui::GetWindowWidth() - 24.0f * s_uiScale);
+                if (ImGui::SmallButton(">")) { s_showOutliner = false; s_showDetails = false; }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin prawy panel inspektora");
 
                 static int s_outlinerCategory = 0; // 0: Wszystko, 1: Siatki, 2: Swiatla, 3: Fizyka, 4: Gracz
                 auto drawFilterChip = [&](const char* name, int cIdx) {
@@ -1425,7 +1553,6 @@ namespace engine::renderer {
             // 7. DETAILS & WORLD / GRAPHICS SETTINGS PANEL
             if (!s_immersivePlay && s_showDetails) {
                 const float detailsY = topTotalH + (s_showOutliner ? outlinerH : 0.0f);
-                const float detailsH = s_showOutliner ? (contentH - outlinerH) : contentH;
 
                 ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, detailsY), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(rightPanelW, detailsH), ImGuiCond_Always);
@@ -2020,11 +2147,15 @@ namespace engine::renderer {
                 ImGui::Begin("BottomDrawerWindow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 if (s_showContentDrawer) {
                     ImGui::TextColored(ImVec4(0.96f, 0.62f, 0.08f, 1.0f), "Content Drawer");
+                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
+                    if (ImGui::SmallButton("X##CloseDrawer")) { s_showContentDrawer = false; }
                     ImGui::Separator();
                     const char* assets[] = { "BP_Player", "BP_Coin", "M_ChromeIBL", "M_SlateFloor", "VFX_Fire", "Lvl_MainLevel" };
                     for (const char* a : assets) { ImGui::Button(a, ImVec2(115.0f * s_uiScale, 60.0f * s_uiScale)); ImGui::SameLine(); }
                 } else {
                     ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), ">_ Output Log");
+                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
+                    if (ImGui::SmallButton("X##CloseLog")) { s_showOutputLog = false; }
                     ImGui::Separator();
                     ImGui::BeginChild("OutputLogScroll", ImVec2(0, 0), false);
                     for (const auto& line : core::Logger::getRecentLogs(40)) ImGui::TextUnformatted(line.c_str());
@@ -2048,7 +2179,8 @@ namespace engine::renderer {
             }
 
             if (s_showScriptStudio) {
-                ImGui::SetNextWindowSize(ImVec2(700 * s_uiScale, 500 * s_uiScale), ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowSize(ImVec2(750 * s_uiScale, 520 * s_uiScale), ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowSizeConstraints(ImVec2(360 * s_uiScale, 240 * s_uiScale), ImVec2(screenW, screenH));
                 if (ImGui::Begin("Blueprints / QuickJS Script Studio", &s_showScriptStudio)) {
                     static char scriptBuf[16384] = "";
                     static bool s_scriptInit = false;
@@ -2074,6 +2206,63 @@ namespace engine::renderer {
                 }
                 ImGui::End();
             }
+
+            // Render and process interactive splitters
+            if (!s_immersivePlay) {
+                // 1. Left Vertical Splitter (between Place Actors and Viewport)
+                if (s_showPlaceActors) {
+                    handleSplitter("##SplitterLeft",
+                                   ImVec2(leftPanelW - 2.0f, topTotalH),
+                                   ImVec2(4.0f, contentH),
+                                   true,
+                                   &s_userLeftPanelW,
+                                   +1.0f,
+                                   140.0f * s_uiScale,
+                                   std::max(140.0f * s_uiScale, screenW - rightPanelW - 180.0f * s_uiScale),
+                                   260.0f * s_uiScale);
+                }
+
+                // 2. Right Vertical Splitter (between Viewport and Outliner/Details)
+                if (s_showOutliner || s_showDetails) {
+                    handleSplitter("##SplitterRight",
+                                   ImVec2(leftPanelW + centerViewportW - 2.0f, topTotalH),
+                                   ImVec2(4.0f, contentH),
+                                   true,
+                                   &s_userRightPanelW,
+                                   -1.0f,
+                                   180.0f * s_uiScale,
+                                   std::max(180.0f * s_uiScale, screenW - leftPanelW - 180.0f * s_uiScale),
+                                   310.0f * s_uiScale);
+                }
+
+                // 3. Outliner / Details Horizontal Splitter
+                if (s_showOutliner && s_showDetails) {
+                    handleSplitter("##SplitterOutliner",
+                                   ImVec2(leftPanelW + centerViewportW, topTotalH + outlinerH - 2.0f),
+                                   ImVec2(rightPanelW, 4.0f),
+                                   false,
+                                   &s_userOutlinerH,
+                                   +1.0f,
+                                   70.0f * s_uiScale,
+                                   std::max(70.0f * s_uiScale, contentH - 70.0f * s_uiScale),
+                                   contentH * 0.42f);
+                }
+
+                // 4. Bottom Drawer Horizontal Splitter
+                if (s_showContentDrawer || s_showOutputLog) {
+                    handleSplitter("##SplitterDrawer",
+                                   ImVec2(0.0f, screenH - bottomTotalH - 2.0f),
+                                   ImVec2(screenW, 4.0f),
+                                   false,
+                                   &s_userDrawerH,
+                                   -1.0f,
+                                   80.0f * s_uiScale,
+                                   screenH * 0.70f,
+                                   220.0f * s_uiScale);
+                }
+            }
+
+            s_wasSplitterHoveredLastFrame = s_anySplitterHovered;
         }
 
         ImGui::Render();
