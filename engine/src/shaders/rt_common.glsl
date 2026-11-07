@@ -203,7 +203,7 @@ bool traceSceneSurface(
 
 
 vec3 sampleRtSkyRadiance(vec3 dir) {
-    if ((ubo.skyboxMode & 2) == 0) {
+    if ((ubo.skyboxMode & 3) == 0 && ubo.ambientColor.w <= 0.001) {
         return vec3(0.0);
     }
     // Atmospheric analytical sky matching skybox.frag

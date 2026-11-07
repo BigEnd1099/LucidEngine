@@ -46,10 +46,8 @@ void main() {
         return;
     }
 
-    // Keep RT reflections active across the full perceptual roughness range.
-    // Previously roughness > 0.85 returned black and depended entirely on IBL,
-    // which made fully metallic materials appear to absorb light when IBL was off.
-    float roughness = clamp(gNR.w, 0.04, 1.0);
+    // Unclamped roughness allows mirror metals (roughness 0.0) to have exact specular rays
+    float roughness = clamp(gNR.w, 0.0, 1.0);
 
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
     vec3 V = normalize(ubo.cameraPos.xyz - P);
@@ -70,10 +68,13 @@ void main() {
 
     vec3 accumulated = vec3(0.0);
     float spread = roughness * roughness * 0.85;
+    vec3 rayOrig = P + N * 0.012;
+
+    int numActiveLights = min(ubo.numLights, 8);
 
     for (int s = 0; s < samples; ++s) {
         vec2 disk = sampleUniformDisk(rand2());
-        vec3 dir = (roughness < 0.06) ? idealR : normalize(idealR + tangent * disk.x * spread + bitangent * disk.y * spread);
+        vec3 dir = (roughness < 0.02) ? idealR : normalize(idealR + tangent * disk.x * spread + bitangent * disk.y * spread);
         if (dot(dir, N) <= 0.0) dir = reflect(dir, N);
 
         RtInstanceData hit;
@@ -82,10 +83,77 @@ void main() {
         vec4 hitTangent;
         float hitDist;
 
-        if (traceSceneSurface(P + N * 0.012, dir, MAX_REFL_DIST, hit, hitPos, hitNorm, hitUv, hitTangent, hitDist)) {
+        bool hitGeo = traceSceneSurface(rayOrig, dir, MAX_REFL_DIST, hit, hitPos, hitNorm, hitUv, hitTangent, hitDist);
+        float closestDist = hitGeo ? hitDist : MAX_REFL_DIST;
+
+        // Analytical point/spot/area lights intersection (light bulbs have no TLAS geometry)
+        bool hitBulb = false;
+        vec3 bulbRadiance = vec3(0.0);
+        float closestBulbDist = closestDist;
+
+        for (int li = 0; li < numActiveLights; ++li) {
+            float intensity = max(ubo.lightsCol[li].w, 0.0);
+            if (intensity <= 0.001) continue;
+
+            vec3 lightPos = ubo.lightsPos[li].xyz;
+            float range = max(ubo.lightsPos[li].w, 0.1);
+            int type = int(round(ubo.lightsDir[li].w));
+            float bulbRadius = clamp(range * 0.02, 0.08, 0.35);
+            if (type == 2) {
+                bulbRadius = clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.1, 0.6);
+            }
+
+            vec3 OC = lightPos - rayOrig;
+            float tProj = dot(OC, dir);
+            if (tProj > 0.0) {
+                float d2 = dot(OC, OC) - tProj * tProj;
+                float r2 = bulbRadius * bulbRadius;
+                if (d2 < r2) {
+                    float tHit = tProj - sqrt(max(0.0, r2 - d2));
+                    if (tHit > 0.0 && tHit < closestBulbDist) {
+                        bool conePass = true;
+                        if (type == 1) {
+                            vec3 toHit = normalize((rayOrig + dir * tHit) - lightPos);
+                            float cone = dot(toHit, normalize(ubo.lightsDir[li].xyz));
+                            conePass = (cone > ubo.lightsParams[li].y);
+                        }
+                        if (conePass) {
+                            if (!rayQueryOccluded(rayOrig, dir, max(0.001, tHit - 0.02))) {
+                                closestBulbDist = tHit;
+                                bulbRadiance = ubo.lightsCol[li].rgb * max(intensity * 12.0, 25.0);
+                                hitBulb = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (hitBulb) {
+            accumulated += bulbRadiance;
+        } else if (hitGeo) {
             accumulated += shadeRtHit(hit, hitPos, hitNorm, hitUv, hitTangent, dir);
-        } else if ((ubo.skyboxMode & 2) != 0) {
-            accumulated += sampleRtSkyRadiance(dir);
+        } else {
+            // Missed geometry & light bulbs: check sun disk & sky
+            bool hitSun = false;
+            if (ubo.sunDirection.w > 0.05) {
+                vec3 sunDir = normalize(ubo.sunDirection.xyz);
+                float sunCos = dot(dir, sunDir);
+                if (sunCos > 0.9993) {
+                    if (!rayQueryOccluded(rayOrig, sunDir, 10000.0)) {
+                        float sunDisk = smoothstep(0.9993, 0.9998, sunCos);
+                        accumulated += ubo.sunColor.rgb * (ubo.sunDirection.w * 35.0 * sunDisk);
+                        hitSun = true;
+                    }
+                }
+            }
+            if (!hitSun) {
+                if ((ubo.skyboxMode & 3) != 0 || ubo.ambientColor.w > 0.01) {
+                    accumulated += sampleRtSkyRadiance(dir);
+                } else {
+                    accumulated += max(ubo.ambientColor.rgb * ubo.ambientColor.w, vec3(0.02));
+                }
+            }
         }
     }
 

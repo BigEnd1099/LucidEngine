@@ -379,6 +379,9 @@ namespace engine::renderer {
         }
 
         // Retrieve previous frame's GPU timestamps if available
+        if (params.lightChanged) {
+            m_historyValid = false;
+        }
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
             uint64_t timestamps[7]{};
             VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 7,

@@ -53,7 +53,7 @@ void main() {
     vec3 finalNormal = computeNormal(N);
 
     vec3 orm = texture(ormMap, fragTexCoord).rgb;
-    float roughness = clamp(orm.g * pcs.normalCol1.w, 0.045, 1.0);
+    float roughness = clamp(orm.g * pcs.normalCol1.w, 0.0, 1.0);
     float metallic  = clamp(orm.b * pcs.normalCol0.w, 0.0, 1.0);
 
     vec2 curNDC  = currClipPos.xy / max(currClipPos.w, 1e-5);

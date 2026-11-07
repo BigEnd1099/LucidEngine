@@ -225,7 +225,9 @@ namespace engine::renderer {
             }
         }
 
-        // Zapis SceneUboData przed wszystkimi przebiegami (uĹĽywane przez Depth Prepass, PBR i Skybox)
+        bool rtLightOrCameraMoved = false;
+
+        // Zapis SceneUboData przed wszystkimi przebiegami (uzywane przez Depth Prepass, PBR i Skybox)
         if (m_sceneUboMappedPtr) {
             SceneUboData ubo{};
             ubo.viewProj = vp;
@@ -307,6 +309,50 @@ namespace engine::renderer {
                 lightIdx++;
             }
             ubo.numLights = lightIdx;
+
+            static glm::vec4 s_prevLightsPos[8]{};
+            static glm::vec4 s_prevLightsCol[8]{};
+            static glm::vec4 s_prevLightsDir[8]{};
+            static glm::vec4 s_prevSunDir{0.0f};
+            static glm::vec4 s_prevSunCol{0.0f};
+            static glm::vec3 s_prevCamPos{0.0f};
+            static int s_prevNumLights{-1};
+            static bool s_hasPrevState{false};
+
+            if (!s_hasPrevState) {
+                rtLightOrCameraMoved = true;
+                s_hasPrevState = true;
+            } else {
+                if (s_prevNumLights != ubo.numLights) {
+                    rtLightOrCameraMoved = true;
+                }
+                if (glm::distance(s_prevCamPos, camPos) > 0.005f) {
+                    rtLightOrCameraMoved = true;
+                }
+                if (glm::distance(glm::vec3(s_prevSunDir), glm::vec3(ubo.sunDirection)) > 0.001f ||
+                    std::abs(s_prevSunDir.w - ubo.sunDirection.w) > 0.01f ||
+                    glm::distance(glm::vec3(s_prevSunCol), glm::vec3(ubo.sunColor)) > 0.01f) {
+                    rtLightOrCameraMoved = true;
+                }
+                for (int i = 0; i < ubo.numLights; ++i) {
+                    if (glm::distance(glm::vec3(s_prevLightsPos[i]), glm::vec3(ubo.lightsPos[i])) > 0.005f ||
+                        glm::distance(glm::vec3(s_prevLightsCol[i]), glm::vec3(ubo.lightsCol[i])) > 0.005f ||
+                        std::abs(s_prevLightsCol[i].w - ubo.lightsCol[i].w) > 0.01f ||
+                        glm::distance(glm::vec3(s_prevLightsDir[i]), glm::vec3(ubo.lightsDir[i])) > 0.005f) {
+                        rtLightOrCameraMoved = true;
+                        break;
+                    }
+                }
+            }
+            s_prevCamPos = camPos;
+            s_prevSunDir = ubo.sunDirection;
+            s_prevSunCol = ubo.sunColor;
+            s_prevNumLights = ubo.numLights;
+            for (int i = 0; i < 8; ++i) {
+                s_prevLightsPos[i] = ubo.lightsPos[i];
+                s_prevLightsCol[i] = ubo.lightsCol[i];
+                s_prevLightsDir[i] = ubo.lightsDir[i];
+            }
 
             // Analityczne cienie sferyczne usuniete - zastepuja je rzeczywiste cienie mapowane
             ubo.numOccluders = 0;
@@ -921,6 +967,7 @@ namespace engine::renderer {
                 rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
                 rtp.spatialStrength = m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0f;
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;
+                rtp.lightChanged = rtLightOrCameraMoved;
                 rtp.debugMode = m_rtSettings.debugMode;
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
             } else {

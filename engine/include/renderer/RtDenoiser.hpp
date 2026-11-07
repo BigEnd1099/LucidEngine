@@ -27,6 +27,7 @@ namespace engine::renderer {
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
+            bool      lightChanged{false}; // Resets accumulation when lights or camera change
             RtDebugMode debugMode{RtDebugMode::None};
         };
 
