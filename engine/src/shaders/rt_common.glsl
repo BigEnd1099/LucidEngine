@@ -235,7 +235,9 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     }
     hitNormal = shadingNormal;
     float emissive = max(hit.material.z, 0.0);
-    vec3 diffuseResponse = albedo * (1.0 - metallic) / PI;
+    // Diffuse BRDF response is kept unweighted here. The Fresnel/metallic energy split
+    // is applied exactly once by kD at each lighting contribution below.
+    vec3 diffuseResponse = albedo / PI;
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     vec3 V = -normalize(rayDir);
@@ -390,7 +392,9 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     // Ambient / Environment lighting at hit point
     if ((ubo.skyboxMode & 2) != 0) {
         vec3 ambientIBL = sampleRtSkyRadiance(hitNormal) * 0.5;
-        radiance += diffuseResponse * ambientIBL;
+        vec3 ambientF = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+        vec3 ambientKD = (vec3(1.0) - ambientF) * (1.0 - metallic);
+        radiance += ambientKD * diffuseResponse * ambientIBL;
 
         vec3 R = reflect(-V, hitNormal);
         vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * (1.0 - roughness);
