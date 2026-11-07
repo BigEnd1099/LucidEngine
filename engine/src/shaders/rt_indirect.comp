@@ -130,7 +130,7 @@ void main() {
             if (b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
             if (!found) {
                 // Ray miss: gather sky radiance on miss instead of pitch black
-                if (doGI) {
+                if (doGI && (ubo.skyboxMode & 2) != 0) {
                     pathRadiance += throughput * sampleRtSkyRadiance(dir);
                 }
                 break;

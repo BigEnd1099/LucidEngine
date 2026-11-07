@@ -103,16 +103,18 @@ vec3 computeNormal(vec3 N) {
 
 // Heitz 2014 Height-Correlated Smith GGX
 float distributionGGX(float NdotH, float alpha) {
-    float a2 = alpha * alpha;
+    float a = max(alpha, 0.002);
+    float a2 = a * a;
     float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
-    return a2 / max(PI * d * d, 1e-6);
+    return a2 / max(PI * d * d, 1e-12);
 }
 
 float visibilitySmithGGXCorrelated(float NdotV, float NdotL, float alpha) {
-    float a2 = alpha * alpha;
+    float a = max(alpha, 0.002);
+    float a2 = a * a;
     float gv = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
     float gl = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
-    return 0.5 / max(gv + gl, 1e-5);
+    return 0.5 / max(gv + gl, 1e-7);
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
@@ -301,15 +303,15 @@ void main() {
 
     vec3 orm = texture(ormMap, fragTexCoord).rgb;
     float metallic = clamp(pcs.normalCol0.w * orm.b, 0.0, 1.0);
-    float roughness = clamp(pcs.normalCol1.w * orm.g, 0.045, 1.0);
+    float rawRoughness = clamp(pcs.normalCol1.w * orm.g, 0.0, 1.0);
     float emissive = max(pcs.normalCol2.w, 0.0);
 
     vec3 dndu = dFdx(N);
     vec3 dndv = dFdy(N);
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
-    float kernelRoughness2 = min(2.0 * variance, 0.18);
-    float alpha = clamp(sqrt(roughness * roughness + kernelRoughness2), 0.045, 1.0);
-    roughness = alpha;
+    float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
+    float alpha = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.001, 1.0);
+    float roughness = alpha;
     alpha = roughness * roughness;
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);

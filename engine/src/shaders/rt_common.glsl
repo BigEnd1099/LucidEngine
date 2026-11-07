@@ -40,6 +40,7 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     OccluderData occluders[32];
     vec4 rtFeatureParams; // x = diffuse GI, y = RT instance count, z = GI intensity
 } ubo;
+layout(set = 0, binding = 3) uniform samplerCube envCubemap;
 layout(set = 0, binding = 11) uniform accelerationStructureEXT sceneTLAS;
 
 struct RtInstanceData {
@@ -137,8 +138,8 @@ bool rayQueryOccluded(vec3 origin, vec3 direction, float maxDistance) {
     rayQueryEXT query;
     rayQueryInitializeEXT(
         query,
-        sceneTLAS,
-        gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+        sceneTLAS, gl_RayFlagsTerminateOnFirstHitEXT |
+        gl_RayFlagsOpaqueEXT,
         0xFF,
         origin,
         0.002,
@@ -157,7 +158,7 @@ bool traceSceneSurface(
     rayQueryEXT query;
     rayQueryInitializeEXT(
         query, sceneTLAS,
-        gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+        gl_RayFlagsOpaqueEXT,
         0xFF, origin, 0.003, normalize(direction), maxDistance
     );
     while (rayQueryProceedEXT(query)) { }
@@ -203,11 +204,11 @@ bool traceSceneSurface(
 
 
 vec3 sampleRtSkyRadiance(vec3 dir) {
-    if ((ubo.skyboxMode & 3) == 0 && ubo.ambientColor.w <= 0.001) {
+    if ((ubo.skyboxMode & 3) == 0) {
         return vec3(0.0);
     }
     // Atmospheric analytical sky matching skybox.frag
-    vec3 sky = max(ubo.ambientColor.rgb, vec3(0.02)) * max(ubo.ambientColor.w, 0.15);
+    vec3 sky = textureLod(envCubemap, dir, 0.0).rgb * max(ubo.ambientColor.w, 0.15);
     if (ubo.sunDirection.w > 0.05) {
         vec3 sunDir = normalize(ubo.sunDirection.xyz);
         float cosTheta = dot(normalize(dir), sunDir);
@@ -224,7 +225,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
     vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
-    float roughness = clamp(hit.material.y * orm.g, 0.045, 1.0);
+    float roughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
 
     vec3 shadingNormal = normalize(hitNormal);
     vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, 0.0).xyz * 2.0 - 1.0;
@@ -244,11 +245,11 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     float NdotV = max(dot(hitNormal, V), 0.001);
 
     // Emissive surface: acts as secondary light source
-    vec3 radiance = albedo * (emissive * 6.0) + albedo * 0.012 * (1.0 - roughness * 0.25);
+    vec3 radiance = albedo * (emissive * 6.0) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - roughness * 0.25)) : vec3(0.0));
 
     // Microfacet GGX parameters
-    float a = roughness * roughness;
-    float a2 = max(a * a, 1e-4);
+    float a = max(roughness * roughness, 0.002);
+    float a2 = a * a;
     float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
@@ -261,7 +262,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
         float VdotH = max(dot(V, H), 0.0);
 
         float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-        float D = a2 / (PI * dDenom * dDenom);
+        float D = a2 / max(PI * dDenom * dDenom, 1e-12);
         float g1v = NdotV / (NdotV * (1.0 - k) + k);
         float g1l = sunNdotL / (sunNdotL * (1.0 - k) + k);
         float G = g1v * g1l;
@@ -301,7 +302,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
             float VdotH = max(dot(V, H), 0.0);
 
             float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-            float D = a2 / (PI * dDenom * dDenom);
+            float D = a2 / max(PI * dDenom * dDenom, 1e-12);
             float g1v = NdotV / (NdotV * (1.0 - k) + k);
             float g1l = ndotl / (ndotl * (1.0 - k) + k);
             float G = g1v * g1l;
@@ -373,7 +374,7 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
                     float VdotH = max(dot(V, H), 0.0);
 
                     float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-                    float D = a2 / (PI * dDenom * dDenom);
+                    float D = a2 / max(PI * dDenom * dDenom, 1e-12);
                     float g1v = NdotV / (NdotV * (1.0 - k) + k);
                     float g1l = ndotl / (ndotl * (1.0 - k) + k);
                     float G = g1v * g1l;

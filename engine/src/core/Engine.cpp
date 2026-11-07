@@ -877,6 +877,8 @@ namespace engine::core {
             const auto& matJson = components["material"];
             if (matJson.contains("color")) {
                 mat.baseColor = parseColorJson(matJson["color"], glm::vec4(1.0f));
+            } else if (matJson.contains("baseColor")) {
+                mat.baseColor = parseColorJson(matJson["baseColor"], glm::vec4(1.0f));
             }
             mat.metallic = matJson.value("metallic", 0.1f);
             mat.roughness = matJson.value("roughness", 0.5f);
@@ -885,9 +887,9 @@ namespace engine::core {
             }
             mat.emissiveIntensity = matJson.value("emissiveIntensity", 0.0f);
             m_registry->get().emplace<ecs::MaterialComponent>(entity, mat);
-        } else if (components.contains("color")) {
+        } else if (components.contains("color") || components.contains("baseColor")) {
             ecs::MaterialComponent mat;
-            mat.baseColor = parseColorJson(components["color"], glm::vec4(1.0f));
+            mat.baseColor = parseColorJson(components.contains("color") ? components["color"] : components["baseColor"], glm::vec4(1.0f));
             m_registry->get().emplace<ecs::MaterialComponent>(entity, mat);
         }
 
@@ -1542,6 +1544,14 @@ function update(entities, dt, input, contacts) {
         return ecs::TypeExporter::generateTypeScriptDefinitions();
     }
 
+    void Engine::setEnvironmentSettings(const EnvironmentSettings& env) {
+        m_envSettings = env;
+        if (m_renderer) {
+            m_renderer->setSkyboxEnabled(env.skyboxEnabled);
+            m_renderer->setIblEnabled(env.iblEnabled);
+        }
+    }
+
     void Engine::setEnvironmentFromJson(const nlohmann::json& json) {
         if (json.contains("gravity")) {
             m_envSettings.gravity = json["gravity"].get<float>();
@@ -1584,6 +1594,41 @@ function update(entities, dt, input, contacts) {
         if (json.contains("fogFar")) {
             m_envSettings.fogFar = json["fogFar"].get<float>();
         }
+        if (json.contains("hdriEnabled")) {
+            bool hdri = json["hdriEnabled"].get<bool>();
+            m_envSettings.skyboxEnabled = hdri;
+            m_envSettings.iblEnabled = hdri;
+            if (m_renderer) {
+                m_renderer->setSkyboxEnabled(hdri);
+                m_renderer->setIblEnabled(hdri);
+            }
+        } else if (json.contains("hdri")) {
+            bool hdri = json["hdri"].get<bool>();
+            m_envSettings.skyboxEnabled = hdri;
+            m_envSettings.iblEnabled = hdri;
+            if (m_renderer) {
+                m_renderer->setSkyboxEnabled(hdri);
+                m_renderer->setIblEnabled(hdri);
+            }
+        }
+        if (json.contains("skyboxEnabled")) {
+            m_envSettings.skyboxEnabled = json["skyboxEnabled"].get<bool>();
+            if (m_renderer) m_renderer->setSkyboxEnabled(m_envSettings.skyboxEnabled);
+        } else if (json.contains("skybox")) {
+            m_envSettings.skyboxEnabled = json["skybox"].get<bool>();
+            if (m_renderer) m_renderer->setSkyboxEnabled(m_envSettings.skyboxEnabled);
+        }
+        if (json.contains("iblEnabled")) {
+            m_envSettings.iblEnabled = json["iblEnabled"].get<bool>();
+            if (m_renderer) m_renderer->setIblEnabled(m_envSettings.iblEnabled);
+        } else if (json.contains("ibl")) {
+            m_envSettings.iblEnabled = json["ibl"].get<bool>();
+            if (m_renderer) m_renderer->setIblEnabled(m_envSettings.iblEnabled);
+        }
+        if (json.contains("hdriPath") && json["hdriPath"].is_string()) {
+            if (m_renderer) m_renderer->loadEnvironmentHdriFile(json["hdriPath"].get<std::string>());
+        }
+
         if (json.contains("uiScale")) {
             setUiScale(json["uiScale"].get<float>());
         }
@@ -1602,8 +1647,16 @@ function update(entities, dt, input, contacts) {
     nlohmann::json Engine::getEnvironmentJson() const {
         uint32_t rw = 1920, rh = 1080;
         getRenderResolution(rw, rh);
+        bool skyboxOn = m_renderer ? m_renderer->isSkyboxEnabled() : m_envSettings.skyboxEnabled;
+        bool iblOn = m_renderer ? m_renderer->isIblEnabled() : m_envSettings.iblEnabled;
         return {
             {"gravity", m_envSettings.gravity},
+            {"hdri", skyboxOn || iblOn},
+            {"hdriEnabled", skyboxOn || iblOn},
+            {"skybox", skyboxOn},
+            {"skyboxEnabled", skyboxOn},
+            {"ibl", iblOn},
+            {"iblEnabled", iblOn},
             {"ambientColor", {m_envSettings.ambientColor.r, m_envSettings.ambientColor.g, m_envSettings.ambientColor.b}},
             {"ambientIntensity", m_envSettings.ambientIntensity},
             {"sunColor", {m_envSettings.sunColor.r, m_envSettings.sunColor.g, m_envSettings.sunColor.b}},

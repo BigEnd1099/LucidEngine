@@ -68,7 +68,8 @@ namespace engine::renderer {
         bool isSkyboxEnabled() const { return m_skyboxEnabled; }
 
         void setIblEnabled(bool enabled) { m_iblEnabled = enabled; }
-        bool isIblEnabled() const { return m_iblEnabled; }
+        bool isIblEnabled() const { return m_iblEnabled; } bool loadEnvironmentHdriFile(const std::string& path);
+
 
         void setRayTracingEnabled(bool enabled) { m_rtSettings.enabled = enabled; }
         bool isRayTracingEnabled() const { return m_rtSettings.enabled && m_context && m_context->isRayTracingSupported(); }
@@ -116,7 +117,7 @@ namespace engine::renderer {
         void createSkyboxPipeline();
         void cleanupSkyboxPipeline();
         void loadEnvironmentHdri(int index);
-        bool loadEnvironmentHdriFile(const std::string& path);
+
         void createDefaultTextures();
         void cleanupDefaultTextures();
         void uploadTexture2D(VkImage& dstImage, VmaAllocation& dstAlloc, VkImageView& dstView,

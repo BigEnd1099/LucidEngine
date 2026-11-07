@@ -148,10 +148,10 @@ void main() {
                 }
             }
             if (!hitSun) {
-                if ((ubo.skyboxMode & 3) != 0 || ubo.ambientColor.w > 0.01) {
+                if ((ubo.skyboxMode & 3) != 0) {
                     accumulated += sampleRtSkyRadiance(dir);
                 } else {
-                    accumulated += max(ubo.ambientColor.rgb * ubo.ambientColor.w, vec3(0.02));
+                    // Sky/HDRI disabled
                 }
             }
         }

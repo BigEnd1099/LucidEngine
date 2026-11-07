@@ -50,7 +50,7 @@ namespace engine::core {
         bool fogEnabled{false};
         glm::vec3 fogColor{0.06f, 0.07f, 0.09f};
         float fogNear{20.0f};
-        float fogFar{100.0f};
+        float fogFar{100.0f}; bool skyboxEnabled{true}; bool iblEnabled{true};
     };
 
     class Engine {
@@ -150,7 +150,7 @@ namespace engine::core {
         std::string getCameraMode() const { return m_cameraMode; }
 
         // Environment & Lighting API
-        void setEnvironmentSettings(const EnvironmentSettings& env) { m_envSettings = env; }
+        void setEnvironmentSettings(const EnvironmentSettings& env);
         void setGravity(float g) { m_envSettings.gravity = g; }
         float getGravity() const { return m_envSettings.gravity; }
         const EnvironmentSettings& getEnvironmentSettings() const { return m_envSettings; }

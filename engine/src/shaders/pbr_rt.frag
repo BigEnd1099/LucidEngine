@@ -77,16 +77,18 @@ vec3 computeNormal(vec3 N) {
 
 // Heitz 2014 Height-Correlated Smith GGX
 float distributionGGX(float NdotH, float alpha) {
-    float a2 = alpha * alpha;
+    float a = max(alpha, 0.002);
+    float a2 = a * a;
     float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
-    return a2 / max(PI * d * d, 1e-6);
+    return a2 / max(PI * d * d, 1e-12);
 }
 
 float visibilitySmithGGXCorrelated(float NdotV, float NdotL, float alpha) {
-    float a2 = alpha * alpha;
+    float a = max(alpha, 0.002);
+    float a2 = a * a;
     float gv = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
     float gl = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
-    return 0.5 / max(gv + gl, 1e-5);
+    return 0.5 / max(gv + gl, 1e-7);
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
@@ -432,9 +434,11 @@ void main() {
     if (ubo.rtParams.x > 0.5 && ubo.rtParams.w > 0.5) {
         vec3 reflSample = texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0).rgb;
         vec3 fresnel = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-        vec3 rtSpecular = sanitizeHDR(reflSample) * fresnel * computeSpecularAO(
-            max(dot(N, V), 0.0), combinedAO, roughness
-        );
+        float specAO = mix(1.0, computeSpecularAO(max(dot(N, V), 0.0), combinedAO, roughness), smoothstep(0.0, 0.1, roughness));
+        vec3 rtSpecular = sanitizeHDR(reflSample) * fresnel * specAO;
+
+
+
         ambientLighting += rtSpecular - specularIBL * iblIntensity;
     }
 
