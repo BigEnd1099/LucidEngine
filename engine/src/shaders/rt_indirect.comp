@@ -91,7 +91,6 @@ void main() {
     vec4 gAM = texelFetch(uGAlbedoMetallic, fullPx, 0);
     vec3 primaryAlbedo = clamp(gAM.rgb, vec3(0.0), vec3(1.0));
     float primaryMetallic = clamp(gAM.a, 0.0, 1.0);
-    float primaryRoughness = clamp(gNR.w, 0.0, 1.0);
     vec3 primaryV = normalize(toCam);
     float primaryNdotV = max(dot(N, primaryV), 1e-4);
     vec3 primaryF0 = mix(vec3(0.04), primaryAlbedo, primaryMetallic);
