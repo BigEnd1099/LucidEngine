@@ -73,7 +73,16 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!standaloneGame && std::filesystem::exists("game.json")) {
+    std::string exeName = "";
+    if (argc > 0 && argv[0]) {
+        std::filesystem::path p(argv[0]);
+        exeName = p.stem().string();
+        for (char& c : exeName) c = static_cast<char>(std::tolower(c));
+    }
+    const bool isEngineEditor = (exeName == "engine" || exeName.find("lucid") != std::string::npos || exeName.empty());
+
+    // Only auto-launch standalone mode if this is an exported game executable (NOT the engine editor itself)
+    if (!standaloneGame && !isEngineEditor && std::filesystem::exists("game.json")) {
         standaloneGame = true;
         projectPath = "game.json";
     }

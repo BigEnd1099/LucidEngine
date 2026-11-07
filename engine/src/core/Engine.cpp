@@ -2209,11 +2209,7 @@ function update(entities, dt, input, contacts) {
                 gj << proj.dump(2);
                 gj.close();
             }
-            std::ofstream rootGj("game.json");
-            if (rootGj.is_open()) {
-                rootGj << proj.dump(2);
-                rootGj.close();
-            }
+// Projekt zapisywany jest w folderPath (np. projects/MyGame/game.json)
             core::Logger::info("saveCurrentProject successful: " + folderPath);
             return res;
         } catch (const std::exception& e) {

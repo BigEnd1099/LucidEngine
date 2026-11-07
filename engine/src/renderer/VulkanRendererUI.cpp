@@ -661,7 +661,7 @@ namespace engine::renderer {
                 if (engine) {
                     const bool ok = engine->saveCurrentProject("projects/MyGame");
                     snprintf(s_engineNotification, sizeof(s_engineNotification),
-                             ok ? "Projekt zapisany w projects/MyGame oraz game.json!" : "Blad zapisu projektu!");
+                             ok ? "Projekt zapisany w projects/MyGame!" : "Blad zapisu projektu!");
                     s_engineNotificationTimer = 4.0f;
                 }
             };
