@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { TestRpcClient } from './tests/test_utils.mjs';
+import { TestRpcClient } from './test_utils.mjs';
 
 export async function runViewSyncTest() {
   const client = new TestRpcClient('ws://127.0.0.1:9000');

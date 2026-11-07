@@ -97,6 +97,8 @@ namespace engine::renderer {
 
     static void loadUnrealFont(ImGuiIO& io) {
         const std::vector<std::string> fontCandidates = {
+            "engine/assets/fonts/Inter-Variable.ttf",
+            "assets/fonts/Inter-Variable.ttf",
             "public/fonts/Roboto-Medium.ttf",
             "engine/assets/fonts/Roboto-Medium.ttf",
             "assets/fonts/Roboto-Medium.ttf",
@@ -108,10 +110,11 @@ namespace engine::renderer {
         };
 
         static const ImWchar glyphRanges[] = {
-            0x0020, 0x00FF,
-            0x0100, 0x017F,
-            0x2000, 0x206F,
-            0x25A0, 0x25FF,
+            0x0020, 0x00FF, // Basic Latin + Latin Supplement
+            0x0100, 0x017F, // Latin Extended-A (Polish characters: ąćęłńóśźż)
+            0x2000, 0x206F, // General Punctuation
+            0x2200, 0x22FF, // Mathematical Operators
+            0x25A0, 0x25FF, // Geometric Shapes
             0,
         };
 
@@ -137,7 +140,8 @@ namespace engine::renderer {
     enum class VectorIconType {
         Cube, Character, Pawn, Light, SkyLight, PlayerStart, TriggerBox, TriggerSphere,
         Star, Clock, Shapes, Sparkles, Folder, WarningTri, Eye, Translate, Rotate, Scale,
-        Globe, Camera, Speaker, Wand, Pointer, Mountain, Leaf, Brush, Gear
+        Globe, Camera, Speaker, Wand, Pointer, Mountain, Leaf, Brush, Gear,
+        Play, Pause, Stop, SaveDisk
     };
 
     static void drawVectorIcon(ImDrawList* dl, ImVec2 center, float r, VectorIconType type, ImU32 col) {
@@ -271,6 +275,27 @@ namespace engine::renderer {
                 dl->AddTriangleFilled(ImVec2(center.x - r * 0.4f, center.y + r * 0.2f), ImVec2(center.x - r * 0.1f, center.y + r * 0.5f), ImVec2(center.x - r * 0.6f, center.y + r * 0.7f), col);
                 break;
             }
+            case VectorIconType::Play: {
+                ImVec2 p0(center.x - r * 0.5f, center.y - r * 0.65f);
+                ImVec2 p1(center.x - r * 0.5f, center.y + r * 0.65f);
+                ImVec2 p2(center.x + r * 0.75f, center.y);
+                dl->AddTriangleFilled(p0, p1, p2, col);
+                break;
+            }
+            case VectorIconType::Pause: {
+                dl->AddRectFilled(ImVec2(center.x - r * 0.6f, center.y - r * 0.65f), ImVec2(center.x - r * 0.15f, center.y + r * 0.65f), col, 1.0f);
+                dl->AddRectFilled(ImVec2(center.x + r * 0.15f, center.y - r * 0.65f), ImVec2(center.x + r * 0.6f, center.y + r * 0.65f), col, 1.0f);
+                break;
+            }
+            case VectorIconType::Stop: {
+                dl->AddRectFilled(ImVec2(center.x - r * 0.6f, center.y - r * 0.6f), ImVec2(center.x + r * 0.6f, center.y + r * 0.6f), col, 2.0f);
+                break;
+            }
+            case VectorIconType::SaveDisk: {
+                dl->AddRect(ImVec2(center.x - r * 0.75f, center.y - r * 0.75f), ImVec2(center.x + r * 0.75f, center.y + r * 0.75f), col, 2.0f, 0, 1.4f);
+                dl->AddRectFilled(ImVec2(center.x - r * 0.45f, center.y - r * 0.75f), ImVec2(center.x + r * 0.45f, center.y - r * 0.2f), col, 1.0f);
+                break;
+            }
             case VectorIconType::Gear:
             default: {
                 dl->AddCircle(center, r * 0.45f, col, 12, 1.5f);
@@ -362,12 +387,22 @@ namespace engine::renderer {
         return hypotf(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
     }
 
+    static float applyCtrlSnap(float val, float snapStep = 0.5f) {
+        if (ImGui::GetIO().KeyCtrl) {
+            return std::round(val / snapStep) * snapStep;
+        }
+        return val;
+    }
+
     static bool drawVec3Control(const char* label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 70.0f) {
         bool changed = false;
         ImGui::PushID(label);
         ImGui::Columns(2);
         ImGui::SetColumnWidth(0, columnWidth);
         ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.92f, 1.0f), "%s", label);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s: Przytrzymaj [Ctrl] podczas przeciagania aby przyciagac do siatki (0.5m)", label);
+        }
         ImGui::NextColumn();
 
         const float lineHeight = ImGui::GetFrameHeight();
@@ -377,6 +412,7 @@ namespace engine::renderer {
 
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 0));
 
+        // Os X (Karmazynowy)
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.18f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.28f, 0.30f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.12f, 0.14f, 1.0f));
@@ -384,9 +420,16 @@ namespace engine::renderer {
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
+        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f")) {
+            values.x = applyCtrlSnap(values.x);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Os X: Przytrzymaj [Ctrl] podczas przeciagania aby przyciagac do siatki (0.5m)");
+        }
         ImGui::SameLine();
 
+        // Os Y (Zielony)
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.75f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.90f, 0.35f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.60f, 0.18f, 1.0f));
@@ -394,9 +437,16 @@ namespace engine::renderer {
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
+        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f")) {
+            values.y = applyCtrlSnap(values.y);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Os Y: Przytrzymaj [Ctrl] podczas przeciagania aby przyciagac do siatki (0.5m)");
+        }
         ImGui::SameLine();
 
+        // Os Z (Niebieski)
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.90f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.48f, 1.0f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.28f, 0.75f, 1.0f));
@@ -404,7 +454,13 @@ namespace engine::renderer {
         ImGui::PopStyleColor(3);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f")) changed = true;
+        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f")) {
+            values.z = applyCtrlSnap(values.z);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Os Z: Przytrzymaj [Ctrl] podczas przeciagania aby przyciagac do siatki (0.5m)");
+        }
 
         ImGui::PopStyleVar();
         ImGui::Columns(1);
@@ -455,7 +511,7 @@ namespace engine::renderer {
             ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  |  %s", st.c_str());
             ImGui::End();
         } else {
-            static bool s_immersivePlay = false;
+                                    static bool s_immersivePlay = false;
             static bool s_showPlaceActors = true;
             static bool s_showOutliner = true;
             static bool s_showDetails = true;
@@ -467,8 +523,39 @@ namespace engine::renderer {
                 s_immersivePlay = !s_immersivePlay;
             }
 
+            // --- PRZESTRZENIE ROBOCZE (WORKSPACES) ---
+            enum class EditorWorkspace {
+                SCENE_LAYOUT = 0,    // 0: Układ Sceny i Aktorzy
+                PHYSICS_SIM = 1,     // 1: Fizyka Jolt & Zelda TotK Chemia
+                MATERIALS_WORLD = 2, // 2: Materiały PBR & Oświetlenie IBL
+                SCRIPTING = 3,       // 3: Skrypty QuickJS & Kod
+                RENDER_PROFILER = 4  // 4: Sprzętowy RT & Profiler GPU
+            };
+            static EditorWorkspace s_activeWorkspace = EditorWorkspace::SCENE_LAYOUT;
+
+            // --- KATEGORIE INSPEKTORA (DETAILS TABS) ---
+            enum class InspectorCategory {
+                TRANSFORM = 0,
+                MESH_PBR = 1,
+                LIGHT = 2,
+                PHYSICS = 3,
+                CHEMISTRY = 4,
+                SCRIPTS = 5,
+                WORLD_IBL = 6,
+                POST_PROCESS = 7,
+                RENDER_RT = 8
+            };
+            static int s_inspectorMode = 0; // 0: Obiekt / Encja, 1: Świat & Silnik
+            static InspectorCategory s_inspectorCategory = InspectorCategory::TRANSFORM;
+
+            // --- INTERAKTYWNE ROZMIARY PANELI (RESIZABLE SPLITTERS) ---
+            static float s_leftPanelW = 270.0f;
+            static float s_rightPanelW = 350.0f;
+            static float s_outlinerSplitRatio = 0.42f;
+            static int s_outlinerFilterCategory = 0; // 0: Wszystko, 1: Siatka, 2: Światło, 3: Fizyka, 4: Gracz/Audio
+
             const float topTitleBarH  = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
-            const float topLevelTabsH = s_immersivePlay ? 0.0f : (26.0f * s_uiScale);
+            const float topLevelTabsH = s_immersivePlay ? 0.0f : (30.0f * s_uiScale);
             const float topToolbarH   = 36.0f * s_uiScale;
             const float topTotalH     = topTitleBarH + topLevelTabsH + topToolbarH;
 
@@ -476,10 +563,15 @@ namespace engine::renderer {
             const float drawerH       = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? std::min(220.0f * s_uiScale, screenH * 0.35f) : 0.0f;
             const float bottomTotalH  = bottomStatusH + drawerH;
 
-            const float contentH        = std::max(180.0f, screenH - topTotalH - bottomTotalH);
-            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? std::min(260.0f * s_uiScale, screenW * 0.25f) : 0.0f;
-            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? std::min(295.0f * s_uiScale, screenW * 0.27f) : 0.0f;
-            const float centerViewportW = std::max(200.0f, screenW - leftPanelW - rightPanelW);
+            const float contentH      = std::max(180.0f, screenH - topTotalH - bottomTotalH);
+
+            s_leftPanelW  = std::clamp(s_leftPanelW, 160.0f * s_uiScale, screenW * 0.40f);
+            s_rightPanelW = std::clamp(s_rightPanelW, 240.0f * s_uiScale, screenW * 0.48f);
+            s_outlinerSplitRatio = std::clamp(s_outlinerSplitRatio, 0.15f, 0.85f);
+
+            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? s_leftPanelW : 0.0f;
+            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_rightPanelW : 0.0f;
+            const float centerViewportW = std::max(180.0f, screenW - leftPanelW - rightPanelW);
 
             static entt::entity selectedEnt = entt::null;
             static NativeGizmoMode s_gizmoMode = NativeGizmoMode::TRANSLATE;
@@ -541,7 +633,6 @@ namespace engine::renderer {
             static float s_snapStep = 0.5f;
             static int s_cameraSpeed = 4;
             static int s_placeActorCategory = 2;
-            static int s_detailsTab = 0;
 
             if (selectedEnt != entt::null && !registry.get().valid(selectedEnt)) {
                 selectedEnt = entt::null;
@@ -552,7 +643,7 @@ namespace engine::renderer {
                 selectedEnt = engine->getSelectedEntity();
             }
 
-            // 1. TOP WINDOW BAR
+            // 1. TOP TITLE / MENU BAR
             if (!s_immersivePlay) {
                 ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(screenW, topTitleBarH), ImGuiCond_Always);
@@ -567,110 +658,141 @@ namespace engine::renderer {
                     ImVec2 badgePos = ImGui::GetCursorScreenPos();
                     const float badgeR = 8.0f * s_uiScale;
                     ImVec2 badgeCenter(badgePos.x + badgeR + 2.0f, badgePos.y + topTitleBarH * 0.42f);
-                    tdl->AddCircleFilled(badgeCenter, badgeR, IM_COL32(0, 140, 235, 255), 16);
-                    tdl->AddText(ImVec2(badgeCenter.x - 3.5f * s_uiScale, badgeCenter.y - 6.5f * s_uiScale), IM_COL32(255, 255, 255, 255), "L");
-                    ImGui::Dummy(ImVec2(badgeR * 2.0f + 4.0f, badgeR * 2.0f));
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "LUCID");
-                    ImGui::SameLine(0.0f, 14.0f * s_uiScale);
+                    tdl->AddCircleFilled(badgeCenter, badgeR, IM_COL32(0, 110, 230, 255));
+                    tdl->AddCircleFilled(badgeCenter, badgeR * 0.55f, IM_COL32(255, 255, 255, 230));
 
-                    if (ImGui::BeginMenu("File")) {
-                        if (ImGui::MenuItem("New Level (Nowy poziom)", "Ctrl+N")) {
-                            if (engine) { selectedEnt = entt::null; engine->setCurrentPreset("empty"); engine->resetScene("empty"); }
-                        }
-                        if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) saveCurrentGame();
-                        if (ImGui::BeginMenu("Open Project (Otworz)")) {
-                            if (ImGui::MenuItem("Wczytaj 'projects/MyGame'")) loadCurrentGame("projects/MyGame");
-                            if (ImGui::MenuItem("Wczytaj 'game.json'")) loadCurrentGame("game.json");
-                            ImGui::EndMenu();
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + badgeR * 2.2f + 6.0f);
+                    ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Lucid Studio");
+                    ImGui::SameLine(0.0f, 8.0f * s_uiScale);
+
+                    if (ImGui::BeginMenu("Plik")) {
+                        if (ImGui::MenuItem("Zapisz projekt", "Ctrl+S")) saveCurrentGame();
+                        if (ImGui::MenuItem("Otworz projekt...", "Ctrl+O")) loadCurrentGame("projects/MyGame");
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Eksportuj gre (.exe)")) {
+                            if (engine) engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame");
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("Kompiluj pelna gre (.exe)", "Ctrl+Shift+P")) {
-                            saveCurrentGame();
-                            if (engine && engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame")) {
-                                snprintf(s_engineNotification, sizeof(s_engineNotification), "Gra skompilowana do Build/Windows/MyLucidGame/!");
-                                s_engineNotificationTimer = 5.0f;
+                        if (ImGui::MenuItem("Zamknij studio")) {
+                            if (m_context && m_context->getWindow()) glfwSetWindowShouldClose(m_context->getWindow(), GLFW_TRUE);
+                        }
+                        ImGui::EndMenu();
+                    }
+                    if (ImGui::BeginMenu("Edycja")) {
+                        if (ImGui::MenuItem("Cofnij", "Ctrl+Z")) {}
+                        if (ImGui::MenuItem("Ponow", "Ctrl+Y")) {}
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Zduplikuj zaznaczony", "Ctrl+D")) {}
+                        if (ImGui::MenuItem("Usun obiekt", "Delete")) {
+                            if (selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                                registry.get().destroy(selectedEnt);
+                                selectedEnt = entt::null;
+                                if (engine) engine->setSelectedEntity(entt::null);
                             }
                         }
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Edit")) {
-                        if (ImGui::MenuItem("World & Graphics Settings")) { s_detailsTab = 1; s_showDetails = true; }
+                    if (ImGui::BeginMenu("Widok")) {
+                        ImGui::MenuItem("Biblioteka aktorow", nullptr, &s_showPlaceActors);
+                        ImGui::MenuItem("Hierarchia sceny (Outliner)", nullptr, &s_showOutliner);
+                        ImGui::MenuItem("Panel wlasciwosci (Details)", nullptr, &s_showDetails);
+                        ImGui::MenuItem("Dziennik zdarzen (Log)", nullptr, &s_showOutputLog);
+                        ImGui::Separator();
+                        ImGui::MenuItem("Pelny ekran (Tryb immersyjny)", "F11", &s_immersivePlay);
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Window")) {
-                        ImGui::MenuItem("Place Actors", nullptr, &s_showPlaceActors);
-                        ImGui::MenuItem("Outliner", nullptr, &s_showOutliner);
-                        ImGui::MenuItem("Details", nullptr, &s_showDetails);
-                        ImGui::MenuItem("Content Drawer", "Ctrl+Space", &s_showContentDrawer);
-                        ImGui::MenuItem("Output Log", nullptr, &s_showOutputLog);
-                        ImGui::MenuItem("Blueprints / Scripts", nullptr, &s_showScriptStudio);
-                        ImGui::Separator();
-                        if (ImGui::BeginMenu("FPS")) {
-                            int curFps = engine ? engine->getTargetFps() : 0;
-                            if (ImGui::MenuItem("30 FPS", nullptr, curFps == 30)) { if (engine) engine->setTargetFps(30); }
-                            if (ImGui::MenuItem("60 FPS", nullptr, curFps == 60)) { if (engine) engine->setTargetFps(60); }
-                            if (ImGui::MenuItem("120 FPS", nullptr, curFps == 120)) { if (engine) engine->setTargetFps(120); }
-                            if (ImGui::MenuItem("240 FPS", nullptr, curFps == 240)) { if (engine) engine->setTargetFps(240); }
-                            if (ImGui::MenuItem("Unlimited (Brak limitu)", nullptr, curFps == 0)) { if (engine) engine->setTargetFps(0); }
-                            ImGui::Separator();
-                            bool vsync = engine ? engine->isVsyncEnabled() : true;
-                            if (ImGui::MenuItem("V-Sync", nullptr, vsync)) {
-                                if (engine) engine->setVsyncEnabled(!vsync);
-                            }
-                            ImGui::EndMenu();
-                        }
-                        if (ImGui::BeginMenu("Anti-Aliasing (FXAA 3.11)")) {
-                            if (ImGui::MenuItem("Off (Brak AA)", nullptr, m_antiAliasingMode == 0)) m_antiAliasingMode = 0;
+                    if (ImGui::BeginMenu("Grafika")) {
+                        if (ImGui::BeginMenu("Anti-Aliasing (FXAA)")) {
+                            if (ImGui::MenuItem("Wylaczone", nullptr, m_antiAliasingMode == 0)) m_antiAliasingMode = 0;
                             if (ImGui::MenuItem("FXAA Fast", nullptr, m_antiAliasingMode == 1)) m_antiAliasingMode = 1;
-                            if (ImGui::MenuItem("FXAA Quality (Subpixel)", nullptr, m_antiAliasingMode == 2)) m_antiAliasingMode = 2;
+                            if (ImGui::MenuItem("FXAA Quality", nullptr, m_antiAliasingMode == 2)) m_antiAliasingMode = 2;
                             if (ImGui::MenuItem("FXAA Ultra", nullptr, m_antiAliasingMode == 3)) m_antiAliasingMode = 3;
                             ImGui::EndMenu();
                         }
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Tools")) {
-                        if (ImGui::MenuItem("Execute QuickJS Script")) s_showScriptStudio = true;
-                        if (ImGui::MenuItem("Export TypeScript (.d.ts)") && engine) engine->exportTypeDefinitions();
+                    if (ImGui::BeginMenu("Narzedzia")) {
+                        if (ImGui::MenuItem("Studio Skryptow QuickJS (F4)")) s_showScriptStudio = true;
+                        if (ImGui::MenuItem("Eksportuj TypeScript (engine.d.ts)") && engine) engine->exportTypeDefinitions();
                         ImGui::EndMenu();
                     }
 
-                    const float projOffset = screenW * 0.52f;
+                    const float projOffset = screenW * 0.55f;
                     if (ImGui::GetCursorPosX() < projOffset) ImGui::SameLine(projOffset);
-                    ImGui::TextDisabled("Renderer:");
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Vulkan 1.3 Cubemap IBL + Kulla-Conty PBR");
+                    ImGui::TextDisabled("Vulkan 1.3 | Cubemap IBL + ACES HDR");
                     ImGui::EndMenuBar();
                 }
                 ImGui::End();
                 ImGui::PopStyleColor(2);
                 ImGui::PopStyleVar();
 
-                // 2. LEVEL TABS STRIP
+                // 2. WORKSPACE SELECTION BAR (Blender/Unreal Mode Bar)
                 ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 2));
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.043f, 0.067f, 1.0f));
-                ImGui::Begin("LevelTabsStrip", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
+                ImGui::Begin("WorkspaceSelectorBar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
 
-                const std::string curPreset = engine ? engine->getCurrentPreset() : "empty";
+                // Etykieta aktywnego poziomu
                 ImVec2 tabStart = ImGui::GetCursorScreenPos();
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.086f, 0.086f, 0.125f, 1.0f));
-                if (ImGui::Button("    CzystyPoziom.scene  (Persistent)   x ", ImVec2(0, topLevelTabsH - 4.0f)) && engine) {
+                const std::string curPreset = engine ? engine->getCurrentPreset() : "empty";
+                if (ImGui::Button("    Scena: CzystyPoziom ", ImVec2(0, topLevelTabsH - 4.0f)) && engine) {
                     selectedEnt = entt::null;
                     engine->resetScene(curPreset);
                 }
                 ImGui::PopStyleColor();
                 ImVec2 tabEnd = ImGui::GetItemRectMax();
-                ImGui::GetWindowDrawList()->AddLine(tabStart, ImVec2(tabEnd.x, tabStart.y), IM_COL32(0, 130, 240, 255), 2.0f);
                 drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * s_uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
+
+                ImGui::SameLine(0.0f, 16.0f * s_uiScale);
+
+                // Przyciski przestrzeni roboczych (Workspaces)
+                auto drawWorkspaceTab = [&](const char* title, EditorWorkspace ws) {
+                    const bool active = (s_activeWorkspace == ws);
+                    if (active) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.44f, 0.95f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.07f, 0.075f, 0.10f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.76f, 0.85f, 1.0f));
+                    }
+                    if (ImGui::Button(title, ImVec2(0, topLevelTabsH - 4.0f))) {
+                        s_activeWorkspace = ws;
+                        if (ws == EditorWorkspace::PHYSICS_SIM) {
+                            s_inspectorMode = 0;
+                            s_inspectorCategory = InspectorCategory::PHYSICS;
+                        } else if (ws == EditorWorkspace::MATERIALS_WORLD) {
+                            s_inspectorMode = 1;
+                            s_inspectorCategory = InspectorCategory::WORLD_IBL;
+                        } else if (ws == EditorWorkspace::SCRIPTING) {
+                            s_showScriptStudio = true;
+                            s_inspectorMode = 0;
+                            s_inspectorCategory = InspectorCategory::SCRIPTS;
+                        } else if (ws == EditorWorkspace::RENDER_PROFILER) {
+                            s_inspectorMode = 1;
+                            s_inspectorCategory = InspectorCategory::RENDER_RT;
+                        } else if (ws == EditorWorkspace::SCENE_LAYOUT) {
+                            s_inspectorMode = 0;
+                            s_inspectorCategory = InspectorCategory::TRANSFORM;
+                        }
+                    }
+                    ImGui::PopStyleColor(2);
+                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
+                };
+
+                drawWorkspaceTab("  Scena 3D  ", EditorWorkspace::SCENE_LAYOUT);
+                drawWorkspaceTab("  Fizyka & Symulacja  ", EditorWorkspace::PHYSICS_SIM);
+                drawWorkspaceTab("  Materialy & Swiat  ", EditorWorkspace::MATERIALS_WORLD);
+                drawWorkspaceTab("  Skrypty QuickJS  ", EditorWorkspace::SCRIPTING);
+                drawWorkspaceTab("  Render & Profiler  ", EditorWorkspace::RENDER_PROFILER);
 
                 ImGui::End();
                 ImGui::PopStyleColor();
                 ImGui::PopStyleVar();
             }
 
-            // 3. MAIN TOOLBAR
+            // 3. MAIN TOOLBAR (Transport Dock, Narzedzia projektu i perspektywa)
             ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH + topLevelTabsH), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(screenW, topToolbarH), ImGuiCond_Always);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 5));
@@ -678,69 +800,79 @@ namespace engine::renderer {
             ImGui::Begin("MainToolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
 
             const float btnH = topToolbarH - 10.0f;
-            if (ImGui::Button(" Save ", ImVec2(0, btnH))) saveCurrentGame();
+
+            // Zapisz projekt
+            ImVec2 sPos = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("     Zapisz ", ImVec2(0, btnH))) saveCurrentGame();
+            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * s_uiScale, sPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zapisz biezacy stan projektu [Ctrl+S]");
             ImGui::SameLine();
 
+            // Studio Skryptow
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.72f, 1.0f, 1.0f));
-            if (ImGui::Button(" </> Blueprints / Scripts ", ImVec2(0, btnH))) s_showScriptStudio = !s_showScriptStudio;
+            if (ImGui::Button(" </> Blueprints ", ImVec2(0, btnH))) s_showScriptStudio = !s_showScriptStudio;
             ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Otworz QuickJS ESM Live Coding & Skrypty (F4)");
             ImGui::SameLine();
 
+            // Szybkie ustawienia oswietlenia i renderera
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.32f, 1.0f));
-            if (ImGui::Button(" Graphics & IBL Settings ", ImVec2(0, btnH))) { s_detailsTab = 1; s_showDetails = true; }
+            ImVec2 gPos = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) {
+                s_inspectorMode = 1;
+                s_inspectorCategory = InspectorCategory::WORLD_IBL;
+                s_showDetails = true;
+            }
+            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * s_uiScale, gPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
             ImGui::PopStyleColor();
             ImGui::SameLine();
 
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.04f, 0.28f, 0.18f, 0.95f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.98f, 0.68f, 1.0f));
-            if (ImGui::Button(" Kompiluj gre (.exe) ", ImVec2(0, btnH)) && engine) {
-                engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame");
-            }
-            ImGui::PopStyleColor(2);
-
-            const float transportPos = screenW * 0.56f;
+            // Transport Dock (Play / Pause / Stop / Step)
+            const float transportPos = screenW * 0.44f;
             if (ImGui::GetCursorPosX() < transportPos) ImGui::SameLine(transportPos);
             const bool isPaused = engine ? engine->isPaused() : true;
 
-            ImGui::PushStyleColor(ImGuiCol_Button, !isPaused ? ImVec4(0.06f, 0.35f, 0.20f, 1.0f) : ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.25f, 0.95f, 0.52f, 1.0f));
-            if (ImGui::Button(" Play ", ImVec2(0, btnH)) && engine) engine->playSimulation();
-            ImGui::PopStyleColor(2);
-            ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.75f, 0.18f, 1.0f));
-            if (ImGui::Button(" || Pause ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
-            ImGui::PopStyleColor();
-            ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.38f, 0.42f, 1.0f));
-            if (ImGui::Button(" Stop ", ImVec2(0, btnH)) && engine) engine->stopSimulation();
-            ImGui::PopStyleColor();
-            ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-
-            if (ImGui::Button(" >| ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 0.016f);
-
-            const float rightToolbarX = screenW - 265.0f * s_uiScale;
-            if (ImGui::GetCursorPosX() < rightToolbarX) ImGui::SameLine(rightToolbarX);
-
-            const char* camModes[] = { "Editor Cam", "TPP (Gracz)", "Top-Down", "Side View" };
-            static int camModeIdx = 0;
-            ImGui::SetNextItemWidth(105.0f * s_uiScale);
-            if (ImGui::Combo("##CamModeToolbar", &camModeIdx, camModes, IM_ARRAYSIZE(camModes)) && engine) {
-                if (camModeIdx == 0) engine->setCameraMode("editor");
-                else if (camModeIdx == 1) engine->setCameraMode("thirdPerson");
-                else if (camModeIdx == 2) engine->setCameraMode("topDown");
-                else if (camModeIdx == 3) engine->setCameraMode("sideScroller");
+            ImVec2 plPos = ImGui::GetCursorScreenPos();
+            if (!isPaused) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.55f, 0.25f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                if (ImGui::Button("     PLAYING ", ImVec2(0, btnH)) && engine) engine->playSimulation();
+                ImGui::PopStyleColor(2);
+            } else {
+                if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) engine->playSimulation();
             }
-            ImGui::SameLine(0.0f, 6.0f * s_uiScale);
-            if (ImGui::Button(" Tryb Gry (F11) ", ImVec2(0, btnH))) s_immersivePlay = !s_immersivePlay;
+            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * s_uiScale, plPos.y + btnH * 0.5f), 5.0f * s_uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Uruchom symulacje fizyki Jolt i skrypty");
+            ImGui::SameLine();
+
+            ImVec2 paPos = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("     Pauza ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
+            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * s_uiScale, paPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wstrzymaj symulacje fizyki");
+            ImGui::SameLine();
+
+            ImVec2 stPos = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) engine->stopSimulation();
+            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * s_uiScale, stPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
+            ImGui::SameLine();
+
+            if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wykonaj krok symulacji o dokladnie 1 klatke (1/60s)");
+
+            // Tryb rzutu kamery
+            ImGui::SameLine(screenW - 170.0f * s_uiScale);
+            static int s_camMode = 0;
+            const char* camModes[] = { "Perspektywa", "Ortogonalna" };
+            ImGui::SetNextItemWidth(155.0f * s_uiScale);
+            ImGui::Combo("##CameraModeCombo", &s_camMode, camModes, IM_ARRAYSIZE(camModes));
 
             ImGui::End();
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
-            // 4A. FAR-LEFT TOOL DOCK & 4B. PLACE ACTORS PALETTE
-            const float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (36.0f * s_uiScale) : 0.0f;
+            // 4. LEWY PANEL: BIBLIOTEKA AKTOROW (Zwijany i skalowalny)
+            const float toolDockW = 40.0f * s_uiScale;
             if (!s_immersivePlay && s_showPlaceActors) {
                 ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(toolDockW, contentH), ImGuiCond_Always);
@@ -761,7 +893,11 @@ namespace engine::renderer {
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
                     if (ImGui::Button("##DockBtn", ImVec2(itemSz, itemSz))) {
                         s_activeToolMode = i;
-                        if (i == 5) { s_detailsTab = 1; s_showDetails = true; }
+                        if (i == 5) {
+                            s_inspectorMode = 1;
+                            s_inspectorCategory = InspectorCategory::WORLD_IBL;
+                            s_showDetails = true;
+                        }
                     }
                     ImGui::PopStyleColor();
                     drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
@@ -778,10 +914,14 @@ namespace engine::renderer {
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
+                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Biblioteka Aktorow");
+                ImGui::SameLine(ImGui::GetWindowWidth() - 30.0f * s_uiScale);
+                if (ImGui::SmallButton("<##CollapseLeft")) s_showPlaceActors = false;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin lewy panel");
+
                 static char classSearch[64] = "";
                 ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
+                ImGui::InputTextWithHint("##SearchClasses", "Szukaj szablonu...", classSearch, sizeof(classSearch));
                 ImGui::Separator();
 
                 auto spawnCard = [&](const char* title, const char* desc, int spawnType, VectorIconType iconType, ImU32 iconCol) {
@@ -829,11 +969,12 @@ namespace engine::renderer {
                             ecs::RigidBodyComponent rb; rb.mass = 1.0f; rb.shapeType = 2; rb.capsuleRadius = 0.6f; rb.capsuleHalfHeight = 0.8f;
                             rb.lockRotationX = true; rb.lockRotationZ = true;
                             registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
-                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.0f, 0.85f, 1.0f, 1.0f); mat.metallic = 0.25f; mat.roughness = 0.25f;
+                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.2f, 0.8f, 0.4f, 1.0f);
                             registry.get().emplace<ecs::MaterialComponent>(entity, mat);
+                            registry.get().emplace<ecs::CharacterMovementComponent>(entity, ecs::CharacterMovementComponent{});
                         } else if (spawnType == 3) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PointLight"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 2.5f, 0.0f));
+                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 2.0f, 0.0f));
                             registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"point", glm::vec3(1.0f, 0.95f, 0.8f), 4.0f, 20.0f});
                         } else if (spawnType == 7) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"ChromeSphere"});
@@ -880,7 +1021,7 @@ namespace engine::renderer {
                 ImGui::PopStyleColor();
             }
 
-            // 5. CENTER PANEL: BORDERLESS 3D VIEWPORT
+            // 5. VIEWPORT 3D (W centrum z interaktywnymi nakladkami i splitterami)
             ImGui::SetNextWindowPos(ImVec2(leftPanelW, topTotalH), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(centerViewportW, contentH), ImGuiCond_Always);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -984,228 +1125,101 @@ namespace engine::renderer {
                 }
             }
 
-            int hoveredGizmoAxis = 0;
-            ImVec2 originScreen(0, 0), ptX(0, 0), ptY(0, 0), ptZ(0, 0);
-            bool hasSelectedTransform = (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt));
+            // Obsluga nawigacji kamery w Viewporcie (RMB / MMB / Alt)
+            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                s_isRmbNavigating = true;
+            }
+            if (s_isRmbNavigating) {
+                if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+                    s_isRmbNavigating = false;
+                } else {
+                    ImVec2 mouseDelta = ImGui::GetIO().MouseDelta;
+                    camYaw   += mouseDelta.x * 0.18f;
+                    camPitch -= mouseDelta.y * 0.18f;
+                    camPitch = std::clamp(camPitch, -89.0f, 89.0f);
 
-            if (hasSelectedTransform) {
-                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                const float gizmoLen = std::max(0.7f, glm::length(camPos - t.position) * 0.14f);
-                float originW = 0.0f, wX = 0.0f, wY = 0.0f, wZ = 0.0f;
-                const bool originVisible = worldToScreen(t.position, originScreen, originW);
-                const bool xVis = worldToScreen(t.position + glm::vec3(gizmoLen, 0.0f, 0.0f), ptX, wX);
-                const bool yVis = worldToScreen(t.position + glm::vec3(0.0f, gizmoLen, 0.0f), ptY, wY);
-                const bool zVis = worldToScreen(t.position + glm::vec3(0.0f, 0.0f, gizmoLen), ptZ, wZ);
+                    float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed * 0.5f);
+                    if (ImGui::IsKeyDown(ImGuiKey_LeftShift)) speed *= 3.0f;
 
-                if (originVisible && isHovered && !s_isRmbNavigating && !s_isMmbPanning && !s_isAltOrbiting) {
-                    if (hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y) <= 14.0f) hoveredGizmoAxis = 4;
-                    else if (xVis && distToSegment(mousePos, originScreen, ptX) <= 12.0f) hoveredGizmoAxis = 1;
-                    else if (yVis && distToSegment(mousePos, originScreen, ptY) <= 12.0f) hoveredGizmoAxis = 2;
-                    else if (zVis && distToSegment(mousePos, originScreen, ptZ) <= 12.0f) hoveredGizmoAxis = 3;
+                    if (ImGui::IsKeyDown(ImGuiKey_W)) camPos += front * speed;
+                    if (ImGui::IsKeyDown(ImGuiKey_S)) camPos -= front * speed;
+                    if (ImGui::IsKeyDown(ImGuiKey_D)) camPos += right * speed;
+                    if (ImGui::IsKeyDown(ImGuiKey_A)) camPos -= right * speed;
+                    if (ImGui::IsKeyDown(ImGuiKey_E)) camPos += glm::vec3(0.0f, 1.0f, 0.0f) * speed;
+                    if (ImGui::IsKeyDown(ImGuiKey_Q)) camPos -= glm::vec3(0.0f, 1.0f, 0.0f) * speed;
+
+                    if (engine) engine->setCamera(camPos, camYaw, camPitch, camFov);
                 }
             }
 
-            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) { s_isRmbNavigating = true; ImGui::SetWindowFocus("Viewport"); }
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) s_isRmbNavigating = false;
-            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) { s_isMmbPanning = true; ImGui::SetWindowFocus("Viewport"); }
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) s_isMmbPanning = false;
-
-            const bool altDown = ImGui::IsKeyDown(ImGuiKey_LeftAlt) || ImGui::IsKeyDown(ImGuiKey_RightAlt);
-            if (isHovered && altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { s_isAltOrbiting = true; ImGui::SetWindowFocus("Viewport"); }
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) { s_isAltOrbiting = false; s_draggingGizmoAxis = 0; }
-
-            if (isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                if (hoveredGizmoAxis > 0 && hasSelectedTransform) {
-                    s_draggingGizmoAxis = hoveredGizmoAxis;
-                    auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                    s_dragInitialEntityPos = t.position;
-                    s_dragInitialRotation  = t.rotation;
-                    s_dragInitialScale     = t.scale;
-                    s_dragPivotScreen      = originScreen;
-
-                    s_dragAxisVec = (s_draggingGizmoAxis == 1) ? glm::vec3(1,0,0) :
-                                    (s_draggingGizmoAxis == 2) ? glm::vec3(0,1,0) :
-                                    (s_draggingGizmoAxis == 3) ? glm::vec3(0,0,1) : glm::vec3(0);
-
-                    if (s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
-                        const glm::vec3 toCam = camPos - s_dragInitialEntityPos;
-                        glm::vec3 vPerp = toCam - glm::dot(toCam, s_dragAxisVec) * s_dragAxisVec;
-                        if (glm::length(vPerp) < 1e-4f) vPerp = glm::vec3(0.0f, 1.0f, 0.0f);
-                        s_dragPlaneNormal = glm::normalize(vPerp);
-                    } else {
-                        s_dragPlaneNormal = -front;
-                    }
-
-                    glm::vec3 clickRayOrig, clickRayDir;
-                    getRayFromScreen(mousePos, clickRayOrig, clickRayDir);
-                    s_dragHasHit = intersectRayPlane(clickRayOrig, clickRayDir, s_dragInitialEntityPos, s_dragPlaneNormal, s_dragInitialHitPoint);
-                    s_dragInitialOffset = (s_dragHasHit && s_draggingGizmoAxis <= 3) ? glm::dot(s_dragInitialHitPoint - s_dragInitialEntityPos, s_dragAxisVec) : 0.0f;
-                    s_lastRotAngle = atan2f(mousePos.y - originScreen.y, mousePos.x - originScreen.x) * (180.0f / 3.14159265f);
-                    s_accumulatedRotAngle = 0.0f;
-                    s_dragInitialDist = std::max(10.0f, hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y));
-                } else if (hoveredLightEntity != entt::null) {
+            // Selekcja promieniem (Raycast) przy kliknieciu lewym przyciskiem
+            if (isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && s_draggingGizmoAxis == 0) {
+                if (hoveredLightEntity != entt::null) {
                     selectedEnt = hoveredLightEntity;
                     if (engine) engine->setSelectedEntity(selectedEnt);
-                    hasSelectedTransform = true;
                 } else {
-                    glm::vec3 rayOrig, rayDir;
-                    getRayFromScreen(mousePos, rayOrig, rayDir);
-                    entt::entity hitEnt = entt::null;
-                    float closestDist = 1e9f;
+                    glm::vec3 rOrig, rDir;
+                    getRayFromScreen(mousePos, rOrig, rDir);
 
-                    auto tView = registry.get().view<ecs::TransformComponent>();
-                    for (auto entity : tView) {
-                        const auto& tc = tView.get<ecs::TransformComponent>(entity);
-                        if (registry.get().all_of<ecs::MeshComponent>(entity) && registry.get().get<ecs::MeshComponent>(entity).meshId == 1) continue;
-                        if (registry.get().all_of<ecs::TagComponent>(entity)) {
-                            const auto& tn = registry.get().get<ecs::TagComponent>(entity).name;
-                            if (tn == "Ground" || tn == "GroundPlane") continue;
-                        }
-                        const glm::vec3 halfExt = registry.get().all_of<ecs::LightComponent>(entity)
-                            ? glm::vec3(1.5f)
-                            : glm::max(tc.scale * 0.5f, glm::vec3(0.05f));
-                        const glm::quat rot = glm::dot(tc.orientation, tc.orientation) < 0.001f ? glm::quat(glm::radians(tc.rotation)) : glm::normalize(tc.orientation);
-                        const glm::quat invRot = glm::inverse(rot);
-                        const glm::vec3 rOrigLocal = invRot * (rayOrig - tc.position);
-                        const glm::vec3 rDirLocal  = invRot * rayDir;
-                        const glm::vec3 invD(
-                            std::abs(rDirLocal.x) > 1e-7f ? 1.0f / rDirLocal.x : 1e7f,
-                            std::abs(rDirLocal.y) > 1e-7f ? 1.0f / rDirLocal.y : 1e7f,
-                            std::abs(rDirLocal.z) > 1e-7f ? 1.0f / rDirLocal.z : 1e7f
-                        );
-                        const glm::vec3 t0 = (-halfExt - rOrigLocal) * invD;
-                        const glm::vec3 t1 = (+halfExt - rOrigLocal) * invD;
-                        const glm::vec3 tMinV = glm::min(t0, t1), tMaxV = glm::max(t0, t1);
-                        const float tNear = std::max({tMinV.x, tMinV.y, tMinV.z});
-                        const float tFar  = std::min({tMaxV.x, tMaxV.y, tMaxV.z});
-                        if (tNear <= tFar && tFar >= 0.0f) {
-                            const float tHit = (tNear >= 0.0f) ? tNear : tFar;
-                            if (tHit < closestDist) { closestDist = tHit; hitEnt = entity; }
-                        }
-                    }
-                    selectedEnt = hitEnt;
-                    if (engine) engine->setSelectedEntity(hitEnt);
-                    hasSelectedTransform = (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt));
-                }
-            }
+                    entt::entity bestHitEnt = entt::null;
+                    float bestDist = 1e9f;
 
-            if (s_draggingGizmoAxis > 0 && hasSelectedTransform) {
-                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
-                    glm::vec3 curRayOrig, curRayDir;
-                    getRayFromScreen(mousePos, curRayOrig, curRayDir);
-                    const float denom = glm::dot(curRayDir, s_dragPlaneNormal);
-                    if (std::abs(denom) > 0.03f) {
-                        const float tDist = glm::dot(s_dragInitialEntityPos - curRayOrig, s_dragPlaneNormal) / denom;
-                        if (tDist > 0.05f && tDist < 5000.0f) {
-                            const glm::vec3 curHit = curRayOrig + tDist * curRayDir;
-                            if (s_draggingGizmoAxis <= 3) {
-                                float deltaAxis = glm::dot(curHit - s_dragInitialEntityPos, s_dragAxisVec) - s_dragInitialOffset;
-                                if (s_snapEnabled && s_snapStep > 0.01f) deltaAxis = std::round(deltaAxis / s_snapStep) * s_snapStep;
-                                t.position = s_dragInitialEntityPos + s_dragAxisVec * deltaAxis;
-                            } else {
-                                t.position = s_dragInitialEntityPos + (curHit - s_dragInitialHitPoint);
+                    auto viewEntities = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
+                    for (auto ent : viewEntities) {
+                        const auto& t = viewEntities.get<ecs::TransformComponent>(ent);
+                        const float radius = std::max(t.scale.x, std::max(t.scale.y, t.scale.z)) * 0.75f;
+                        glm::vec3 m = rOrig - t.position;
+                        float b = glm::dot(m, rDir);
+                        float c = glm::dot(m, m) - radius * radius;
+                        if (c <= 0.0f || b <= 0.0f) {
+                            float discr = b * b - c;
+                            if (discr >= 0.0f) {
+                                float tHit = -b - sqrtf(discr);
+                                if (tHit > 0.0f && tHit < bestDist) {
+                                    bestDist = tHit;
+                                    bestHitEnt = ent;
+                                }
                             }
-                            if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                         }
                     }
-                } else if (s_gizmoMode == NativeGizmoMode::ROTATE) {
-                    const float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.14159265f);
-                    float dAngle = curAngle - s_lastRotAngle;
-                    while (dAngle > 180.0f) dAngle -= 360.0f;
-                    while (dAngle < -180.0f) dAngle += 360.0f;
-                    s_accumulatedRotAngle += dAngle;
-                    s_lastRotAngle = curAngle;
-                    const float finalAngle = s_snapEnabled ? std::round(s_accumulatedRotAngle / 15.0f) * 15.0f : s_accumulatedRotAngle;
-                    t.rotation = s_dragInitialRotation;
-                    if (s_draggingGizmoAxis == 1) t.rotation.x += finalAngle;
-                    else if (s_draggingGizmoAxis == 2 || s_draggingGizmoAxis == 4) t.rotation.y += finalAngle;
-                    else if (s_draggingGizmoAxis == 3) t.rotation.z += finalAngle;
-                    t.orientation = glm::quat(glm::radians(t.rotation));
-                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
-                    float scaleFactor = hypotf(mousePos.x - s_dragPivotScreen.x, mousePos.y - s_dragPivotScreen.y) / s_dragInitialDist;
-                    if (s_snapEnabled) scaleFactor = std::max(0.1f, std::round(scaleFactor / 0.25f) * 0.25f);
-                    if (s_draggingGizmoAxis == 1) t.scale.x = std::max(0.01f, s_dragInitialScale.x * scaleFactor);
-                    else if (s_draggingGizmoAxis == 2) t.scale.y = std::max(0.01f, s_dragInitialScale.y * scaleFactor);
-                    else if (s_draggingGizmoAxis == 3) t.scale.z = std::max(0.01f, s_dragInitialScale.z * scaleFactor);
-                    else t.scale = glm::max(glm::vec3(0.01f), s_dragInitialScale * scaleFactor);
-                }
-            }
-
-            if (s_isRmbNavigating && engine) {
-                camYaw += ImGui::GetIO().MouseDelta.x * 0.20f;
-                camPitch = glm::clamp(camPitch - ImGui::GetIO().MouseDelta.y * 0.20f, -89.0f, 89.0f);
-                const glm::vec3 cf = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                const glm::vec3 cr = glm::normalize(glm::cross(cf, glm::vec3(0.0f, 1.0f, 0.0f)));
-                float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed / 4.0f);
-                if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) speed *= 3.0f;
-                if (ImGui::IsKeyDown(ImGuiKey_W)) camPos += cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_S)) camPos -= cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_A)) camPos -= cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_D)) camPos += cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_E)) camPos.y += speed;
-                if (ImGui::IsKeyDown(ImGuiKey_Q)) camPos.y -= speed;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isMmbPanning && engine) {
-                camPos -= (right * ImGui::GetIO().MouseDelta.x - up * ImGui::GetIO().MouseDelta.y) * 0.04f;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isAltOrbiting && engine) {
-                const glm::vec3 pivot = hasSelectedTransform ? registry.get().get<ecs::TransformComponent>(selectedEnt).position : (camPos + front * 10.0f);
-                const float orbitDist = std::max(0.5f, glm::length(camPos - pivot));
-                camYaw += ImGui::GetIO().MouseDelta.x * 0.25f;
-                camPitch = glm::clamp(camPitch - ImGui::GetIO().MouseDelta.y * 0.25f, -89.0f, 89.0f);
-                const glm::vec3 of = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                engine->setCamera(pivot - of * orbitDist, camYaw, camPitch, camFov);
-            }
-            if (isHovered && std::abs(ImGui::GetIO().MouseWheel) > 0.01f && engine) {
-                engine->setCamera(camPos + front * (ImGui::GetIO().MouseWheel * 3.0f), camYaw, camPitch, camFov);
-            }
-
-            // Ikony świateł 3D w stylu Blender / UE5
-            {
-                auto lightEntities = registry.get().view<ecs::TransformComponent, ecs::LightComponent>();
-                for (auto lEnt : lightEntities) {
-                    const auto& tc = lightEntities.get<ecs::TransformComponent>(lEnt);
-                    const auto& lc = lightEntities.get<ecs::LightComponent>(lEnt);
-                    ImVec2 iconCenter; float iconW = 0.0f;
-                    if (!worldToScreen(tc.position, iconCenter, iconW) || iconW <= 0.05f) continue;
-
-                    const bool isSelected = (selectedEnt == lEnt);
-                    const bool isHov = (hoveredLightEntity == lEnt);
-                    const ImU32 lCol = IM_COL32((int)(lc.color.r * 255), (int)(lc.color.g * 255), (int)(lc.color.b * 255), isSelected ? 255 : 215);
-                    if (isSelected || isHov) {
-                        drawList->AddCircle(iconCenter, 19.0f * s_uiScale, IM_COL32(0, 240, 255, isSelected ? 255 : 170), 0, 2.2f);
+                    if (bestHitEnt != entt::null) {
+                        selectedEnt = bestHitEnt;
+                        if (engine) engine->setSelectedEntity(selectedEnt);
                     }
-                    drawList->AddCircleFilled(iconCenter, 10.5f * s_uiScale, lCol);
-                    drawList->AddCircle(iconCenter, 10.5f * s_uiScale, IM_COL32(255, 255, 255, 235), 0, 1.5f);
                 }
             }
 
-            // Zaznaczenie i Gizmo 3D
-            if (hasSelectedTransform) {
+            // Rysowanie Gizmo 3D dla zaznaczonego obiektu
+            int hoveredGizmoAxis = 0;
+            if (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                float origW = 0.0f;
-                if (worldToScreen(t.position, originScreen, origW)) {
-                    const int act = (s_draggingGizmoAxis > 0) ? s_draggingGizmoAxis : hoveredGizmoAxis;
-                    const ImU32 colX = (act == 1) ? IM_COL32(255, 255, 60, 255) : IM_COL32(239, 68, 68, 255);
-                    const ImU32 colY = (act == 2) ? IM_COL32(255, 255, 60, 255) : IM_COL32(34, 197, 94, 255);
-                    const ImU32 colZ = (act == 3) ? IM_COL32(255, 255, 60, 255) : IM_COL32(59, 130, 246, 255);
-                    drawList->AddLine(originScreen, ptX, colX, (act == 1) ? 4.0f : 2.8f);
-                    drawList->AddLine(originScreen, ptY, colY, (act == 2) ? 4.0f : 2.8f);
-                    drawList->AddLine(originScreen, ptZ, colZ, (act == 3) ? 4.0f : 2.8f);
-                    drawList->AddCircleFilled(originScreen, 5.5f, IM_COL32(245, 245, 255, 230));
+                ImVec2 originScreen;
+                float originW = 0.0f;
+                if (worldToScreen(t.position, originScreen, originW) && originW > 0.05f) {
+                    const float gizmoLen = 65.0f * s_uiScale;
+                    ImVec2 ptX, ptY, ptZ;
+                    float wX = 0.0f, wY = 0.0f, wZ = 0.0f;
+                    worldToScreen(t.position + glm::vec3(1.5f, 0.0f, 0.0f), ptX, wX);
+                    worldToScreen(t.position + glm::vec3(0.0f, 1.5f, 0.0f), ptY, wY);
+                    worldToScreen(t.position + glm::vec3(0.0f, 0.0f, 1.5f), ptZ, wZ);
+
+                    const ImU32 colX = (s_draggingGizmoAxis == 1) ? IM_COL32(255, 255, 60, 255) : IM_COL32(239, 68, 68, 255);
+                    const ImU32 colY = (s_draggingGizmoAxis == 2) ? IM_COL32(255, 255, 60, 255) : IM_COL32(34, 197, 94, 255);
+                    const ImU32 colZ = (s_draggingGizmoAxis == 3) ? IM_COL32(255, 255, 60, 255) : IM_COL32(59, 130, 246, 255);
+
+                    drawList->AddLine(originScreen, ptX, colX, (s_draggingGizmoAxis == 1) ? 4.0f : 2.8f);
+                    drawList->AddLine(originScreen, ptY, colY, (s_draggingGizmoAxis == 2) ? 4.0f : 2.8f);
+                    drawList->AddLine(originScreen, ptZ, colZ, (s_draggingGizmoAxis == 3) ? 4.0f : 2.8f);
+                    drawList->AddCircleFilled(originScreen, 5.0f, IM_COL32(255, 255, 255, 240));
                 }
             }
 
             if (!s_immersivePlay) {
-                // Pigułka narzędzi Gizmo (lewy górny róg Viewportu)
+                // Nakladka lewa gorna: Tryb Gizmo, Snap i Szybkosc kamery
                 ImGui::SetCursorPos(ImVec2(10.0f * s_uiScale, 10.0f * s_uiScale));
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
                 ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(270.0f * s_uiScale, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
+                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(340.0f * s_uiScale, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
                 auto gizmoToolBtn = [&](const char* id, NativeGizmoMode mode, VectorIconType icon) {
                     const bool active = (s_gizmoMode == mode);
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.47f, 0.83f, 1.0f) : ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
@@ -1221,22 +1235,30 @@ namespace engine::renderer {
                 gizmoToolBtn("##GizS", NativeGizmoMode::SCALE,     VectorIconType::Scale);
                 if (ImGui::Button(s_snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * s_uiScale))) s_snapEnabled = !s_snapEnabled;
                 ImGui::SameLine();
-                if (ImGui::Button((" Cam " + std::to_string(s_cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * s_uiScale))) s_cameraSpeed = (s_cameraSpeed % 8) + 1;
+                if (ImGui::Button((" Cam " + std::to_string(s_cameraSpeed) + "x ").c_str(), ImVec2(0, 22.0f * s_uiScale))) s_cameraSpeed = (s_cameraSpeed % 8) + 1;
+                ImGui::SameLine();
+                if (ImGui::Button(" Przod ", ImVec2(0, 22.0f * s_uiScale)) && engine) {
+                    engine->setCamera(glm::vec3(0.0f, 5.0f, 25.0f), -90.0f, 0.0f, camFov);
+                }
                 ImGui::EndChild();
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
 
-                // Pigułka statusu (prawy górny róg Viewportu)
-                const float trPillW = 350.0f * s_uiScale;
+                // Nakladka prawa gorna: Telemetria i format bufora
+                const float trPillW = 320.0f * s_uiScale;
                 ImGui::SetCursorPos(ImVec2(std::max(10.0f, viewportPanelSize.x - trPillW - 10.0f * s_uiScale), 10.0f * s_uiScale));
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
                 ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
                 ImGui::BeginChild("VpOverlayTopRight", ImVec2(trPillW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Cubemap IBL + ACES");
+                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "PBR + IBL");
                 ImGui::SameLine();
                 ImGui::TextDisabled("|");
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(0.20f, 0.92f, 0.58f, 1.0f), "%ux%u (EV %.2f)", m_width, m_height, m_exposure);
+                ImGui::SameLine();
+                if (!s_showDetails) {
+                    if (ImGui::SmallButton("< Rozwin")) s_showDetails = true;
+                }
                 ImGui::EndChild();
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
@@ -1246,23 +1268,76 @@ namespace engine::renderer {
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
-            // 6. OUTLINER PANEL
-            const float outlinerH = s_showDetails ? (contentH * 0.42f) : contentH;
+            // 6. OUTLINER PANEL (Hierarchia Sceny z filtrami kategorialnymi)
+            const float outlinerH = s_showDetails ? (contentH * s_outlinerSplitRatio) : contentH;
             if (!s_immersivePlay && s_showOutliner) {
                 ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(rightPanelW, outlinerH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("OutlinerPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Outliner");
+                // Naglowek panelu z tytulem i przyciskiem zwijania
+                ImDrawList* odl = ImGui::GetWindowDrawList();
+                ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
+                drawVectorIcon(odl, ImVec2(oHdrPos.x + 8.0f * s_uiScale, oHdrPos.y + 9.0f * s_uiScale), 5.5f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * s_uiScale);
+                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Hierarchia Sceny");
+
+                auto view = registry.get().view<ecs::TransformComponent>();
+                size_t totalEnts = view.size();
+                ImGui::SameLine(ImGui::GetWindowWidth() - 105.0f * s_uiScale);
+                ImGui::TextDisabled("[%zu encji]", totalEnts);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(">##CollapseRight")) { s_showOutliner = false; s_showDetails = false; }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin prawy panel");
+
+                // Filtry kategorialne (Wszystko / Siatki / Swiatla / Fizyka / Gracz)
+                auto filterChip = [&](const char* name, int catIdx) {
+                    const bool active = (s_outlinerFilterCategory == catIdx);
+                    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.44f, 0.95f, 1.0f));
+                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.09f, 0.12f, 1.0f));
+                    if (ImGui::SmallButton(name)) s_outlinerFilterCategory = catIdx;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0.0f, 3.0f * s_uiScale);
+                };
+                filterChip("Wszystko", 0);
+                filterChip("Siatki", 1);
+                filterChip("Swiatla", 2);
+                filterChip("Fizyka", 3);
+                filterChip("Gracz", 4);
+                ImGui::NewLine();
+
+                // Wyszukiwarka i przycisk spawnowania
                 static char outlinerFilter[64] = "";
-                ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##OutlinerSearch", "Search...", outlinerFilter, sizeof(outlinerFilter));
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 62.0f * s_uiScale);
+                ImGui::InputTextWithHint("##OutlinerSearch", "Filtruj scene...", outlinerFilter, sizeof(outlinerFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("+ Spawn", ImVec2(58.0f * s_uiScale, 0))) {
+                    auto newEnt = registry.createEntity();
+                    glm::vec3 sp = camPos + front * 6.0f;
+                    if (sp.y < 0.5f) sp.y = 0.5f;
+                    registry.get().emplace<ecs::TagComponent>(newEnt, ecs::TagComponent{"NowyAktor_" + std::to_string(static_cast<uint32_t>(newEnt))});
+                    registry.get().emplace<ecs::TransformComponent>(newEnt, sp, glm::vec3(0.0f), glm::vec3(1.0f));
+                    registry.get().emplace<ecs::MeshComponent>(newEnt, ecs::MeshComponent{2});
+                    selectedEnt = newEnt;
+                    if (engine) engine->setSelectedEntity(selectedEnt);
+                }
+
                 ImGui::Separator();
 
+                // Lista encji z rozpoznawaniem typow i filtrowaniem
                 ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
-                auto view = registry.get().view<ecs::TransformComponent>();
                 for (auto entity : view) {
+                    const bool isLight = registry.get().all_of<ecs::LightComponent>(entity);
+                    const bool isPlayer = registry.get().all_of<ecs::CharacterMovementComponent>(entity) || registry.get().all_of<ecs::AudioComponent>(entity);
+                    const bool isPhys = registry.get().all_of<ecs::RigidBodyComponent>(entity) || registry.get().all_of<ecs::DestructibleComponent>(entity);
+                    const bool isMesh = registry.get().all_of<ecs::MeshComponent>(entity);
+
+                    if (s_outlinerFilterCategory == 1 && !isMesh) continue;
+                    if (s_outlinerFilterCategory == 2 && !isLight) continue;
+                    if (s_outlinerFilterCategory == 3 && !isPhys) continue;
+                    if (s_outlinerFilterCategory == 4 && !isPlayer) continue;
+
                     std::string label = "Entity_" + std::to_string(static_cast<uint32_t>(entity));
                     if (registry.get().all_of<ecs::TagComponent>(entity)) {
                         label = registry.get().get<ecs::TagComponent>(entity).name;
@@ -1274,555 +1349,437 @@ namespace engine::renderer {
                         if (l.find(f) == std::string::npos) continue;
                     }
                     const bool isSelected = (selectedEnt == entity);
+
+                    VectorIconType eIcon = VectorIconType::Cube;
+                    ImU32 eCol = IM_COL32(96, 165, 250, 240);
+                    const char* typeBadge = "Mesh";
+
+                    if (isLight) {
+                        eIcon = VectorIconType::Light;
+                        eCol = IM_COL32(250, 204, 21, 255);
+                        typeBadge = "Light";
+                    } else if (registry.get().all_of<ecs::AudioComponent>(entity)) {
+                        eIcon = VectorIconType::Speaker;
+                        eCol = IM_COL32(251, 146, 60, 255);
+                        typeBadge = "Audio";
+                    } else if (registry.get().all_of<ecs::CharacterMovementComponent>(entity)) {
+                        eIcon = VectorIconType::Character;
+                        eCol = IM_COL32(52, 211, 153, 255);
+                        typeBadge = "Player";
+                    } else if (registry.get().all_of<ecs::DestructibleComponent>(entity)) {
+                        eIcon = VectorIconType::WarningTri;
+                        eCol = IM_COL32(249, 115, 22, 255);
+                        typeBadge = "Destr";
+                    } else if (isPhys) {
+                        eIcon = VectorIconType::Cube;
+                        eCol = IM_COL32(147, 197, 253, 255);
+                        typeBadge = "Phys";
+                    }
+
                     ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
-                    if (ImGui::Selectable(label.c_str(), isSelected)) {
+                    ImVec2 rowPos = ImGui::GetCursorScreenPos();
+                    const float rowH = 22.0f * s_uiScale;
+
+                    drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + 10.0f * s_uiScale, rowPos.y + rowH * 0.5f), 5.5f * s_uiScale, eIcon, eCol);
+
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 20.0f * s_uiScale);
+                    const std::string selectableText = label + "##Row";
+                    if (ImGui::Selectable(selectableText.c_str(), isSelected, 0, ImVec2(ImGui::GetContentRegionAvail().x - 48.0f * s_uiScale, rowH))) {
                         selectedEnt = entity;
                         if (engine) engine->setSelectedEntity(selectedEnt);
                     }
+
+                    // Menu kontekstowe pod prawym przyciskiem myszy
+                    if (ImGui::BeginPopupContextItem("EntityCtxMenu")) {
+                        selectedEnt = entity;
+                        if (engine) engine->setSelectedEntity(selectedEnt);
+                        ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Encja #%u: %s", static_cast<uint32_t>(entity), label.c_str());
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Skup kamere [F]")) {
+                            if (registry.get().all_of<ecs::TransformComponent>(entity)) {
+                                const auto& tc = registry.get().get<ecs::TransformComponent>(entity);
+                                if (engine) engine->setCamera(tc.position - front * 8.0f, camYaw, camPitch, camFov);
+                            }
+                        }
+                        if (ImGui::MenuItem("Zresetuj pozycje (0, 0, 0)")) {
+                            if (registry.get().all_of<ecs::TransformComponent>(entity)) {
+                                auto& tc = registry.get().get<ecs::TransformComponent>(entity);
+                                tc.position = glm::vec3(0.0f);
+                                if (engine) engine->syncEntityTransformPhysics(entity);
+                            }
+                        }
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Usun obiekt [Delete]")) {
+                            registry.get().destroy(entity);
+                            if (selectedEnt == entity) selectedEnt = entt::null;
+                            if (engine) engine->setSelectedEntity(entt::null);
+                            ImGui::EndPopup();
+                            ImGui::PopID();
+                            break;
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    // Etykieta typu encji po prawej stronie wiersza
+                    ImGui::SameLine(ImGui::GetWindowWidth() - 44.0f * s_uiScale);
+                    ImGui::TextDisabled("[%s]", typeBadge);
+
                     ImGui::PopID();
                 }
                 ImGui::EndChild();
+
                 ImGui::End();
                 ImGui::PopStyleColor();
             }
 
-            // 7. DETAILS & WORLD / GRAPHICS SETTINGS PANEL
+            // 7. DETAILS PANEL: KATEGORYZOWANY INSPEKTOR (Zamiast jednego wielkiego worka!)
             if (!s_immersivePlay && s_showDetails) {
                 const float detailsY = topTotalH + (s_showOutliner ? outlinerH : 0.0f);
                 const float detailsH = s_showOutliner ? (contentH - outlinerH) : contentH;
-
                 ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, detailsY), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(rightPanelW, detailsH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("DetailsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
-                if (ImGui::Button("  Details  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 0;
-                ImGui::SameLine();
-                if (ImGui::Button("  World & Graphics  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 1;
+                // Przelacznik kontekstu: Obiekt vs Swiat
+                const float halfW = (ImGui::GetContentRegionAvail().x - 6.0f * s_uiScale) * 0.5f;
+                auto drawContextBtn = [&](const char* label, int mode) {
+                    const bool active = (s_inspectorMode == mode);
+                    if (active) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.44f, 0.95f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.09f, 0.12f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.68f, 0.72f, 0.82f, 1.0f));
+                    }
+                    if (ImGui::Button(label, ImVec2(halfW, 23.0f * s_uiScale))) {
+                        s_inspectorMode = mode;
+                    }
+                    ImGui::PopStyleColor(2);
+                };
+                drawContextBtn("Obiekt / Encja", 0);
+                ImGui::SameLine(0.0f, 4.0f * s_uiScale);
+                drawContextBtn("Swiat & Grafika", 1);
                 ImGui::Separator();
 
-                if (s_detailsTab == 0) {
+                // Pasek podkategorii (Tabs)
+                auto drawCategoryChip = [&](const char* title, InspectorCategory cat) {
+                    const bool active = (s_inspectorCategory == cat);
+                    if (active) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.52f, 0.95f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.09f, 0.10f, 0.14f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.74f, 0.84f, 1.0f));
+                    }
+                    if (ImGui::SmallButton(title)) s_inspectorCategory = cat;
+                    ImGui::PopStyleColor(2);
+                    ImGui::SameLine(0.0f, 3.0f * s_uiScale);
+                };
+
+                if (s_inspectorMode == 0) {
+                    // Tryb edycji zaznaczonego obiektu
+                    drawCategoryChip("Transform", InspectorCategory::TRANSFORM);
+                    drawCategoryChip("Siatka/PBR", InspectorCategory::MESH_PBR);
+                    drawCategoryChip("Swiatlo", InspectorCategory::LIGHT);
+                    drawCategoryChip("Fizyka", InspectorCategory::PHYSICS);
+                    drawCategoryChip("Chemia", InspectorCategory::CHEMISTRY);
+                    drawCategoryChip("Skrypt", InspectorCategory::SCRIPTS);
+                    ImGui::NewLine();
+                    ImGui::Separator();
+
                     if (selectedEnt == entt::null || !registry.get().valid(selectedEnt)) {
                         ImGui::Spacing();
-                        ImGui::TextDisabled("Kliknij obiekt w Viewporcie lub wybierz z Outlinera.");
-                        ImGui::TextDisabled("Przelacz na zakladke 'World & Graphics', aby sterowac IBL, Mgla, Bloom i FXAA.");
+                        ImGui::TextDisabled("Nie zaznaczono zadnego obiektu.");
+                        ImGui::TextDisabled("Kliknij obiekt w Viewporcie lub wybierz z Outlinera powyzej.");
                     } else {
                         std::string tagStr = registry.get().all_of<ecs::TagComponent>(selectedEnt)
                             ? registry.get().get<ecs::TagComponent>(selectedEnt).name
                             : "Actor";
-                        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "%s (#%u)", tagStr.c_str(), static_cast<uint32_t>(selectedEnt));
-                        ImGui::Separator();
 
-                        if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                            auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const bool pCh = drawVec3Control("Location", t.position, 0.0f);
-                                const bool rCh = drawVec3Control("Rotation", t.rotation, 0.0f);
-                                const bool sCh = drawVec3Control("Scale", t.scale, 1.0f);
+                        // 1. KATEGORIA: TRANSFORM
+                        if (s_inspectorCategory == InspectorCategory::TRANSFORM) {
+                            char nameBuf[64];
+                            strncpy(nameBuf, tagStr.c_str(), sizeof(nameBuf) - 1);
+                            nameBuf[sizeof(nameBuf) - 1] = '\0';
+                            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 70.0f * s_uiScale);
+                            if (ImGui::InputText("##EntityName", nameBuf, sizeof(nameBuf))) {
+                                if (registry.get().all_of<ecs::TagComponent>(selectedEnt)) {
+                                    registry.get().get<ecs::TagComponent>(selectedEnt).name = nameBuf;
+                                } else {
+                                    registry.get().emplace<ecs::TagComponent>(selectedEnt, ecs::TagComponent{nameBuf});
+                                }
+                            }
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("#%u", static_cast<uint32_t>(selectedEnt));
+                            ImGui::Separator();
+
+                            if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
+                                auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
+                                const bool pCh = drawVec3Control("Pozycja (m)", t.position, 0.0f);
+                                const bool rCh = drawVec3Control("Rotacja (deg)", t.rotation, 0.0f);
+                                const bool sCh = drawVec3Control("Skala", t.scale, 1.0f);
                                 if (rCh) t.orientation = glm::quat(glm::radians(t.rotation));
                                 if ((pCh || rCh || sCh) && engine) engine->syncEntityTransformPhysics(selectedEnt);
-                            }
-                        }
 
-                        if (registry.get().all_of<ecs::LightComponent>(selectedEnt)) {
-                            auto& lc = registry.get().get<ecs::LightComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Light Component (PBR)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const char* lightTypes[] = { "point", "sun", "spot", "area" };
-                                int curType = (lc.type == "directional" || lc.type == "sun") ? 1 : (lc.type == "spot" ? 2 : (lc.type == "area" ? 3 : 0));
-                                if (ImGui::Combo("Light Type", &curType, "Point Light\0Directional (Sun)\0Spot Light\0Area Light (Rect)\0\0")) {
-                                    lc.type = lightTypes[curType];
+                                ImGui::Spacing();
+                                ImGui::Separator();
+                                if (ImGui::Button(" Zresetuj pozycje (0, 0, 0) ")) {
+                                    t.position = glm::vec3(0.0f);
+                                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                                 }
-                                ImGui::ColorEdit3("Color", (float*)&lc.color);
-                                ImGui::DragFloat("Intensity", &lc.intensity, 0.1f, 0.0f, 100.0f, "%.2f");
-
-                                if (curType == 0) { // Point
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                } else if (curType == 1) { // Sun / Directional
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-
-                                        ImGui::Spacing();
-                                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Kierunek padania slonca (Sun Direction):");
-                                        if (ImGui::SliderFloat("Elevation (Pitch)", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Azimuth (Yaw)", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-
-                                        const float pitchRad = glm::radians(lt.rotation.x);
-                                        const float yawRad   = glm::radians(lt.rotation.y);
-                                        const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
-                                        const glm::vec3 currentSunDir = -sunForward;
-                                        ImGui::TextDisabled("Wektor swiatla: (%.2f, %.2f, %.2f)", currentSunDir.x, currentSunDir.y, currentSunDir.z);
-
-                                        ImGui::Text("Pory dnia:");
-                                        if (ImGui::SmallButton("Poludnie (Noon)")) {
-                                            lt.rotation.x = -75.0f; lt.rotation.y = 0.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Poranek")) {
-                                            lt.rotation.x = -20.0f; lt.rotation.y = 80.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Zlota godzina")) {
-                                            lt.rotation.x = -12.0f; lt.rotation.y = 240.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Zachod")) {
-                                            lt.rotation.x = -3.0f; lt.rotation.y = 265.0f; changed = true;
-                                        }
-
-                                        ImGui::Spacing();
-                                        if (engine) {
-                                            auto env = engine->getEnvironmentSettings();
-                                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)", &env.sunEnabled)) {
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                            if (ImGui::Checkbox("Kierunek z pozycji 3D (Direction From Position)", &env.sunDirectionFromPosition)) {
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                            ImGui::SameLine();
-                                            ImGui::TextDisabled("(?)");
-                                            if (ImGui::IsItemHovered()) {
-                                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
-                                            }
-                                        }
-
-                                        ImGui::Spacing();
-                                        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Pozycja slonca 3D (Sun Position):");
-                                        if (drawVec3Control("Pozycja (XYZ)", lt.position, 0.0f)) changed = true;
-                                        if (ImGui::DragFloat("Wysokosc / Altitude (Y)", &lt.position.y, 0.5f, -200.0f, 2000.0f, "%.1f m")) changed = true;
-
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) {
-                                                engine->syncEntityTransformPhysics(selectedEnt);
-                                                auto env = engine->getEnvironmentSettings();
-                                                env.sunDirection = currentSunDir;
-                                                env.sunColor = lc.color;
-                                                env.sunIntensity = lc.intensity;
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                        }
-                                    }
-                                } else if (curType == 2) { // Spot
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Inner Cone", &lc.innerConeAngle, 1.0f, 80.0f, "%.1f deg");
-                                    if (lc.outerConeAngle <= lc.innerConeAngle) lc.outerConeAngle = lc.innerConeAngle + 0.5f;
-                                    ImGui::SliderFloat("Outer Cone", &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, "%.1f deg");
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-                                        if (ImGui::SliderFloat("Spot Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Spot Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                                        }
-                                    }
-                                } else if (curType == 3) { // Area
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Area Width X", &lc.areaSizeX, 0.2f, 20.0f, "%.2f m");
-                                    ImGui::SliderFloat("Area Height Y", &lc.areaSizeY, 0.2f, 20.0f, "%.2f m");
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-                                        if (ImGui::SliderFloat("Area Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Area Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                                        }
-                                    }
+                                ImGui::SameLine();
+                                if (ImGui::Button(" Skup kamere [F] ")) {
+                                    if (engine) engine->setCamera(t.position - front * 8.0f, camYaw, camPitch, camFov);
                                 }
                             }
                         }
 
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
-                            auto& mc = registry.get().get<ecs::MeshComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Static Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const char* meshes[] = { "None", "Plane (Ground)", "Cube (1x1x1)", "Sphere (R=0.5)", "Cylinder", "Capsule" };
+                        // 2. KATEGORIA: SIATKA & PBR
+                        else if (s_inspectorCategory == InspectorCategory::MESH_PBR) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Siatka Geometrii & Material PBR");
+                            ImGui::Separator();
+                            if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
+                                auto& mc = registry.get().get<ecs::MeshComponent>(selectedEnt);
+                                const char* meshes[] = { "Brak", "Plaszczyzna (Ground)", "Szescian (1x1x1)", "Kula (R=0.5)", "Walec", "Kapsula" };
                                 int curMesh = std::clamp(static_cast<int>(mc.meshId), 0, 5);
-                                if (ImGui::Combo("Mesh Asset", &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
+                                if (ImGui::Combo("Model Siatki", &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
                                     mc.meshId = static_cast<uint32_t>(curMesh);
                                 }
+                            } else {
+                                if (ImGui::Button("+ Dodaj komponent Siatki (Mesh)")) {
+                                    registry.get().emplace<ecs::MeshComponent>(selectedEnt, ecs::MeshComponent{2});
+                                }
+                            }
+
+                            ImGui::Spacing();
+                            ImGui::Separator();
+                            ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Parametry Materialu PBR (GGX)");
+                            if (!registry.get().all_of<ecs::MaterialComponent>(selectedEnt)) {
+                                if (ImGui::Button("+ Utworz wlasny Material PBR")) {
+                                    ecs::MaterialComponent m{};
+                                    m.baseColor = glm::vec4(0.85f, 0.85f, 0.90f, 1.0f);
+                                    m.metallic = 0.0f;
+                                    m.roughness = 0.35f;
+                                    m.emissiveIntensity = 0.0f;
+                                    registry.get().emplace<ecs::MaterialComponent>(selectedEnt, m);
+                                }
+                            } else {
+                                auto& mat = registry.get().get<ecs::MaterialComponent>(selectedEnt);
+                                ImGui::ColorEdit4("Kolor Albedo", &mat.baseColor.x);
+                                ImGui::SliderFloat("Metaliczność", &mat.metallic, 0.0f, 1.0f, "%.2f");
+                                ImGui::SliderFloat("Chropowatość", &mat.roughness, 0.045f, 1.0f, "%.3f");
+                                ImGui::DragFloat("Emisja HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
+
+                                ImGui::Spacing();
+                                ImGui::TextDisabled("Szablony PBR:");
+                                if (ImGui::SmallButton("Chrom/Lustro")) { mat.metallic = 1.0f; mat.roughness = 0.05f; }
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("Zloto")) { mat.baseColor = glm::vec4(1.0f, 0.76f, 0.33f, 1.0f); mat.metallic = 1.0f; mat.roughness = 0.15f; }
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("Plastik")) { mat.metallic = 0.0f; mat.roughness = 0.35f; }
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("Neon")) { mat.emissiveIntensity = 12.0f; }
                             }
                         }
 
-                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL)
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
-                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                if (!registry.get().all_of<ecs::MaterialComponent>(selectedEnt)) {
-                                    if (ImGui::Button("+ Dodaj wlasny Material PBR")) {
-                                        ecs::MaterialComponent m{};
-                                        m.baseColor = glm::vec4(0.85f, 0.85f, 0.90f, 1.0f);
-                                        m.metallic = 0.0f;
-                                        m.roughness = 0.35f;
-                                        m.emissiveIntensity = 0.0f;
-                                        registry.get().emplace<ecs::MaterialComponent>(selectedEnt, m);
-                                    }
-                                } else {
-                                    auto& mat = registry.get().get<ecs::MaterialComponent>(selectedEnt);
-                                    ImGui::ColorEdit3("Base Color (Albedo)", &mat.baseColor.x);
-                                    ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f, "%.2f");
-                                    ImGui::SliderFloat("Roughness", &mat.roughness, 0.045f, 1.0f, "%.3f");
-                                    ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
+                        // 3. KATEGORIA: SWIATLO (PBR LIGHT)
+                        else if (s_inspectorCategory == InspectorCategory::LIGHT) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Zrodlo Swiatla PBR");
+                            ImGui::Separator();
+                            if (registry.get().all_of<ecs::LightComponent>(selectedEnt)) {
+                                auto& lc = registry.get().get<ecs::LightComponent>(selectedEnt);
+                                const char* lightTypes[] = { "point", "sun", "spot", "area" };
+                                int curType = (lc.type == "directional" || lc.type == "sun") ? 1 : (lc.type == "spot" ? 2 : (lc.type == "area" ? 3 : 0));
+                                if (ImGui::Combo("Typ Swiatla", &curType, "Punktowe (Point)\0Kierunkowe (Slonce)\0Reflektor (Spot)\0Obszarowe (Area)\0\0")) {
+                                    lc.type = lightTypes[curType];
+                                }
+                                ImGui::ColorEdit3("Kolor", (float*)&lc.color);
+                                ImGui::DragFloat("Jasność / Moc", &lc.intensity, 0.1f, 0.0f, 100.0f, "%.2f");
+                                ImGui::DragFloat("Zasięg (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
+
+                                if (curType == 2) {
+                                    ImGui::SliderFloat("Kąt stożka", &lc.outerConeAngle, 5.0f, 85.0f, "%.1f deg");
+                                }
+                            } else {
+                                ImGui::TextDisabled("Ten obiekt nie emituje swiatla.");
+                                if (ImGui::Button("+ Dodaj komponent Swiatla (PBR Light)")) {
+                                    registry.get().emplace<ecs::LightComponent>(selectedEnt, ecs::LightComponent{"point", glm::vec3(1.0f), 5.0f, 20.0f});
                                 }
                             }
                         }
 
-                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
-                            auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Jolt Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f);
-                                ImGui::SliderFloat("Restitution", &rb.restitution, 0.0f, 1.0f);
-                                ImGui::SliderFloat("Friction", &rb.friction, 0.0f, 1.0f);
-                                ImGui::Checkbox("Is Sensor (Trigger)", &rb.isSensor);
+                        // 4. KATEGORIA: FIZYKA JOLT
+                        else if (s_inspectorCategory == InspectorCategory::PHYSICS) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Fizyka Jolt (RigidBody)");
+                            ImGui::Separator();
+                            if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
+                                auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEnt);
+                                const char* motionTypes[] = { "Dynamiczny (Symulowany)", "Statyczny (Nieruchomy)", "Kinematyczny" };
+                                int mType = (rb.mass <= 0.0f) ? 1 : 0;
+                                if (ImGui::Combo("Tryb Ruchu", &mType, motionTypes, IM_ARRAYSIZE(motionTypes))) {
+                                    rb.mass = (mType == 1) ? 0.0f : 1.0f;
+                                }
+                                if (mType == 0) {
+                                    ImGui::DragFloat("Masa (kg)", &rb.mass, 0.1f, 0.01f, 1000.0f, "%.2f kg");
+                                    ImGui::SameLine();
+                                    if (ImGui::SmallButton("1kg")) rb.mass = 1.0f;
+                                    ImGui::SameLine();
+                                    if (ImGui::SmallButton("10kg")) rb.mass = 10.0f;
+                                }
+                                ImGui::SliderFloat("Sprezystosc (Restitution)", &rb.restitution, 0.0f, 1.0f, "%.2f");
+                                ImGui::SliderFloat("Tarcie (Friction)", &rb.friction, 0.0f, 1.0f, "%.2f");
+                                ImGui::Checkbox("Jest czujnikiem (Sensor/Trigger)", &rb.isSensor);
+                                ImGui::Checkbox("Blokada obrotu X", &rb.lockRotationX);
+                                ImGui::SameLine();
+                                ImGui::Checkbox("Blokada obrotu Z", &rb.lockRotationZ);
+                            } else {
+                                ImGui::TextDisabled("Ten obiekt nie bierze udzialu w symulacji fizyki.");
+                                if (ImGui::Button("+ Dodaj Cialo Sztywne Jolt")) {
+                                    ecs::RigidBodyComponent rb{};
+                                    rb.mass = 1.0f;
+                                    rb.shapeType = 0;
+                                    registry.get().emplace<ecs::RigidBodyComponent>(selectedEnt, rb);
+                                }
+                            }
+                        }
+
+                        // 5. KATEGORIA: CHEMIA / ZYWIOŁY (ZELDA TOTK)
+                        else if (s_inspectorCategory == InspectorCategory::CHEMISTRY) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Reakcje Chemiczne & Żywioły (Zelda TotK)");
+                            ImGui::Separator();
+                            static float s_elemTemp = 20.0f;
+                            static float s_elemWet = 0.0f;
+                            static float s_elemConduct = 0.5f;
+
+                            ImGui::SliderFloat("Temperatura (°C)", &s_elemTemp, -50.0f, 600.0f, "%.1f °C");
+                            if (s_elemTemp > 400.0f) {
+                                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.1f, 1.0f), "[STATUS: OBIEKT PŁONIE]");
+                            } else if (s_elemTemp < 0.0f) {
+                                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "[STATUS: ZAMROŻONY]");
+                            } else {
+                                ImGui::TextColored(ImVec4(0.35f, 0.9f, 0.45f, 1.0f), "[STATUS: NORMALNY]");
+                            }
+
+                            ImGui::SliderFloat("Wilgotność (Woda)", &s_elemWet, 0.0f, 1.0f, "%.2f");
+                            ImGui::SliderFloat("Przewodnictwo", &s_elemConduct, 0.0f, 1.0f, "%.2f");
+
+                            ImGui::Spacing();
+                            ImGui::TextDisabled("Interakcje na zywo:");
+                            if (ImGui::Button(" Podpal (450°C) ")) s_elemTemp = 450.0f;
+                            ImGui::SameLine();
+                            if (ImGui::Button(" Ugas woda ")) { s_elemTemp = 20.0f; s_elemWet = 1.0f; }
+                            ImGui::SameLine();
+                            if (ImGui::Button(" Zamroz (-20°C) ")) s_elemTemp = -20.0f;
+                        }
+
+                        // 6. KATEGORIA: SKRYPTY QUICKJS
+                        else if (s_inspectorCategory == InspectorCategory::SCRIPTS) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Skrypty QuickJS & Rozgrywka");
+                            ImGui::Separator();
+                            static char scriptBindingPath[128] = "scripts/gameplay.js";
+                            ImGui::InputText("Plik Skryptu", scriptBindingPath, sizeof(scriptBindingPath));
+                            ImGui::TextColored(ImVec4(0.25f, 0.95f, 0.55f, 1.0f), "Status: ESM Modul Gotowy");
+
+                            ImGui::Spacing();
+                            if (ImGui::Button(" Przeprowadz Hot-Reload Skryptu ")) {
+                                if (engine) engine->loadScript(engine->getCurrentScript());
+                            }
+                            if (ImGui::Button(" Otworz Pelne Studio Skryptow (F4) ")) {
+                                s_showScriptStudio = true;
                             }
                         }
                     }
                 } else {
-                    // Hardware ray-query effects are optional; raster shadows remain the fallback.
-                    if (ImGui::CollapsingHeader("Hardware Ray Tracing (Vulkan Ray Query)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const bool rtSupported = m_context && m_context->isRayTracingSupported();
-                        if (!rtSupported) {
-                            ImGui::TextDisabled("Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features.");
-                        }
-                        ImGui::BeginDisabled(!rtSupported);
-                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rtSettings.enabled);
-                        ImGui::BeginDisabled(!m_rtSettings.enabled);
-                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtSettings.shadowsEnabled);
-                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtSettings.aoEnabled);
-                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
-                        ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
-                        ImGui::EndDisabled();
-                        ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.giEnabled);
-                        ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
-                        ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
-                        ImGui::EndDisabled();
+                    // Tryb edycji globalnego swiata, oswietlenia i renderera
+                    drawCategoryChip("Swiat & IBL", InspectorCategory::WORLD_IBL);
+                    drawCategoryChip("Postprocesy", InspectorCategory::POST_PROCESS);
+                    drawCategoryChip("Ray Tracing & Profiler", InspectorCategory::RENDER_RT);
+                    ImGui::NewLine();
+                    ImGui::Separator();
 
-                        // GI + AO are traced in compute, then temporally accumulated and denoised.
-                        ImGui::SeparatorText("RT Sampling & Denoising");
-                        ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
-                        ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtSettings.denoiseEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
-                        ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
-                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
-                        ImGui::Checkbox("SVGF (Variance-Guided Filter)", &m_rtSettings.svgfEnabled);
-                        ImGui::EndDisabled();
+                    // G1. SWIAT & IBL
+                    if (s_inspectorCategory == InspectorCategory::WORLD_IBL) {
+                        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Otoczenie, Niebo HDRI & Slonce");
+                        ImGui::Separator();
 
-                        // Debug Visualization Modes
-                        ImGui::SeparatorText("RT Debug & Diagnostics");
-                        const char* debugModes[] = {
-                            "0: Off (Composite Render)",
-                            "1: Raw Indirect Trace (imgS)",
-                            "2: History Length (0..maxHistory)",
-                            "3: Octahedral Geometric Normals",
-                            "4: Linear Depth",
-                            "5: Ambient Occlusion Only",
-                            "6: Specular Reflections Only",
-                            "7: Luminance Variance (SVGF)"
-                        };
-                        int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
-                        if (ImGui::Combo("RT Debug View", &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
-                            m_rtSettings.debugMode = static_cast<RtDebugMode>(currentDebugMode);
-                        }
-
-                        // RT GPU Timers
-                        const auto& timings = m_rtDenoiser.getGpuTimings();
-                        if (ImGui::TreeNode("RT GPU Profiler (Compute Timers)")) {
-                            ImGui::Text("GI Trace Pass:    %.3f ms", timings.traceMs);
-                            ImGui::Text("Refl Trace Pass:  %.3f ms", timings.reflTraceMs);
-                            ImGui::Text("GI Temporal:      %.3f ms", timings.temporalMs);
-                            ImGui::Text("Refl Temporal:    %.3f ms", timings.reflTemporalMs);
-                            ImGui::Text("Atrous Step 1:    %.3f ms", timings.atrous0Ms);
-                            ImGui::Text("Atrous Step 2:    %.3f ms", timings.atrous1Ms);
-                            ImGui::Separator();
-                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Total RT Compute: %.3f ms", timings.totalMs);
-                            ImGui::TreePop();
-                        }
-
-                        ImGui::EndDisabled();
-                        m_rtSettings.giSamples = std::clamp(m_rtSettings.giSamples, 1, 16);
-                        m_rtSettings.reflectionSamples = std::clamp(m_rtSettings.reflectionSamples, 1, 16);
-                        m_rtSettings.maxHistory = std::clamp(m_rtSettings.maxHistory, 4, 256);
-                        ImGui::EndDisabled();
-                        ImGui::EndDisabled();
-                    }
-
-                    // Zakładka World & Graphics Settings (wszystkie nowe systemy Vulkan 1.3)
-                    if (ImGui::CollapsingHeader("GPU Cubemap IBL & Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const char* hdriItems[] = {
-                            "0: Sunset (Zachod slonca)",
-                            "1: Studio (Neutralne studio)",
-                            "2: City (Panorama miejska)",
-                            "3: Courtyard (Dziedziniec)",
-                            "4: Forest (Otoczenie lesne)",
-                            "5: Interior (Wnetrze)",
-                            "6: Night (Nocne niebo)",
-                            "7: Sunrise (Wschod slonca)"
-                        };
-                        int currentHdri = m_selectedHdriIndex;
-                        if (ImGui::Combo("HDRI Environment", &currentHdri, hdriItems, IM_ARRAYSIZE(hdriItems))) {
-                            g_pendingHdriIndex = currentHdri;
+                        const char* hdriPresets[] = { "Sunset (Zachod)", "Clear Sky (Czyste niebo)", "City (Miasto)", "Courtyard (Dziedziniec)", "Forest (Las)", "Interior (Wnetrze)", "Night (Noc)", "Sunrise (Wschod)" };
+                        static int curHdri = 0;
+                        if (ImGui::Combo("Preset Nieba HDRI", &curHdri, hdriPresets, IM_ARRAYSIZE(hdriPresets))) {
                             if (engine) {
                                 auto env = engine->getEnvironmentSettings();
-                                switch (currentHdri) {
-                                    case 0: // Sunset
-                                        env.sunColor = glm::vec3(1.0f, 0.65f, 0.30f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.75f, 0.12f, 0.45f));
-                                        env.ambientColor = glm::vec3(0.22f, 0.12f, 0.18f);
-                                        env.sunIntensity = 4.2f;
-                                        break;
-                                    case 1: // Studio
-                                        env.sunColor = glm::vec3(1.0f, 1.0f, 1.0f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.0f, 0.95f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.35f, 0.36f, 0.38f);
-                                        env.sunIntensity = 2.5f;
-                                        break;
-                                    case 2: // City
-                                        env.sunColor = glm::vec3(1.0f, 0.96f, 0.88f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.40f, 0.75f, -0.30f));
-                                        env.ambientColor = glm::vec3(0.18f, 0.22f, 0.28f);
-                                        env.sunIntensity = 3.2f;
-                                        break;
-                                    case 3: // Courtyard
-                                        env.sunColor = glm::vec3(1.0f, 0.98f, 0.92f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.35f, 0.85f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.20f, 0.24f, 0.30f);
-                                        env.sunIntensity = 3.6f;
-                                        break;
-                                    case 4: // Forest
-                                        env.sunColor = glm::vec3(1.0f, 0.94f, 0.82f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.45f, 0.65f, 0.45f));
-                                        env.ambientColor = glm::vec3(0.12f, 0.25f, 0.14f);
-                                        env.sunIntensity = 3.0f;
-                                        break;
-                                    case 5: // Interior
-                                        env.sunColor = glm::vec3(1.0f, 0.92f, 0.78f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.20f, 0.92f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.30f, 0.26f, 0.22f);
-                                        env.sunIntensity = 2.2f;
-                                        break;
-                                    case 6: // Night
-                                        env.sunColor = glm::vec3(0.65f, 0.80f, 1.0f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.60f, 0.55f, -0.40f));
-                                        env.ambientColor = glm::vec3(0.02f, 0.03f, 0.06f);
-                                        env.sunIntensity = 0.8f;
-                                        break;
-                                    case 7: // Sunrise
-                                    default:
-                                        env.sunColor = glm::vec3(1.0f, 0.82f, 0.60f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.80f, 0.10f, 0.35f));
-                                        env.ambientColor = glm::vec3(0.24f, 0.16f, 0.20f);
-                                        env.sunIntensity = 3.8f;
-                                        break;
+                                switch (curHdri) {
+                                    case 0: env.sunColor = glm::vec3(1.0f, 0.78f, 0.45f); env.sunIntensity = 3.5f; break;
+                                    case 1: env.sunColor = glm::vec3(1.0f, 1.0f, 0.95f); env.sunIntensity = 2.5f; break;
+                                    case 2: env.sunColor = glm::vec3(1.0f, 0.96f, 0.88f); env.sunIntensity = 3.2f; break;
+                                    case 4: env.sunColor = glm::vec3(1.0f, 0.94f, 0.82f); env.sunIntensity = 3.0f; break;
+                                    case 6: env.sunColor = glm::vec3(0.65f, 0.80f, 1.0f); env.sunIntensity = 0.8f; break;
+                                    default: break;
                                 }
                                 engine->setEnvironmentSettings(env);
                             }
                         }
 
-                        ImGui::InputTextWithHint("##CustomHdri", "Sciezka do pliku .exr / .hdr (np. C:/maps/sky.exr)", m_customHdriPath, sizeof(m_customHdriPath));
+                        ImGui::InputTextWithHint("##CustomHdri", "Wlasny plik .exr/.hdr...", m_customHdriPath, sizeof(m_customHdriPath));
                         ImGui::SameLine();
-                        if (ImGui::Button("Wczytaj HDRI/EXR")) {
-                            if (m_customHdriPath[0] != '\0') {
-                                loadEnvironmentHdriFile(m_customHdriPath);
-                            }
+                        if (ImGui::Button("Wczytaj")) {
+                            if (m_customHdriPath[0] != '\0') loadEnvironmentHdriFile(m_customHdriPath);
                         }
 
-                        bool hdriEnvironmentEnabled = m_skyboxEnabled || m_iblEnabled;
-                        if (ImGui::Checkbox("HDRI Environment Enabled (Skybox + IBL)", &hdriEnvironmentEnabled)) {
-                            m_skyboxEnabled = hdriEnvironmentEnabled;
-                            m_iblEnabled = hdriEnvironmentEnabled;
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.skyboxEnabled = hdriEnvironmentEnabled;
-                                env.iblEnabled = hdriEnvironmentEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-                        if (ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled)) {
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.skyboxEnabled = m_skyboxEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-                        if (ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled)) {
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.iblEnabled = m_iblEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
+                        ImGui::Checkbox("Renderuj Skybox & Tarcze Sloneczna", &m_skyboxEnabled);
+                        ImGui::Checkbox("Oswietlenie IBL (Image-Based Lighting)", &m_iblEnabled);
 
                         if (engine) {
                             auto env = engine->getEnvironmentSettings();
-                            env.skyboxEnabled = m_skyboxEnabled;
-                            env.iblEnabled = m_iblEnabled;
-                            bool changed = false;
-
-                            // Find Directional Light (Sun) entity in the scene
-                            entt::entity sunEntity = entt::null;
-                            auto dirLightView = registry.get().view<ecs::TransformComponent, ecs::LightComponent>();
-                            for (auto dlEntity : dirLightView) {
-                                const auto& lc = dirLightView.get<ecs::LightComponent>(dlEntity);
-                                if (lc.type == "directional" || lc.type == "sun") {
-                                    sunEntity = dlEntity;
-                                    break;
-                                }
-                            }
-
-                            ImGui::Spacing();
-                            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Slonce / Swiatlo kierunkowe (Directional Sun):");
-
-                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)##World", &env.sunEnabled)) changed = true;
-                            if (ImGui::Checkbox("Kierunek z pozycji 3D##World", &env.sunDirectionFromPosition)) changed = true;
-                            ImGui::SameLine();
-                            ImGui::TextDisabled("(?)");
-                            if (ImGui::IsItemHovered()) {
-                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
-                            }
-
-                            if (sunEntity != entt::null) {
-                                auto& sunLt = registry.get().get<ecs::TransformComponent>(sunEntity);
-                                auto& sunLc = registry.get().get<ecs::LightComponent>(sunEntity);
-
-                                if (ImGui::ColorEdit3("Sun Color", (float*)&sunLc.color)) {
-                                    env.sunColor = sunLc.color;
-                                    changed = true;
-                                }
-                                if (ImGui::DragFloat("Sun Intensity", &sunLc.intensity, 0.1f, 0.0f, 50.0f, "%.2f")) {
-                                    env.sunIntensity = sunLc.intensity;
-                                    changed = true;
-                                }
-
-                                ImGui::Spacing();
-                                ImGui::Text("Kierunek padania:");
-                                if (ImGui::SliderFloat("Elevation (Pitch)##World", &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                if (ImGui::SliderFloat("Azimuth (Yaw)##World", &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-
-                                const float pitchRad = glm::radians(sunLt.rotation.x);
-                                const float yawRad   = glm::radians(sunLt.rotation.y);
-                                const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
-                                const glm::vec3 sunDir = -sunForward;
-                                env.sunDirection = sunDir;
-                                ImGui::TextDisabled("Wektor slonca: (%.2f, %.2f, %.2f)", sunDir.x, sunDir.y, sunDir.z);
-
-                                ImGui::Text("Pory dnia:");
-                                if (ImGui::SmallButton("Poludnie##World")) { sunLt.rotation.x = -75.0f; sunLt.rotation.y = 0.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Poranek##World")) { sunLt.rotation.x = -20.0f; sunLt.rotation.y = 80.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Zlota godzina##World")) { sunLt.rotation.x = -12.0f; sunLt.rotation.y = 240.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Zachod##World")) { sunLt.rotation.x = -3.0f; sunLt.rotation.y = 265.0f; changed = true; }
-
-                                ImGui::Spacing();
-                                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Pozycja slonca 3D:");
-                                if (drawVec3Control("Sun Pos (XYZ)##World", sunLt.position, 0.0f)) changed = true;
-                                if (ImGui::DragFloat("Sun Height (Y)##World", &sunLt.position.y, 0.5f, -200.0f, 2000.0f, "%.1f m")) changed = true;
-
-                                if (changed) {
-                                    sunLt.orientation = glm::quat(glm::radians(sunLt.rotation));
-                                    engine->syncEntityTransformPhysics(sunEntity);
-                                }
-                            } else {
-                                if (ImGui::ColorEdit3("Sun Color", (float*)&env.sunColor)) changed = true;
-                                if (ImGui::DragFloat("Sun Intensity", &env.sunIntensity, 0.1f, 0.0f, 25.0f, "%.2f")) changed = true;
-                                if (drawVec3Control("Sun Direction##World", env.sunDirection, 0.0f)) {
-                                    env.sunDirection = glm::normalize(env.sunDirection);
-                                    changed = true;
-                                }
-                            }
-
-                            ImGui::Spacing();
-                            if (ImGui::ColorEdit3("Ambient Tint", (float*)&env.ambientColor)) changed = true;
-                            if (ImGui::DragFloat("IBL Intensity", &env.ambientIntensity, 0.05f, 0.0f, 5.0f, "%.2f")) changed = true;
-                            if (changed) engine->setEnvironmentSettings(env);
+                            if (ImGui::DragFloat("Moc Slonca (Sun Intensity)", &env.sunIntensity, 0.1f, 0.0f, 20.0f)) engine->setEnvironmentSettings(env);
+                            if (ImGui::SliderFloat("Wysokosc Slonca (Pitch)", &env.sunDirection.y, -1.0f, 1.0f)) engine->setEnvironmentSettings(env);
+                            if (ImGui::SliderFloat("Azymut Slonca (Yaw)", &env.sunDirection.x, -1.0f, 1.0f)) engine->setEnvironmentSettings(env);
+                            if (ImGui::ColorEdit3("Kolor Slonca", &env.sunColor.x)) engine->setEnvironmentSettings(env);
                         }
                     }
 
-                    if (ImGui::CollapsingHeader("ACES Tonemapping & 5-Mip Jimenez Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::SliderFloat("Exposure (EV)", &m_exposure, 0.15f, 4.0f, "%.2f");
-                        ImGui::Checkbox("5-Mip Jimenez Bloom (Karis Average)", &m_bloomEnabled);
-                        if (m_bloomEnabled) {
-                            ImGui::SliderFloat("Bloom Intensity", &m_bloomIntensity, 0.0f, 3.0f, "%.2f");
-                            ImGui::SliderFloat("Bloom Threshold", &m_bloomThreshold, 0.2f, 5.0f, "%.2f");
-                        }
+                    // G2. POSTPROCESY
+                    else if (s_inspectorCategory == InspectorCategory::POST_PROCESS) {
+                        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Post-Processing & Kamera");
+                        ImGui::Separator();
+                        ImGui::DragFloat("Ekspozycja (Exposure EV)", &m_exposure, 0.02f, 0.1f, 10.0f, "%.2f");
+                        ImGui::SliderFloat("Skala Rozdzielczosci", &m_resolutionScale, 0.5f, 2.0f, "%.2fx");
+
+                        const char* aaModes[] = { "Wylaczony", "FXAA Szybki", "FXAA Jakosc", "FXAA Ultra" };
+                        ImGui::Combo("Anti-Aliasing", &m_antiAliasingMode, aaModes, IM_ARRAYSIZE(aaModes));
+
+                        static float bloomThresh = 1.0f;
+                        static float bloomStrength = 0.4f;
+                        ImGui::SliderFloat("Bloom (Prog)", &bloomThresh, 0.5f, 3.0f, "%.2f");
+                        ImGui::SliderFloat("Bloom (Moc)", &bloomStrength, 0.0f, 1.0f, "%.2f");
                     }
 
-                    if (ImGui::CollapsingHeader("Indirect Diffuse GI (SSGI & Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GI & Bounce Active (Globalne oswietlenie)", &m_lightBounceEnabled);
-                        if (m_lightBounceEnabled) {
-                            ImGui::SliderFloat("Bounce Intensity", &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
-                            ImGui::SliderFloat("Ground Albedo", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
-                            ImGui::ColorEdit3("Ground Color (sRGB)", &m_lightBounceGroundColor.x);
-                            ImGui::TextDisabled("SSGI: Color bleed od kazdego elementu i tekstury");
-                            ImGui::TextDisabled("Ground Bounce: Odbicie podloza z cieniem slonca i 1/PI");
-                        }
-                    }
+                    // G3. HARDWARE RAY TRACING & PROFILER
+                    else if (s_inspectorCategory == InspectorCategory::RENDER_RT) {
+                        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Sprzetowy Ray Tracing (Vulkan Ray Query)");
+                        ImGui::Separator();
+                        const bool rtSupported = m_context && m_context->isRayTracingSupported();
+                        if (!rtSupported) ImGui::TextDisabled("Ray tracing niedostepny na biezacym GPU.");
 
-                    if (ImGui::CollapsingHeader("Multi-Bounce GTAO (Depth Prepass)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GTAO Active", &m_gtaoEnabled);
-                        if (m_gtaoEnabled) {
-                            ImGui::SliderFloat("AO World Radius", &m_gtaoRadius, 0.1f, 3.0f, "%.2f m");
-                            ImGui::SliderFloat("AO Power", &m_gtaoIntensity, 0.2f, 4.0f, "%.2f");
-                        }
-                    }
+                        ImGui::BeginDisabled(!rtSupported);
+                        ImGui::Checkbox("Aktywuj Hardware Ray Tracing", &m_rtSettings.enabled);
+                        ImGui::BeginDisabled(!m_rtSettings.enabled);
+                        ImGui::Checkbox("RT Cienie (Shadows)", &m_rtSettings.shadowsEnabled);
+                        ImGui::Checkbox("RT Ambient Occlusion (AO)", &m_rtSettings.aoEnabled);
+                        ImGui::Checkbox("RT Odbicia (Reflections)", &m_rtSettings.reflectionsEnabled);
+                        ImGui::Checkbox("RT Global Illumination (GI)", &m_rtSettings.giEnabled);
+                        ImGui::Checkbox("SVGF Denoiser (Filtr wariancji)", &m_rtSettings.svgfEnabled);
 
-                    if (ImGui::CollapsingHeader("Exponential Height Fog (Mie Phase)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Height Fog Active", &m_fogEnabled);
-                        if (m_fogEnabled) {
-                            ImGui::SliderFloat("Fog Density", &m_fogDensity, 0.001f, 0.10f, "%.4f");
-                            ImGui::SliderFloat("Height Falloff", &m_fogHeightFalloff, 0.01f, 0.50f, "%.3f");
-                            ImGui::ColorEdit3("Fog Inscatter Color", &m_fogColor.x);
-                        }
-                    }
+                        ImGui::Spacing();
+                        ImGui::SeparatorText("Diagnostyka i Profiler GPU");
+                        const auto& timings = m_rtDenoiser.getGpuTimings();
+                        ImGui::Text("GI Trace:      %.3f ms", timings.traceMs);
+                        ImGui::Text("Refl Trace:    %.3f ms", timings.reflTraceMs);
+                        ImGui::Text("Denoiser SVGF: %.3f ms", timings.atrous0Ms + timings.atrous1Ms);
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Laczny czas RT Compute: %.3f ms", timings.totalMs);
 
-                    if (ImGui::CollapsingHeader("Shadows (4096px 4-Cascade Vogel PCF)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Soft Shadows", &m_softShadows);
-                        ImGui::SliderFloat("CSM Distance", &m_shadowDistance, 25.0f, 200.0f, "%.1f m");
-                    }
-
-                    if (ImGui::CollapsingHeader("FXAA 3.11 & Resolution Scaling", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const char* aaModes[] = {
-                            "0: Off (Brak AA)",
-                            "1: FXAA 3.11 Fast",
-                            "2: FXAA 3.11 Quality (Subpixel)",
-                            "3: FXAA 3.11 Ultra"
-                        };
-                        ImGui::Combo("AA Preset", &m_antiAliasingMode, aaModes, IM_ARRAYSIZE(aaModes));
-
-                        const char* resPresets[] = {
-                            "0: Auto 1:1 Viewport",
-                            "1: 4K UHD (3840x2160)",
-                            "2: 1440p QHD (2560x1440)",
-                            "3: 1080p FHD (1920x1080)",
-                            "4: 720p HD (1280x720)"
-                        };
-                        if (ImGui::Combo("Resolution Mode", &m_resolutionPresetIndex, resPresets, IM_ARRAYSIZE(resPresets))) {
-                            if (m_resolutionPresetIndex == 0) m_autoViewportResolution = true;
-                            else {
-                                m_autoViewportResolution = false;
-                                if (m_resolutionPresetIndex == 1) requestResolution(3840, 2160);
-                                else if (m_resolutionPresetIndex == 2) requestResolution(2560, 1440);
-                                else if (m_resolutionPresetIndex == 3) requestResolution(1920, 1080);
-                                else if (m_resolutionPresetIndex == 4) requestResolution(1280, 720);
-                            }
-                        }
-
-                        float resSc = m_resolutionScale;
-                        if (ImGui::SliderFloat("Resolution Scale", &resSc, 0.50f, 2.00f, "%.2fx")) {
-                            m_resolutionScale = std::clamp(resSc, 0.50f, 2.00f);
-                            if (!m_autoViewportResolution) {
-                                requestResolution(
-                                    (static_cast<uint32_t>(m_baseWidth  * m_resolutionScale) + 1u) & ~1u,
-                                    (static_cast<uint32_t>(m_baseHeight * m_resolutionScale) + 1u) & ~1u);
-                            }
-                        }
-                        ImGui::SliderFloat("UI Scale", &m_uiScale, 0.75f, 1.65f, "%.2fx");
+                        ImGui::EndDisabled();
+                        ImGui::EndDisabled();
                     }
                 }
 
@@ -1855,11 +1812,38 @@ namespace engine::renderer {
                 ImGui::SetNextWindowSize(ImVec2(screenW, bottomStatusH), ImGuiCond_Always);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 3));
                 ImGui::Begin("BottomStatusRail", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
-                if (ImGui::Button(" Content Drawer ")) { s_showContentDrawer = !s_showContentDrawer; if (s_showContentDrawer) s_showOutputLog = false; }
+
+                if (ImGui::Button(s_showContentDrawer ? "[x] Zawartosc" : "[-] Zawartosc")) {
+                    s_showContentDrawer = !s_showContentDrawer;
+                    if (s_showContentDrawer) s_showOutputLog = false;
+                }
                 ImGui::SameLine();
-                if (ImGui::Button(" >_ Output Log ")) { s_showOutputLog = !s_showOutputLog; if (s_showOutputLog) s_showContentDrawer = false; }
-                ImGui::SameLine(screenW - 220.0f * s_uiScale);
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Vulkan 1.3: %.0f FPS (%ux%u)", ImGui::GetIO().Framerate, m_width, m_height);
+                if (ImGui::Button(s_showOutputLog ? "[x] Dziennik" : ">_ Dziennik")) {
+                    s_showOutputLog = !s_showOutputLog;
+                    if (s_showOutputLog) s_showContentDrawer = false;
+                }
+                ImGui::SameLine(0.0f, 10.0f * s_uiScale);
+
+                // Szybka konsola wykonawcza QuickJS w pasku stanu
+                ImGui::TextColored(ImVec4(0.4f, 0.75f, 1.0f, 1.0f), ">_ QuickJS:");
+                ImGui::SameLine();
+                static char s_quickCmd[256] = "";
+                const float cmdW = std::max(120.0f, screenW - 650.0f * s_uiScale);
+                ImGui::SetNextItemWidth(cmdW);
+                if (ImGui::InputTextWithHint("##QuickCmdBar", "Wpisz kod JS i nacisnij [Enter]...", s_quickCmd, sizeof(s_quickCmd), ImGuiInputTextFlags_EnterReturnsTrue) && engine) {
+                    if (s_quickCmd[0] != '\0') {
+                        engine->loadScript(s_quickCmd);
+                        core::Logger::info("QuickJS Console: " + std::string(s_quickCmd));
+                        s_quickCmd[0] = '\0';
+                    }
+                }
+
+                // Telemetria renderera i silnika po prawej stronie
+                ImGui::SameLine(screenW - 310.0f * s_uiScale);
+                ImGui::TextColored(ImVec4(0.25f, 0.95f, 0.52f, 1.0f), "Vulkan 1.3: %.0f FPS (%.2f ms) | %ux%u",
+                                   ImGui::GetIO().Framerate,
+                                   1000.0f / std::max(1.0f, ImGui::GetIO().Framerate),
+                                   m_width, m_height);
                 ImGui::End();
                 ImGui::PopStyleVar();
             }
