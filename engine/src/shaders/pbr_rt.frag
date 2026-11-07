@@ -25,8 +25,8 @@ layout(set = 0, binding = 7) uniform sampler2D ssaoMap;
 layout(set = 0, binding = 8) uniform sampler2D albedoMap;
 layout(set = 0, binding = 9) uniform sampler2D normalMap;
 layout(set = 0, binding = 10) uniform sampler2D ormMap;
-// Denoised RT indirect lighting from the compute passes: rgb = diffuse GI radiance
-// (not yet multiplied by albedo), a = RT ambient visibility.
+// Denoised RT indirect lighting from the compute passes: rgb = primary-surface
+// BRDF-weighted indirect contribution, a = RT ambient visibility.
 layout(set = 0, binding = 16) uniform sampler2D rtIndirectTex;
 layout(set = 0, binding = 17) uniform sampler2D rtReflectionsTex;
 
@@ -531,11 +531,11 @@ void main() {
         bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
 
-    // 3C. One-bounce scene GI: the ray hit is shaded from actual scene lights.
+    // 3C. Material-aware RT GI. The compute pass already evaluates the primary
+    // BRDF, so do not multiply by albedo/(1-metallic) a second time.
     vec3 rtDiffuseGI = vec3(0.0);
     if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5) {
-        rtDiffuseGI = albedo * (1.0 - metallic) * sanitizeHDR(rtIndirect.rgb)
-                    * max(ubo.rtFeatureParams.z, 0.0);
+        rtDiffuseGI = sanitizeHDR(rtIndirect.rgb) * max(ubo.rtFeatureParams.z, 0.0);
     }
 
     // 4. Emisja
