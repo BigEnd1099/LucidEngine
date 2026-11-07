@@ -129,7 +129,7 @@ void main() {
 
                             vec3 sampleColor = texture(colorTex, sampleColorUV).rgb;
                             // Firefly clamping: przyciecie pikow HDR powyzej 6.0
-                            sampleColor = min(sampleColor, vec3(6.0));
+                            sampleColor = min(sampleColor, vec3(25.0));
 
                             // ZACHOWANIE ENERGII W SSGI:
                             // Radiancja wzdloz promienia jest stala (kat brylkowy na ekranie sam maleje jak 1/d^2).

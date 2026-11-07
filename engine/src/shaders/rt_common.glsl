@@ -219,13 +219,16 @@ vec3 sampleRtSkyRadiance(vec3 dir) {
     return sky;
 }
 
-vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir) {
+vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI) {
     vec4 albedoSample = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
     vec3 texLinear = pow(max(albedoSample.rgb, vec3(0.0)), vec3(2.2));
     vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
     vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
-    float roughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
+    float rawRoughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
+
+    // Path-space roughness regularization for diffuse GI (avoids delta-lobe fireflies and missed specular peaks)
+    float roughness = isDiffuseGI ? max(rawRoughness, 0.40) : rawRoughness;
 
     vec3 shadingNormal = normalize(hitNormal);
     vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, 0.0).xyz * 2.0 - 1.0;
@@ -236,10 +239,11 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
     }
     hitNormal = shadingNormal;
     float emissive = max(hit.material.z, 0.0);
-    // Diffuse BRDF response is kept unweighted here. The Fresnel/metallic energy split
-    // is applied exactly once by kD at each lighting contribution below.
-    vec3 diffuseResponse = albedo / PI;
+
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 giBounceTint = mix(albedo, F0, metallic);
+    vec3 diffuseResponse = (isDiffuseGI ? giBounceTint : albedo) / PI;
+    vec3 metalScatter = (!isDiffuseGI && metallic > 0.001) ? (metallic * F0 * smoothstep(0.02, 0.35, rawRoughness) / PI) : vec3(0.0);
 
     vec3 V = -normalize(rayDir);
     float NdotV = max(dot(hitNormal, V), 0.001);
@@ -269,68 +273,74 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
         vec3 spec = (D * G * F) / max(4.0 * NdotV * sunNdotL, 1e-4);
-        vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-        radiance += (kd * diffuseResponse + spec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
+        vec3 kd = isDiffuseGI ? mix(vec3(1.0) - F, vec3(1.0), metallic) : ((vec3(1.0) - F) * (1.0 - metallic));
+        vec3 effSpec = isDiffuseGI ? (spec * (1.0 - metallic * 0.75)) : spec;
+        radiance += (kd * diffuseResponse + metalScatter + effSpec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
     }
 
     int numActiveLights = min(ubo.numLights, 8);
 
-        for (int i = 0; i < numActiveLights; ++i) {
-            vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
-            float distanceToLight = length(toLight);
-            float range = max(ubo.lightsPos[i].w, 0.1);
-            float intensity = max(ubo.lightsCol[i].w, 0.0);
-            if (distanceToLight >= range || intensity <= 0.001) continue;
-            vec3 L = toLight / max(distanceToLight, 1e-4);
-            float ndotl = max(dot(hitNormal, L), 0.0);
-            if (ndotl <= 0.0) continue;
+    for (int i = 0; i < numActiveLights; ++i) {
+        vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
+        float distanceToLight = length(toLight);
+        float range = max(ubo.lightsPos[i].w, 0.1);
+        float intensity = max(ubo.lightsCol[i].w, 0.0);
+        if (distanceToLight >= range || intensity <= 0.001) continue;
+        vec3 L = toLight / max(distanceToLight, 1e-4);
+        float ndotl = max(dot(hitNormal, L), 0.0);
+        if (ndotl <= 0.0) continue;
 
-            float ratio = distanceToLight / range;
-            float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
-            float attenuation = window * window / (distanceToLight * distanceToLight + 1.0);
-            int type = int(round(ubo.lightsDir[i].w));
-            if (type == 1) {
-                float cone = dot(-L, normalize(ubo.lightsDir[i].xyz));
-                attenuation *= smoothstep(ubo.lightsParams[i].y, ubo.lightsParams[i].x, cone);
-            }
-            if (attenuation <= 1e-5 ||
-                rayQueryOccluded(hitPosition + hitNormal * 0.008, L, max(distanceToLight - 0.02, 0.003)))
-                continue;
-
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(hitNormal, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-
-            float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-            float D = a2 / max(PI * dDenom * dDenom, 1e-12);
-            float g1v = NdotV / (NdotV * (1.0 - k) + k);
-            float g1l = ndotl / (ndotl * (1.0 - k) + k);
-            float G = g1v * g1l;
-            vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-
-            vec3 spec = (D * G * F) / max(4.0 * NdotV * ndotl, 1e-4);
-            vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-            radiance += (kd * diffuseResponse + spec) * ubo.lightsCol[i].rgb *
-                        (intensity * 4.0 * attenuation * ndotl);
+        float ratio = distanceToLight / range;
+        float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
+        float attenuation = window * window / (distanceToLight * distanceToLight + 1.0);
+        int type = int(round(ubo.lightsDir[i].w));
+        if (type == 1) {
+            float cone = dot(-L, normalize(ubo.lightsDir[i].xyz));
+            attenuation *= smoothstep(ubo.lightsParams[i].y, ubo.lightsParams[i].x, cone);
         }
+        if (attenuation <= 1e-5 ||
+            rayQueryOccluded(hitPosition + hitNormal * 0.008, L, max(distanceToLight - 0.02, 0.003)))
+            continue;
+
+        vec3 H = normalize(V + L);
+        float NdotH = max(dot(hitNormal, H), 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+
+        float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
+        float D = a2 / max(PI * dDenom * dDenom, 1e-12);
+        float g1v = NdotV / (NdotV * (1.0 - k) + k);
+        float g1l = ndotl / (ndotl * (1.0 - k) + k);
+        float G = g1v * g1l;
+        vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+
+        vec3 spec = (D * G * F) / max(4.0 * NdotV * ndotl, 1e-4);
+        vec3 kd = isDiffuseGI ? mix(vec3(1.0) - F, vec3(1.0), metallic) : ((vec3(1.0) - F) * (1.0 - metallic));
+        vec3 effSpec = isDiffuseGI ? (spec * (1.0 - metallic * 0.75)) : spec;
+        radiance += (kd * diffuseResponse + metalScatter + effSpec) * ubo.lightsCol[i].rgb *
+                    (intensity * 4.0 * attenuation * ndotl);
+    }
 
     // Ambient / Environment lighting at hit point
     if ((ubo.skyboxMode & 2) != 0) {
         vec3 ambientIBL = sampleRtSkyRadiance(hitNormal) * 0.5;
         vec3 ambientF = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-        vec3 ambientKD = (vec3(1.0) - ambientF) * (1.0 - metallic);
+        vec3 ambientKD = isDiffuseGI ? mix(vec3(1.0) - ambientF, vec3(1.0), metallic) : ((vec3(1.0) - ambientF) * (1.0 - metallic));
         radiance += ambientKD * diffuseResponse * ambientIBL;
 
         vec3 R = reflect(-V, hitNormal);
         vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * (1.0 - roughness);
-        radiance += specSky * 0.4;
+        radiance += specSky * (isDiffuseGI ? 0.15 : 0.4);
     }
 
     return sanitizeHDR(radiance);
 }
 
+vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir) {
+    return shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent, rayDir, false);
+}
+
 vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent) {
-    return shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent, hitNormal);
+    return shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent, hitNormal, false);
 }
 
 #endif

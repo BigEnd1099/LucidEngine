@@ -310,7 +310,7 @@ void main() {
     vec3 dndv = dFdy(N);
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
-    float alpha = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.001, 1.0);
+    float alpha = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 1e-5, 1.0);
     float roughness = alpha;
     alpha = roughness * roughness;
 

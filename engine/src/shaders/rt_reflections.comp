@@ -135,7 +135,7 @@ void main() {
         if (hitBulb) {
             accumulated += bulbRadiance;
         } else if (hitGeo) {
-            accumulated += shadeRtHit(hit, hitPos, hitNorm, hitUv, hitTangent, dir);
+            accumulated += shadeRtHit(hit, hitPos, hitNorm, hitUv, hitTangent, dir, false);
         } else {
             // Missed geometry & light bulbs: sample sky radiance (includes sun disk + corona + HDRI cubemap)
             if ((ubo.skyboxMode & 3) != 0) {
