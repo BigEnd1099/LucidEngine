@@ -452,6 +452,18 @@ namespace engine::renderer {
                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_DEPTH_BIT, m_depthImage, m_depthAllocation, m_depthImageView);
 
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, m_gBufferNormalRoughnessImage, m_gBufferNormalRoughnessAlloc, m_gBufferNormalRoughnessImageView);
+
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, m_gBufferAlbedoMetallicImage, m_gBufferAlbedoMetallicAlloc, m_gBufferAlbedoMetallicImageView);
+
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16_SFLOAT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, m_gBufferMotionImage, m_gBufferMotionAlloc, m_gBufferMotionImageView);
+
         if (!m_viewportSampler) {
             VkSamplerCreateInfo sInfo{};
             sInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -558,6 +570,9 @@ namespace engine::renderer {
         destroyImg(m_aoBlurImage, m_aoBlurAllocation, m_aoBlurImageView);
         destroyImg(m_objectIdImage, m_objectIdAllocation, m_objectIdImageView);
         destroyImg(m_depthImage, m_depthAllocation, m_depthImageView);
+        destroyImg(m_gBufferNormalRoughnessImage, m_gBufferNormalRoughnessAlloc, m_gBufferNormalRoughnessImageView);
+        destroyImg(m_gBufferAlbedoMetallicImage, m_gBufferAlbedoMetallicAlloc, m_gBufferAlbedoMetallicImageView);
+        destroyImg(m_gBufferMotionImage, m_gBufferMotionAlloc, m_gBufferMotionImageView);
     }
 
     bool VulkanRenderer::loadEnvironmentHdriFile(const std::string& path) {

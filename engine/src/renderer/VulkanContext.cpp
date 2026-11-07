@@ -204,14 +204,15 @@ namespace engine::renderer {
 #endif
             if (hasGraphics && hasPresent) {
                 m_graphicsQueueFamily = i;
+                m_timestampValidBits = queueFamilies[i].timestampValidBits;
                 found = true;
                 break;
             }
         }
         if (!found) throw std::runtime_error("failed to find a graphics AND present queue family!");
 
-        VkPhysicalDeviceProperties devProps{};
-        vkGetPhysicalDeviceProperties(m_physicalDevice, &devProps);
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &m_deviceProperties);
+        VkPhysicalDeviceProperties devProps = m_deviceProperties;
 
         // Query core 1.2/1.3 and optional KHR ray-tracing features as one pNext chain.
         VkPhysicalDeviceRayQueryFeaturesKHR supportedRayQuery{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };

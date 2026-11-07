@@ -28,6 +28,7 @@ layout(set = 0, binding = 10) uniform sampler2D ormMap;
 // Denoised RT indirect lighting from the compute passes: rgb = diffuse GI radiance
 // (not yet multiplied by albedo), a = RT ambient visibility.
 layout(set = 0, binding = 16) uniform sampler2D rtIndirectTex;
+layout(set = 0, binding = 17) uniform sampler2D rtReflectionsTex;
 
 
 layout(push_constant) uniform PushConstants {
@@ -240,63 +241,9 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
 
 
 
-vec3 traceRtSecondaryBounce(RtInstanceData firstHit, vec3 firstPosition, vec3 firstNormal,
-                               vec2 firstUv, float noise) {
-    vec3 firstAlbedo = firstHit.baseColor.rgb *
-        pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(firstHit.textureIndices.x)], firstUv, 0.0).rgb, vec3(0.0)), vec3(2.2));
-    vec3 firstOrm = textureLod(rtOrmTextures[nonuniformEXT(firstHit.textureIndices.z)], firstUv, 0.0).rgb;
-    float firstMetallic = clamp(firstHit.material.x * firstOrm.b, 0.0, 1.0);
 
-    vec3 direction = sampleCosineHemisphere(normalize(firstNormal), rand2());
 
-    RtInstanceData secondHit;
-    vec3 secondPosition, secondNormal;
-    vec2 secondUv;
-    vec4 secondTangent;
-    float secondDistance;
-    if (!traceSceneSurface(firstPosition + firstNormal * 0.014, direction, 20.0,
-                           secondHit, secondPosition, secondNormal, secondUv,
-                           secondTangent, secondDistance)) {
-        return vec3(0.0);
-    }
-    // One additional diffuse segment; throughput is the first hit's Lambertian albedo.
-    return sanitizeHDR(firstAlbedo * (1.0 - firstMetallic) *
-                      shadeRtHit(secondHit, secondPosition, secondNormal, secondUv, secondTangent));
-}
-
-vec3 traceRtReflection(vec3 worldPosition, vec3 normal, vec3 viewDirection,
-                       float roughness, vec3 F0, float ao, float noise) {
-    vec3 idealDirection = normalize(reflect(-viewDirection, normal));
-    vec3 tangent, bitangent;
-    buildBasis(idealDirection, tangent, bitangent);
-    // rtParams.w carries the reflection sample count (0 = reflections off).
-    const int SAMPLE_COUNT = clamp(int(ubo.rtParams.w + 0.5), 1, 16);
-    vec3 accumulated = vec3(0.0);
-    for (int i = 0; i < SAMPLE_COUNT; ++i) {
-        vec2 disk = sampleUniformDisk(rand2());
-        float spread = roughness * roughness * 0.65;
-        vec3 direction = normalize(idealDirection + tangent * disk.x * spread + bitangent * disk.y * spread);
-        // Jitter must never push the ray below the surface.
-        if (dot(direction, normal) <= 0.0) direction = reflect(direction, normal);
-        RtInstanceData hit;
-        vec3 hitPosition, hitNormal;
-        vec2 hitUv;
-        vec4 hitTangent;
-        float hitDistance;
-        if (traceSceneSurface(worldPosition + normal * 0.012, direction, 10000.0,
-                              hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance)) {
-            accumulated += shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent);
-            accumulated += 0.35 * traceRtSecondaryBounce(hit, hitPosition, hitNormal, hitUv, 0.0);
-        } else if ((ubo.skyboxMode & 2) != 0) {
-            accumulated += sanitizeHDR(textureLod(prefilterMap, direction, roughness * MAX_REFLECTION_LOD).rgb)
-                           * max(ubo.ambientColor.w, 0.0);
-        }
-    }
-    vec3 fresnel = fresnelSchlickRoughness(max(dot(normal, viewDirection), 0.0), F0, roughness);
-    return (accumulated / float(SAMPLE_COUNT)) * fresnel * computeSpecularAO(
-        max(dot(normal, viewDirection), 0.0), ao, roughness
-    );
-}
+// RT specular reflections are traced, accumulated and denoised in dedicated compute passes.
 
 
 vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, float roughness, vec3 energyComp, bool softShadows) {
@@ -446,7 +393,7 @@ void main() {
     // RT indirect (diffuse GI + ambient visibility) is traced, accumulated and
     // denoised in the compute passes before this draw; here it is only fetched.
     vec4 rtIndirect = vec4(0.0, 0.0, 0.0, 1.0);
-    if (ubo.rtParams.x > 0.5 && (ubo.rtParams.z > 0.5 || ubo.rtFeatureParams.x > 0.5)) {
+    if (ubo.rtParams.x > 0.5 && (ubo.rtParams.z > 0.5 || ubo.rtFeatureParams.x > 0.5 || ubo.rtFeatureParams.w > 0.5)) {
         rtIndirect = texelFetch(rtIndirectTex, ivec2(gl_FragCoord.xy), 0);
     }
     if (ubo.rtParams.x > 0.5 && ubo.rtParams.z > 0.5) {
@@ -483,8 +430,10 @@ void main() {
         ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
     }
     if (ubo.rtParams.x > 0.5 && ubo.rtParams.w > 0.5) {
-        vec3 rtSpecular = traceRtReflection(
-            fragWorldPos, N, V, roughness, F0, combinedAO, ign
+        vec3 reflSample = texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0).rgb;
+        vec3 fresnel = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+        vec3 rtSpecular = sanitizeHDR(reflSample) * fresnel * computeSpecularAO(
+            max(dot(N, V), 0.0), combinedAO, roughness
         );
         ambientLighting += rtSpecular - specularIBL * iblIntensity;
     }
@@ -611,6 +560,17 @@ void main() {
         float mieWeight = (sunIntensity > 0.001) ? clamp(miePhase * 0.45, 0.0, 0.75) : 0.0;
         vec3 inscatterColor = mix(ubo.fogColor.rgb * anySceneEnergy, ubo.sunColor.rgb * (sunIntensity * 0.35), mieWeight);
         hdrColor = mix(inscatterColor, hdrColor, fogTransmittance);
+    }
+
+    // Debug modes: if active, display the debug buffer directly
+    if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.w > 0.5) {
+        if (ubo.rtFeatureParams.w > 5.5 && ubo.rtFeatureParams.w < 6.5) {
+            vec3 reflSample = texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0).rgb;
+            outColor = vec4(reflSample, 1.0);
+            return;
+        }
+        outColor = vec4(rtIndirect.rgb, 1.0);
+        return;
     }
 
     outColor = vec4(sanitizeHDR(hdrColor), 1.0);

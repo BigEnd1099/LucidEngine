@@ -7,8 +7,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 // Passes 3-4/4: edge-avoiding a-trous wavelet filter (5x5 B3-spline, step 1 then 2),
-// guided by view-space plane distance and normals. The filter strength fades out as
-// the temporal history grows, so converged pixels keep their detail.
+// guided by view-space plane distance, normals, and SVGF local luminance variance.
 //   PASS 0: imgHistCur -> imgA        PASS 1: imgA -> imgS (final output, sampled by pbr_rt.frag)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(constant_id = 0) const int PASS = 0;
@@ -20,11 +19,12 @@ layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
 layout(set = 1, binding = 2, rgba16f) uniform image2D imgA;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
+layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
 
 layout(push_constant) uniform PC {
     mat4 unused;
-    vec4 f;   // x = spatial strength (0..1)
-    uvec4 u;
+    vec4 f;   // x = spatial strength (0..1), y = maxHistory, w = svgfEnabled (1/0)
+    uvec4 u;  // u.x = debugMode (in pass 1)
 } pc;
 
 vec4 loadSrc(ivec2 p) { return (PASS == 0) ? imageLoad(imgHistCur, p) : imageLoad(imgA, p); }
@@ -38,6 +38,60 @@ void main() {
 
     vec4 center = loadSrc(px);
     vec4 gC = imageLoad(imgGeomCur, px);
+
+    // Debug visualization modes (evaluated only in PASS 1 directly into imgS)
+    if (PASS == 1 && pc.u.x > 0u) {
+        uint mode = pc.u.x;
+        if (gC.z < 0.0) {
+            // Sky
+            storeDst(px, vec4(0.0, 0.0, 0.0, 1.0));
+            return;
+        }
+        if (mode == 1u) {
+            // Raw indirect trace (imgS still contains rt_indirect.comp output before pass 1 overwrite)
+            vec4 rawS = imageLoad(imgS, px);
+            storeDst(px, rawS);
+            return;
+        } else if (mode == 2u) {
+            // History length (false color gradient normalized to maxHistory)
+            float maxH = max(pc.f.y, 1.0);
+            float t = clamp(gC.w / maxH, 0.0, 1.0);
+            vec3 col;
+            if (t <= 0.25)      col = mix(vec3(0.05, 0.05, 0.4), vec3(0.0, 0.8, 0.8), t * 4.0);
+            else if (t <= 0.50) col = mix(vec3(0.0, 0.8, 0.8),   vec3(0.1, 0.9, 0.1), (t - 0.25) * 4.0);
+            else if (t <= 0.75) col = mix(vec3(0.1, 0.9, 0.1),   vec3(1.0, 0.9, 0.0), (t - 0.50) * 4.0);
+            else                col = mix(vec3(1.0, 0.9, 0.0),   vec3(1.0, 0.1, 0.1), (t - 0.75) * 4.0);
+            storeDst(px, vec4(col, 1.0));
+            return;
+        } else if (mode == 3u) {
+            // Geometric / reconstructed normal
+            vec3 n = rtOctDecode(gC.xy);
+            storeDst(px, vec4(n * 0.5 + 0.5, 1.0));
+            return;
+        } else if (mode == 4u) {
+            // Linear depth (normalized visualization)
+            float dVis = clamp(gC.z / 40.0, 0.0, 1.0);
+            storeDst(px, vec4(vec3(dVis), 1.0));
+            return;
+        } else if (mode == 5u) {
+            // AO only
+            storeDst(px, vec4(vec3(center.a), 1.0));
+            return;
+        } else if (mode == 7u) {
+            // Luminance variance from SVGF (log-scaled heat map)
+            vec4 mom = imageLoad(imgMomentsCur, px);
+            float v = max(mom.z, 0.0);
+            float t = clamp(log2(1.0 + v * 16.0) / 4.0, 0.0, 1.0);
+            vec3 col;
+            if (t <= 0.25)      col = mix(vec3(0.0, 0.0, 0.5), vec3(0.0, 0.5, 1.0), t * 4.0);
+            else if (t <= 0.50) col = mix(vec3(0.0, 0.5, 1.0), vec3(0.0, 0.9, 0.2), (t - 0.25) * 4.0);
+            else if (t <= 0.75) col = mix(vec3(0.0, 0.9, 0.2), vec3(1.0, 0.8, 0.0), (t - 0.50) * 4.0);
+            else                col = mix(vec3(1.0, 0.8, 0.0), vec3(1.0, 0.05, 0.05), (t - 0.75) * 4.0);
+            storeDst(px, vec4(col, 1.0));
+            return;
+        }
+    }
+
     if (gC.z < 0.0 || pc.f.x <= 0.001) { storeDst(px, center); return; }
 
     vec3 nC = rtOctDecode(gC.xy);
@@ -47,8 +101,15 @@ void main() {
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
 
+    vec4 momC = imageLoad(imgMomentsCur, px);
+    float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
+    float lC = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
+    const bool useSvgf = (pc.f.w > 0.5);
+
     vec4 sum = center * (h[0] * h[0]);
+    float varSum = varC * (h[0] * h[0]) * (h[0] * h[0]);
     float wTotal = h[0] * h[0];
+
     for (int j = -2; j <= 2; ++j) {
         for (int i = -2; i <= 2; ++i) {
             if (i == 0 && j == 0) continue;
@@ -60,12 +121,32 @@ void main() {
             float planeDist = abs(dot(nCv, pQv - pCv));
             float wd = exp(-planeDist / (depthTol * float(step)));
             float wn = pow(clamp(dot(nC, rtOctDecode(gQ.xy)), 0.0, 1.0), 24.0);
-            float w = h[abs(i)] * h[abs(j)] * wd * wn;
+
+            float wl = 1.0;
+            if (useSvgf) {
+                vec4 qCol = loadSrc(q);
+                float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
+                float deltaL = abs(lC - lQ);
+                float sigmaL = 4.0 * max(pc.f.x, 0.1);
+                wl = exp(-deltaL / (sigmaL * sqrt(max(varC, 1e-4)) + 1e-3));
+            }
+
+            float w = h[abs(i)] * h[abs(j)] * wd * wn * wl;
             sum += loadSrc(q) * w;
+            if (useSvgf) {
+                float qVar = (PASS == 0) ? max(0.0, imageLoad(imgMomentsCur, q).z) : max(0.0, imageLoad(imgMomentsCur, q).w);
+                varSum += w * w * qVar;
+            }
             wTotal += w;
         }
     }
-    vec4 filtered = sum / wTotal;
+    vec4 filtered = sum / max(wTotal, 1e-6);
+
+    if (PASS == 0 && useSvgf) {
+        float filteredVar = varSum / max(wTotal * wTotal, 1e-6);
+        momC.w = filteredVar;
+        imageStore(imgMomentsCur, px, momC);
+    }
 
     // Short history -> trust the spatial estimate; long history -> keep the temporal detail.
     float s = clamp(pc.f.x * (1.0 / (1.0 + gC.w * 0.15)), 0.0, 1.0);

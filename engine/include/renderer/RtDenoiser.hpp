@@ -1,5 +1,6 @@
 #pragma once
 #include "renderer/VulkanContext.hpp"
+#include "renderer/RtSettings.hpp"
 #include <glm/glm.hpp>
 #include <array>
 #include <cstdint>
@@ -20,14 +21,36 @@ namespace engine::renderer {
             uint32_t  frameIndex{0};
             bool      giEnabled{true};
             bool      aoEnabled{true};
+            bool      reflectionsEnabled{true};
+            uint32_t  reflectionSamples{4};
             uint32_t  bounces{2};          // 1..15
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
+            bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
+            RtDebugMode debugMode{RtDebugMode::None};
+        };
+
+        struct GpuTimings {
+            float traceMs{0.0f};
+            float reflTraceMs{0.0f};
+            float temporalMs{0.0f};
+            float reflTemporalMs{0.0f};
+            float atrous0Ms{0.0f};
+            float atrous1Ms{0.0f};
+            float totalMs{0.0f};
         };
 
         bool init(VulkanContext* context, VkDescriptorSetLayout sceneSetLayout,
-                  uint32_t width, uint32_t height, VkImageView depthView, VkSampler depthSampler);
-        void resize(uint32_t width, uint32_t height, VkImageView depthView, VkSampler depthSampler);
+                  uint32_t width, uint32_t height,
+                  VkImageView depthView, VkSampler depthSampler,
+                  VkImageView gNormalRoughnessView = VK_NULL_HANDLE,
+                  VkImageView gAlbedoMetallicView = VK_NULL_HANDLE,
+                  VkImageView gMotionView = VK_NULL_HANDLE);
+        void resize(uint32_t width, uint32_t height,
+                    VkImageView depthView, VkSampler depthSampler,
+                    VkImageView gNormalRoughnessView = VK_NULL_HANDLE,
+                    VkImageView gAlbedoMetallicView = VK_NULL_HANDLE,
+                  VkImageView gMotionView = VK_NULL_HANDLE);
         void cleanup();
 
         bool isReady() const { return m_ready; }
@@ -38,7 +61,9 @@ namespace engine::renderer {
         void record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params);
 
         VkImageView outputView() const { return m_imgS.view; }
+        VkImageView reflectionOutputView() const { return m_imgRefl.view; }
         VkSampler   outputSampler() const { return m_sampler; }
+        const GpuTimings& getGpuTimings() const { return m_gpuTimings; }
 
     private:
         struct Image {
@@ -49,7 +74,9 @@ namespace engine::renderer {
 
         void createImages();
         void destroyImages();
-        void writeDescriptors(VkImageView depthView, VkSampler depthSampler);
+        void writeDescriptors(VkImageView depthView, VkSampler depthSampler,
+                              VkImageView gNormalRoughnessView, VkImageView gAlbedoMetallicView,
+                              VkImageView gMotionView);
         VkShaderModule loadModule(const char* spvName) const;
         VkPipeline createPipeline(VkShaderModule module, int32_t specPass) const;
         Image makeImage(VkFormat format) const;
@@ -66,6 +93,9 @@ namespace engine::renderer {
         Image m_imgA{};                    // a-trous ping buffer
         std::array<Image, 2> m_geom{};     // oct normal, linear depth, history length (ping-pong)
         std::array<Image, 2> m_hist{};     // temporal accumulation (ping-pong)
+        Image m_imgRefl{};                 // raw reflection trace
+        std::array<Image, 2> m_imgReflHist{}; // reflection temporal ping-pong
+        std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
 
         VkSampler m_sampler{VK_NULL_HANDLE};
         VkDescriptorSetLayout m_setLayout{VK_NULL_HANDLE};
@@ -75,5 +105,12 @@ namespace engine::renderer {
         VkPipeline m_tracePipelineHandle{VK_NULL_HANDLE};
         VkPipeline m_temporalPipeline{VK_NULL_HANDLE};
         std::array<VkPipeline, 2> m_atrousPipelines{};
+        VkPipeline m_reflPipeline{VK_NULL_HANDLE};
+        VkPipeline m_reflTemporalPipeline{VK_NULL_HANDLE};
+
+        VkQueryPool m_queryPool{VK_NULL_HANDLE};
+        bool m_timestampsSupported{false};
+        bool m_hasTimestampResults{false};
+        GpuTimings m_gpuTimings{};
     };
 }

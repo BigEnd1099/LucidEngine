@@ -1,0 +1,96 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "rt_common.glsl"
+#include "rt_screen.glsl"
+
+layout(set = 1, binding = 0) uniform sampler2D uDepth;
+layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
+layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
+layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
+layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
+
+layout(push_constant) uniform PC {
+    mat4  unused;
+    vec4  f;
+    uvec4 u;   // x = samples per pixel (1..16), y = frame index, z = flags, w = max bounces
+} pc;
+
+const float MAX_REFL_DIST = 1000.0;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 isize = imageSize(imgRefl);
+    if (any(greaterThanEqual(px, isize))) return;
+    vec2 size = vec2(isize);
+
+    float d = texelFetch(uDepth, px, 0).r;
+    if (d >= 1.0 || ubo.rtParams.x < 0.5 || ubo.rtParams.w < 0.5) {
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+
+    vec4 gNR = texelFetch(uGNormalRoughness, px, 0);
+    vec3 N = gNR.xyz;
+    if (dot(N, N) > 1e-4) {
+        N = normalize(N);
+    } else {
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+
+    float roughness = clamp(gNR.w, 0.04, 1.0);
+    if (roughness > 0.85) {
+        // High roughness surfaces rely on prefiltered IBL
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    vec3 V = normalize(ubo.cameraPos.xyz - P);
+    if (dot(N, V) < 0.0) N = -N;
+
+    vec3 idealR = normalize(reflect(-V, N));
+    vec3 tangent, bitangent;
+    buildBasis(idealR, tangent, bitangent);
+
+    int baseSamples = int(clamp(pc.u.x, 1u, 16u));
+    int samples = baseSamples;
+    vec4 prevG = imageLoad(imgGeomPrev, px);
+    if (prevG.w < 4.0 && baseSamples < 4) {
+        samples = min(baseSamples * 2, 4);
+    }
+    uint frame = pc.u.y;
+    rngInit(uvec2(px), frame);
+
+    vec3 accumulated = vec3(0.0);
+    float spread = roughness * roughness * 0.65;
+
+    for (int s = 0; s < samples; ++s) {
+        vec2 disk = sampleUniformDisk(rand2());
+        vec3 dir = (roughness < 0.06) ? idealR : normalize(idealR + tangent * disk.x * spread + bitangent * disk.y * spread);
+        if (dot(dir, N) <= 0.0) dir = reflect(dir, N);
+
+        RtInstanceData hit;
+        vec3 hitPos, hitNorm;
+        vec2 hitUv;
+        vec4 hitTangent;
+        float hitDist;
+
+        if (traceSceneSurface(P + N * 0.012, dir, MAX_REFL_DIST, hit, hitPos, hitNorm, hitUv, hitTangent, hitDist)) {
+            accumulated += shadeRtHit(hit, hitPos, hitNorm, hitUv, hitTangent, dir);
+        } else if ((ubo.skyboxMode & 2) != 0) {
+            accumulated += sampleRtSkyRadiance(dir);
+        }
+    }
+
+    vec3 refl = sanitizeHDR(accumulated / float(samples));
+    imageStore(imgRefl, px, vec4(refl, 1.0));
+}

@@ -746,7 +746,7 @@ namespace engine::core {
                     try { update(dt_real); } catch (const std::exception& e) { core::Logger::error(std::string("Update exception: ") + e.what()); }
                 }
                 if (!m_headless) {
-                    try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); }
+                    try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); } catch(...) { core::Logger::error("Unknown render exception!"); }
                 }
 
                 // Dual-Transport: Publish authoritative TelemetrySnapshot to 32-slot Seqlock Ring Buffer

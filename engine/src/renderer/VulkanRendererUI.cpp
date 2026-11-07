@@ -1487,33 +1487,66 @@ namespace engine::renderer {
                             ImGui::TextDisabled("Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features.");
                         }
                         ImGui::BeginDisabled(!rtSupported);
-                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rayTracingEnabled);
-                        ImGui::BeginDisabled(!m_rayTracingEnabled);
-                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtShadowsEnabled);
-                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtAoEnabled);
-                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtReflectionsEnabled);
-                        ImGui::BeginDisabled(!m_rtReflectionsEnabled);
-                        ImGui::SliderInt("RT Reflection Samples", &m_rtReflectionSamples, 1, 16, "%d");
+                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rtSettings.enabled);
+                        ImGui::BeginDisabled(!m_rtSettings.enabled);
+                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtSettings.shadowsEnabled);
+                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtSettings.aoEnabled);
+                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
+                        ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
+                        ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
                         ImGui::EndDisabled();
-                        ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtGiEnabled);
-                        ImGui::BeginDisabled(!m_rtGiEnabled);
-                        ImGui::SliderFloat("RT GI Intensity", &m_rtGiIntensity, 0.0f, 3.0f, "%.2f");
-                        ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtGiBounces, 1, 15, "%d");
+                        ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
+                        ImGui::BeginDisabled(!m_rtSettings.giEnabled);
+                        ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
+                        ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
                         ImGui::EndDisabled();
 
                         // GI + AO are traced in compute, then temporally accumulated and denoised.
                         ImGui::SeparatorText("RT Sampling & Denoising");
-                        ImGui::BeginDisabled(!m_rtGiEnabled && !m_rtAoEnabled);
-                        ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtGiSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtDenoiseEnabled);
-                        ImGui::BeginDisabled(!m_rtDenoiseEnabled);
-                        ImGui::SliderInt("Temporal History (samples)", &m_rtMaxHistory, 4, 256, "%d");
-                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSpatialStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
+                        ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
+                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtSettings.denoiseEnabled);
+                        ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
+                        ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
+                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::Checkbox("SVGF (Variance-Guided Filter)", &m_rtSettings.svgfEnabled);
                         ImGui::EndDisabled();
+
+                        // Debug Visualization Modes
+                        ImGui::SeparatorText("RT Debug & Diagnostics");
+                        const char* debugModes[] = {
+                            "0: Off (Composite Render)",
+                            "1: Raw Indirect Trace (imgS)",
+                            "2: History Length (0..maxHistory)",
+                            "3: Octahedral Geometric Normals",
+                            "4: Linear Depth",
+                            "5: Ambient Occlusion Only",
+                            "6: Specular Reflections Only",
+                            "7: Luminance Variance (SVGF)"
+                        };
+                        int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
+                        if (ImGui::Combo("RT Debug View", &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
+                            m_rtSettings.debugMode = static_cast<RtDebugMode>(currentDebugMode);
+                        }
+
+                        // RT GPU Timers
+                        const auto& timings = m_rtDenoiser.getGpuTimings();
+                        if (ImGui::TreeNode("RT GPU Profiler (Compute Timers)")) {
+                            ImGui::Text("GI Trace Pass:    %.3f ms", timings.traceMs);
+                            ImGui::Text("Refl Trace Pass:  %.3f ms", timings.reflTraceMs);
+                            ImGui::Text("GI Temporal:      %.3f ms", timings.temporalMs);
+                            ImGui::Text("Refl Temporal:    %.3f ms", timings.reflTemporalMs);
+                            ImGui::Text("Atrous Step 1:    %.3f ms", timings.atrous0Ms);
+                            ImGui::Text("Atrous Step 2:    %.3f ms", timings.atrous1Ms);
+                            ImGui::Separator();
+                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Total RT Compute: %.3f ms", timings.totalMs);
+                            ImGui::TreePop();
+                        }
+
                         ImGui::EndDisabled();
-                        m_rtGiSamples = std::clamp(m_rtGiSamples, 1, 16);
-                        m_rtReflectionSamples = std::clamp(m_rtReflectionSamples, 1, 16);
-                        m_rtMaxHistory = std::clamp(m_rtMaxHistory, 4, 256);
+                        m_rtSettings.giSamples = std::clamp(m_rtSettings.giSamples, 1, 16);
+                        m_rtSettings.reflectionSamples = std::clamp(m_rtSettings.reflectionSamples, 1, 16);
+                        m_rtSettings.maxHistory = std::clamp(m_rtSettings.maxHistory, 4, 256);
                         ImGui::EndDisabled();
                         ImGui::EndDisabled();
                     }

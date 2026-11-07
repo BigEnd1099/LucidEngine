@@ -20,9 +20,9 @@
     "engine:kill": "powershell -Command \"Stop-Process -Name engine -Force -ErrorAction SilentlyContinue\"",
     "engine:headless": "engine\\build\\Release\\engine.exe --headless",
     "orchestrator": "node agent_orchestrator.mjs",
-    "test": "node test_all.mjs",
-    "test:engine": "node test_client.mjs && node test_gltf.mjs",
-    "test:mcp": "node test_mcp.mjs"
+    "test": "node tests/test_all.mjs",
+    "test:engine": "node tests/test_client.mjs && node tests/test_gltf.mjs",
+    "test:mcp": "node tests/test_mcp.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",

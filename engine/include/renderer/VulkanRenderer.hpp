@@ -2,6 +2,7 @@
 #include "renderer/VulkanContext.hpp"
 #include "renderer/AccelerationStructure.hpp"
 #include "renderer/RtDenoiser.hpp"
+#include "renderer/RtSettings.hpp"
 #include "ecs/Registry.hpp"
 #include <vector>
 #include <string>
@@ -69,28 +70,29 @@ namespace engine::renderer {
         void setIblEnabled(bool enabled) { m_iblEnabled = enabled; }
         bool isIblEnabled() const { return m_iblEnabled; }
 
-        void setRayTracingEnabled(bool enabled) { m_rayTracingEnabled = enabled; }
-        bool isRayTracingEnabled() const { return m_rayTracingEnabled && m_context && m_context->isRayTracingSupported(); }
+        void setRayTracingEnabled(bool enabled) { m_rtSettings.enabled = enabled; }
+        bool isRayTracingEnabled() const { return m_rtSettings.enabled && m_context && m_context->isRayTracingSupported(); }
         VkAccelerationStructureKHR getRayTracingTLAS() const { return m_accelerationStructure.getTLAS(); }
 
-        // ---- Ray-traced indirect lighting quality (GI/AO are traced in compute, accumulated and denoised)
-        // Paths traced per pixel per frame for diffuse GI + AO (1..16). With temporal accumulation
-        // 1 is usually enough for static views; raise it for fast-moving cameras/lights.
-        void setRtGiSamples(int n) { m_rtGiSamples = std::clamp(n, 1, 16); }
-        int  getRtGiSamples() const { return m_rtGiSamples; }
-        // Rays per pixel per frame for RT reflections (1..16).
-        void setRtReflectionSamples(int n) { m_rtReflectionSamples = std::clamp(n, 1, 16); }
-        int  getRtReflectionSamples() const { return m_rtReflectionSamples; }
-        void setRtGiBounces(int n) { m_rtGiBounces = std::clamp(n, 1, 15); }
-        int  getRtGiBounces() const { return m_rtGiBounces; }
-        // Temporal history length in effective samples (4..256). Lower = faster reaction to moving lights.
-        void setRtMaxHistory(int n) { m_rtMaxHistory = std::clamp(n, 4, 256); }
-        int  getRtMaxHistory() const { return m_rtMaxHistory; }
-        void setRtSpatialStrength(float s) { m_rtSpatialStrength = std::clamp(s, 0.0f, 1.0f); }
-        float getRtSpatialStrength() const { return m_rtSpatialStrength; }
-        // false = show the raw noisy trace (debug).
-        void setRtDenoiseEnabled(bool e) { m_rtDenoiseEnabled = e; }
-        bool isRtDenoiseEnabled() const { return m_rtDenoiseEnabled; }
+        RtSettings& getRtSettings() { return m_rtSettings; }
+        const RtSettings& getRtSettings() const { return m_rtSettings; }
+        const RtDenoiser::GpuTimings& getRtGpuTimings() const { return m_rtDenoiser.getGpuTimings(); }
+
+        // ---- Ray-traced indirect lighting quality getters/setters forwarding to m_rtSettings
+        void setRtGiSamples(int n) { m_rtSettings.giSamples = std::clamp(n, 1, 16); }
+        int  getRtGiSamples() const { return m_rtSettings.giSamples; }
+        void setRtReflectionSamples(int n) { m_rtSettings.reflectionSamples = std::clamp(n, 1, 16); }
+        int  getRtReflectionSamples() const { return m_rtSettings.reflectionSamples; }
+        void setRtGiBounces(int n) { m_rtSettings.giBounces = std::clamp(n, 1, 15); }
+        int  getRtGiBounces() const { return m_rtSettings.giBounces; }
+        void setRtMaxHistory(int n) { m_rtSettings.maxHistory = std::clamp(n, 4, 256); }
+        int  getRtMaxHistory() const { return m_rtSettings.maxHistory; }
+        void setRtSpatialStrength(float s) { m_rtSettings.spatialStrength = std::clamp(s, 0.0f, 1.0f); }
+        float getRtSpatialStrength() const { return m_rtSettings.spatialStrength; }
+        void setRtDenoiseEnabled(bool e) { m_rtSettings.denoiseEnabled = e; }
+        bool isRtDenoiseEnabled() const { return m_rtSettings.denoiseEnabled; }
+        void setRtDebugMode(RtDebugMode mode) { m_rtSettings.debugMode = mode; }
+        RtDebugMode getRtDebugMode() const { return m_rtSettings.debugMode; }
 
         void setFogEnabled(bool enabled) { m_fogEnabled = enabled; }
         bool isFogEnabled() const { return m_fogEnabled; }
@@ -146,18 +148,7 @@ namespace engine::renderer {
 
         VulkanContext* m_context{nullptr};
         AccelerationStructure m_accelerationStructure;
-        bool m_rayTracingEnabled{true};
-        bool m_rtShadowsEnabled{true};
-        bool m_rtAoEnabled{true};
-        bool m_rtReflectionsEnabled{true};
-        bool m_rtGiEnabled{true};
-        float m_rtGiIntensity{1.0f};
-        int m_rtGiBounces{2};
-        int m_rtGiSamples{1};
-        int m_rtReflectionSamples{4};
-        int m_rtMaxHistory{32};
-        float m_rtSpatialStrength{1.0f};
-        bool m_rtDenoiseEnabled{true};
+        RtSettings m_rtSettings{};
         RtDenoiser m_rtDenoiser;
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
@@ -195,10 +186,30 @@ namespace engine::renderer {
         bool m_standaloneGameMode{false};
         uint32_t m_frameCounter{0};
 
-        // Main PBR & Depth Prepass Pipelines
+        // Main PBR, Depth Prepass & G-Buffer Pipelines
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_graphicsPipeline{VK_NULL_HANDLE};
         VkPipeline m_depthPrepassPipeline{VK_NULL_HANDLE};
+        VkPipeline m_gBufferPipeline{VK_NULL_HANDLE};
+
+        // Thin G-Buffer targets (shading normal + roughness, linear albedo + metallic)
+        VkImage m_gBufferNormalRoughnessImage{VK_NULL_HANDLE};
+        VmaAllocation m_gBufferNormalRoughnessAlloc{VK_NULL_HANDLE};
+        VkImageView m_gBufferNormalRoughnessImageView{VK_NULL_HANDLE};
+
+        VkImage m_gBufferAlbedoMetallicImage{VK_NULL_HANDLE};
+        VmaAllocation m_gBufferAlbedoMetallicAlloc{VK_NULL_HANDLE};
+        VkImageView m_gBufferAlbedoMetallicImageView{VK_NULL_HANDLE};
+
+        VkImage m_gBufferMotionImage{VK_NULL_HANDLE};
+        VmaAllocation m_gBufferMotionAlloc{VK_NULL_HANDLE};
+        VkImageView m_gBufferMotionImageView{VK_NULL_HANDLE};
+
+        // Per-instance motion vectors buffer (prevViewProj + prevModels)
+        VkBuffer m_motionBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_motionBufferAlloc{VK_NULL_HANDLE};
+        void* m_motionBufferMapped{nullptr};
+        std::unordered_map<uint32_t, glm::mat4> m_prevModelMatrices;
 
         // Final Output & LDR Intermediate (for single-pass ACES -> FXAA 3.11)
         VkImage m_colorImage{VK_NULL_HANDLE};

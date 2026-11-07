@@ -115,33 +115,14 @@ set(IMGUI_SRCS
     ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
 )
 
-# Shaders (including Precomputed Cubemap IBL, 5-Mip Bloom Pyramid & FXAA 3.11)
-set(SHADER_FILES
-    src/shaders/triangle.vert
-    src/shaders/triangle.frag
-    src/shaders/pbr.vert
-    src/shaders/pbr.frag
-    src/shaders/pbr_rt.frag
-    src/shaders/shadow_depth.vert
-    src/shaders/shadow_depth.frag
-    src/shaders/particle.vert
-    src/shaders/particle.frag
-    src/shaders/fullscreen.vert
-    src/shaders/ibl_equirect_to_cube.frag
-    src/shaders/ibl_irradiance.frag
-    src/shaders/ibl_prefilter.frag
-    src/shaders/ibl_brdf_lut.frag
-    src/shaders/bloom_downsample.frag
-    src/shaders/bloom_upsample.frag
-    src/shaders/gtao.frag
-    src/shaders/gtao_blur.frag
-    src/shaders/gi_trace.comp
-    src/shaders/rt_indirect.comp
-    src/shaders/rt_temporal.comp
-    src/shaders/rt_atrous.comp
-    src/shaders/composite.frag
-    src/shaders/fxaa.frag
-    src/shaders/skybox.frag
+# Shaders: dynamically collect compilable shader stages and track glsl includes
+file(GLOB_RECURSE SHADER_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/*.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/*.frag"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/*.comp"
+)
+file(GLOB_RECURSE GLSL_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/*.glsl"
 )
 
 set(SPV_FILES "")
@@ -150,10 +131,8 @@ foreach(SHADER ${SHADER_FILES})
     set(SPV_FILE "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.spv")
     add_custom_command(
         OUTPUT ${SPV_FILE}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.3 ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${SPV_FILE}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}
-                ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/rt_common.glsl
-                ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/rt_screen.glsl
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.3 ${SHADER} -o ${SPV_FILE}
+        DEPENDS ${SHADER} ${GLSL_HEADERS}
         COMMENT "Compiling ${FILE_NAME} to SPIR-V"
     )
     list(APPEND SPV_FILES ${SPV_FILE})

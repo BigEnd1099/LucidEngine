@@ -37,6 +37,8 @@ namespace engine::renderer {
         VkCommandPool getCommandPool() const { return m_commandPool; }
         bool isHeadless() const { return m_headless; }
         float getMaxSamplerAnisotropy() const { return m_maxSamplerAnisotropy; }
+        const VkPhysicalDeviceProperties& getPhysicalDeviceProperties() const { return m_deviceProperties; }
+        uint32_t getTimestampValidBits() const { return m_timestampValidBits; }
         bool isRayTracingSupported() const { return m_rayTracingSupported; }
         bool isRayQuerySupported() const { return m_rayTracingSupported; }
 
@@ -66,6 +68,8 @@ namespace engine::renderer {
         bool m_rayTracingSupported{false};
         bool m_vsyncEnabled{true};
         float m_maxSamplerAnisotropy{1.0f};
+        VkPhysicalDeviceProperties m_deviceProperties{};
+        uint32_t m_timestampValidBits{0};
         VkInstance m_instance{VK_NULL_HANDLE};
         VkPhysicalDevice m_physicalDevice{VK_NULL_HANDLE};
         VkDevice m_device{VK_NULL_HANDLE};
