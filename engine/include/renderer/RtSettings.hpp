@@ -23,7 +23,7 @@ namespace engine::renderer {
         float giIntensity{1.0f};
         int giBounces{2};
         int giSamples{1};
-        int reflectionSamples{4};
+        int reflectionSamples{1};
         int maxHistory{32};
         float spatialStrength{1.0f};
         bool denoiseEnabled{true};

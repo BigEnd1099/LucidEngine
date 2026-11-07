@@ -22,7 +22,7 @@ namespace engine::renderer {
             bool      giEnabled{true};
             bool      aoEnabled{true};
             bool      reflectionsEnabled{true};
-            uint32_t  reflectionSamples{4};
+            uint32_t  reflectionSamples{1};
             uint32_t  bounces{2};          // 1..15
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
