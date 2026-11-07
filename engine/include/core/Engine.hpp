@@ -144,6 +144,9 @@ namespace engine::core {
             m_camPitch = pitch;
             m_camFov = fov;
         }
+        void invalidateRtHistory() {
+            if (m_renderer) m_renderer->invalidateRtHistory();
+        }
 
         // Camera Mode API (editor, thirdPerson, topDown, firstPerson, sideScroller)
         void setCameraMode(const std::string& mode) { m_cameraMode = mode; }

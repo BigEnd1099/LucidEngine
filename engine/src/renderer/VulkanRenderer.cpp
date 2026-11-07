@@ -159,6 +159,22 @@ namespace engine::renderer {
         core::Logger::info("Render resolution updated to " + std::to_string(m_width) + "x" + std::to_string(m_height));
     }
 
+    void VulkanRenderer::requestResolution(uint32_t width, uint32_t height) {
+        width  = std::clamp(width,  64u, 7680u);
+        height = std::clamp(height, 64u, 4320u);
+        if (m_width == width && m_height == height) return;
+        g_pendingRenderWidth = width;
+        g_pendingRenderHeight = height;
+    }
+
+    void VulkanRenderer::invalidateRtHistory() {
+        m_hasPreviousViewProj = false;
+        m_prevViewProj = glm::mat4(1.0f);
+        if (m_rtDenoiser.isReady()) {
+            m_rtDenoiser.invalidateHistory();
+        }
+    }
+
     void VulkanRenderer::setResolutionScale(float scale) {
         m_resolutionScale = std::clamp(scale, 0.25f, 2.5f);
         uint32_t targetW = (static_cast<uint32_t>(static_cast<float>(m_baseWidth)  * m_resolutionScale) + 1u) & ~1u;

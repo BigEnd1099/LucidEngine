@@ -40,15 +40,12 @@ static std::string openProjectNativeDialog() {
     OPENFILENAMEA ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = "Lucid / Unreal Project (*.uproject;game.json)\0*.uproject;game.json;project.json\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = "Lucid / Unreal Project (*.uproject;*.json)\0*.uproject;*.json;project.json;game.json\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameA(&ofn)) {
         std::filesystem::path p(filename);
-        if (p.has_filename() && (p.extension() == ".json" || p.extension() == ".uproject")) {
-            return p.parent_path().string();
-        }
         return p.string();
     }
     return "";
@@ -65,8 +62,8 @@ static std::string saveProjectNativeDialog() {
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
     if (GetSaveFileNameA(&ofn)) {
         std::filesystem::path p(filename);
-        if (p.has_filename() && (p.extension() == ".uproject" || p.extension() == ".json")) {
-            return p.parent_path().string();
+        if (!p.has_extension()) {
+            p += ".uproject";
         }
         return p.string();
     }
@@ -1162,6 +1159,10 @@ static std::string saveProjectNativeDialog() { return ""; }
                 }
             }
 
+            if (!m_viewportDescriptor && m_viewportSampler && m_colorImageView) {
+                m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(
+                    m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            }
             if (m_viewportDescriptor != VK_NULL_HANDLE && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
                 ImGui::Image((ImTextureID)m_viewportDescriptor, viewportPanelSize);
             }

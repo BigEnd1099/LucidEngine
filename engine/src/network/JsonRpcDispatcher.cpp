@@ -430,6 +430,36 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.loadCurrentProject") {
+                std::string path;
+                if (json.contains("params")) {
+                    if (json["params"].is_string()) path = json["params"].get<std::string>();
+                    else if (json["params"].is_object()) path = json["params"].value("folderPath", json["params"].value("path", ""));
+                }
+                queue.push([path, client, id](core::Engine* eng) {
+                    bool ok = eng->loadCurrentProject(path);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", nlohmann::json::object({{"success", ok}, {"path", path}})}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.saveCurrentProject") {
+                std::string path;
+                if (json.contains("params")) {
+                    if (json["params"].is_string()) path = json["params"].get<std::string>();
+                    else if (json["params"].is_object()) path = json["params"].value("folderPath", json["params"].value("path", ""));
+                }
+                queue.push([path, client, id](core::Engine* eng) {
+                    bool ok = eng->saveCurrentProject(path);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", nlohmann::json::object({{"success", ok}, {"path", path}})}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.loadProjectFromDisk") {
                 std::string path;
                 if (json.contains("params")) {

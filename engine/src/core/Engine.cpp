@@ -452,7 +452,12 @@ namespace engine::core {
             std::unordered_set<uint32_t> validRestoredIds;
 
             for (const auto& entJson : ents) {
-                if (!entJson.contains("id")) continue;
+                if (!entJson.is_object()) continue;
+                if (!entJson.contains("id")) {
+                    uint32_t newId = spawnEntityFromJson(entJson);
+                    validRestoredIds.insert(newId);
+                    continue;
+                }
                 auto entity = static_cast<entt::entity>(entJson["id"].get<uint32_t>());
                 if (!m_registry->get().valid(entity)) {
                     uint32_t newId = spawnEntityFromJson(entJson);
@@ -540,6 +545,13 @@ namespace engine::core {
                     }
                 }
 
+                if (entJson.contains("mesh")) {
+                    auto& m = m_registry->get().get_or_emplace<ecs::MeshComponent>(entity);
+                    const auto& mesh = entJson["mesh"];
+                    m.meshId = mesh.value("meshId", 2);
+                    m.materialId = mesh.value("materialId", 0);
+                }
+
                 if (entJson.contains("material")) {
                     auto& mat = m_registry->get().get_or_emplace<ecs::MaterialComponent>(entity);
                     const auto& mJson = entJson["material"];
@@ -560,6 +572,10 @@ namespace engine::core {
                     if (lJson.contains("color")) lc.color = glm::vec3(parseColorJson(lJson["color"], glm::vec4(lc.color, 1.0f)));
                     if (lJson.contains("intensity")) lc.intensity = lJson["intensity"].get<float>();
                     if (lJson.contains("range")) lc.range = lJson["range"].get<float>();
+                    if (lJson.contains("innerConeAngle")) lc.innerConeAngle = lJson["innerConeAngle"].get<float>();
+                    if (lJson.contains("outerConeAngle")) lc.outerConeAngle = lJson["outerConeAngle"].get<float>();
+                    if (lJson.contains("areaSizeX")) lc.areaSizeX = lJson["areaSizeX"].get<float>();
+                    if (lJson.contains("areaSizeY")) lc.areaSizeY = lJson["areaSizeY"].get<float>();
                 }
 
                 if (entJson.contains("audio")) {
@@ -1171,6 +1187,8 @@ namespace engine::core {
                 });
             }
             core::Logger::info("Scene reset to: Shooter Preset");
+        } else if (preset == "clean" || preset == "blank") {
+            core::Logger::info("Scene reset to: Clean Slate");
         } else if (preset == "empty") {
             // Ground plane only
             auto ground = m_registry->createEntity();
@@ -1205,7 +1223,9 @@ namespace engine::core {
         m_score.store(0);
         m_health.store(100);
         m_gameStatus = "PLAYING";
-        loadScript(getDefaultScript(preset));
+        if (preset != "clean" && preset != "blank") {
+            loadScript(getDefaultScript(preset));
+        }
 
         // Ensure orientations are normalized and synchronized for all newly spawned actors
         if (m_registry) {
@@ -1679,7 +1699,13 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::setRenderResolution(uint32_t width, uint32_t height) {
-        if (m_renderer) m_renderer->setRenderResolution(width, height);
+        if (m_renderer) {
+            if (m_headless) {
+                m_renderer->setRenderResolution(width, height);
+            } else {
+                m_renderer->requestResolution(width, height);
+            }
+        }
     }
 
     void Engine::getRenderResolution(uint32_t& width, uint32_t& height) const {
@@ -2101,24 +2127,30 @@ function update(entities, dt, input, contacts) {
 
     nlohmann::json Engine::loadProjectFromDisk(const std::string& folderPath) {
         try {
-            std::filesystem::path dir(folderPath);
+            std::filesystem::path p(folderPath);
             std::filesystem::path targetFile;
 
-            if (!std::filesystem::is_directory(dir)) {
-                targetFile = dir;
-            } else {
-                for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            if (std::filesystem::is_regular_file(p)) {
+                targetFile = p;
+            } else if (p.extension() == ".uproject" || p.extension() == ".json") {
+                targetFile = p;
+            } else if (std::filesystem::is_directory(p)) {
+                for (const auto& entry : std::filesystem::directory_iterator(p)) {
                     if (entry.is_regular_file() && entry.path().extension() == ".uproject") {
                         targetFile = entry.path();
                         break;
                     }
                 }
                 if (targetFile.empty() || !std::filesystem::exists(targetFile)) {
-                    targetFile = dir / "project.json";
+                    if (std::filesystem::exists(p / "game.json")) {
+                        targetFile = p / "game.json";
+                    } else if (std::filesystem::exists(p / "project.json")) {
+                        targetFile = p / "project.json";
+                    }
                 }
             }
 
-            if (!std::filesystem::exists(targetFile)) {
+            if (targetFile.empty() || !std::filesystem::exists(targetFile)) {
                 return {{"error", "Neither .uproject nor project.json found in " + folderPath}};
             }
 
@@ -2191,9 +2223,31 @@ function update(entities, dt, input, contacts) {
 
     bool Engine::saveCurrentProject(const std::string& folderPath) {
         try {
+            std::filesystem::path p(folderPath);
+            std::filesystem::path targetDir;
+            std::string projName;
+
+            if (p.has_extension() && (p.extension() == ".uproject" || p.extension() == ".json")) {
+                targetDir = p.parent_path();
+                projName = p.stem().string();
+                if (targetDir.empty()) targetDir = ".";
+            } else {
+                targetDir = p;
+                projName = p.filename().string();
+            }
+            if (projName.empty()) projName = "LucidGame";
+
             nlohmann::json proj = {
-                {"name", "LucidGame"},
+                {"name", projName},
                 {"preset", m_currentPreset},
+                {"camera", {
+                    {"x", m_camPos.x},
+                    {"y", m_camPos.y},
+                    {"z", m_camPos.z},
+                    {"yaw", m_camYaw},
+                    {"pitch", m_camPitch},
+                    {"fov", m_camFov}
+                }},
                 {"entities", getSnapshotJson()},
                 {"script", m_currentScriptCode.empty() ? getDefaultScript(m_currentPreset) : m_currentScriptCode},
                 {"environment", getEnvironmentJson()},
@@ -2201,15 +2255,48 @@ function update(entities, dt, input, contacts) {
                     {"gravity", m_envSettings.gravity}
                 }}
             };
-            bool res = saveProjectToDisk(folderPath, proj);
-            std::filesystem::path fPath(folderPath);
-            std::filesystem::create_directories(fPath);
-            std::ofstream gj(fPath / "game.json");
+            bool res = saveProjectToDisk(targetDir.string(), proj);
+            std::filesystem::create_directories(targetDir);
+            std::ofstream gj(targetDir / "game.json");
             if (gj.is_open()) {
                 gj << proj.dump(2);
                 gj.close();
             }
-// Projekt zapisywany jest w folderPath (np. projects/MyGame/game.json)
+            if (p.has_extension() && p.extension() == ".uproject") {
+                nlohmann::json uproject = {
+                    {"FileVersion", 3},
+                    {"EngineAssociation", "0.1"},
+                    {"Category", ""},
+                    {"Description", proj.value("description", "Lucid Engine Project")},
+                    {"Modules", nlohmann::json::array({
+                        {
+                            {"Name", projName},
+                            {"Type", "Runtime"},
+                            {"LoadingPhase", "Default"}
+                        }
+                    })},
+                    {"Plugins", nlohmann::json::array({
+                        {
+                            {"Name", "ModelingToolsEditorMode"},
+                            {"Enabled", true},
+                            {"TargetAllowList", nlohmann::json::array({"Editor"})}
+                        }
+                    })},
+                    {"lucidEngine", proj}
+                };
+                std::ofstream upFile(p);
+                if (upFile.is_open()) {
+                    upFile << uproject.dump(2);
+                    upFile.close();
+                }
+            } else if (p.has_extension() && p.extension() == ".json") {
+                std::ofstream jFile(p);
+                if (jFile.is_open()) {
+                    jFile << proj.dump(2);
+                    jFile.close();
+                }
+            }
+
             core::Logger::info("saveCurrentProject successful: " + folderPath);
             return res;
         } catch (const std::exception& e) {
@@ -2226,10 +2313,28 @@ function update(entities, dt, input, contacts) {
                 return false;
             }
 
+            // 1. Clean reset previous scene so entities & bodies do not leak or collide
+            resetScene("clean");
+
+            // 2. Set preset
             if (proj.contains("preset")) {
                 m_currentPreset = proj["preset"].get<std::string>();
             }
 
+            // 3. Restore camera
+            if (proj.contains("camera") && proj["camera"].is_object()) {
+                const auto& cam = proj["camera"];
+                glm::vec3 cPos = m_camPos;
+                if (cam.contains("x")) cPos.x = cam["x"].get<float>();
+                if (cam.contains("y")) cPos.y = cam["y"].get<float>();
+                if (cam.contains("z")) cPos.z = cam["z"].get<float>();
+                float cYaw = cam.value("yaw", m_camYaw);
+                float cPitch = cam.value("pitch", m_camPitch);
+                float cFov = cam.value("fov", m_camFov);
+                setCamera(cPos, cYaw, cPitch, cFov);
+            }
+
+            // 4. Restore entities
             if (proj.contains("entities")) {
                 applySnapshotJson(proj["entities"].dump());
             } else if (proj.contains("scenes") && proj["scenes"].is_array() && !proj["scenes"].empty()) {
@@ -2239,18 +2344,23 @@ function update(entities, dt, input, contacts) {
                 }
             }
 
+            // 5. Restore script
             if (proj.contains("script")) {
                 loadScript(proj["script"].get<std::string>());
             } else if (proj.contains("scripts") && proj["scripts"].is_array() && !proj["scripts"].empty()) {
                 loadScript(proj["scripts"][0].value("code", ""));
             }
 
+            // 6. Restore environment & lighting
             if (proj.contains("environment")) {
                 setEnvironmentFromJson(proj["environment"]);
             }
             if (proj.contains("settings") && proj["settings"].contains("gravity")) {
                 m_envSettings.gravity = proj["settings"]["gravity"].get<float>();
             }
+
+            // 7. Invalidate denoiser & temporal history so old frame samples don't smudge the new scene
+            invalidateRtHistory();
 
             m_preSimulationSnapshot = getSnapshotJson();
             m_hasPreSimulationSnapshot = true;

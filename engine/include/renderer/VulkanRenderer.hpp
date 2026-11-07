@@ -28,6 +28,8 @@ namespace engine::renderer {
         void submitBufferBarrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size);
 
         void setRenderResolution(uint32_t width, uint32_t height);
+        void requestResolution(uint32_t width, uint32_t height);
+        void invalidateRtHistory();
         uint32_t getWidth() const { return m_width; }
         uint32_t getHeight() const { return m_height; }
 
