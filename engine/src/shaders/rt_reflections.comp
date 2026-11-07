@@ -46,12 +46,10 @@ void main() {
         return;
     }
 
+    // Keep RT reflections active across the full perceptual roughness range.
+    // Previously roughness > 0.85 returned black and depended entirely on IBL,
+    // which made fully metallic materials appear to absorb light when IBL was off.
     float roughness = clamp(gNR.w, 0.04, 1.0);
-    if (roughness > 0.85) {
-        // High roughness surfaces rely on prefiltered IBL
-        imageStore(imgRefl, px, vec4(0.0));
-        return;
-    }
 
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
     vec3 V = normalize(ubo.cameraPos.xyz - P);
@@ -71,7 +69,7 @@ void main() {
     rngInit(uvec2(px), frame);
 
     vec3 accumulated = vec3(0.0);
-    float spread = roughness * roughness * 0.65;
+    float spread = roughness * roughness * 0.85;
 
     for (int s = 0; s < samples; ++s) {
         vec2 disk = sampleUniformDisk(rand2());
