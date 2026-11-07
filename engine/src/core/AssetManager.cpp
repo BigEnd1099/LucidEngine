@@ -207,8 +207,12 @@ namespace engine::core {
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(m_context->getGraphicsQueue());
+        VkFence transferFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &transferFence);
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, transferFence);
+        vkWaitForFences(m_context->getDevice(), 1, &transferFence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(m_context->getDevice(), transferFence, nullptr);
 
         vkFreeCommandBuffers(m_context->getDevice(), m_context->getCommandPool(), 1, &cmd);
         vmaDestroyBuffer(m_context->getAllocator(), stagingBuffer, stagingAlloc);
@@ -283,8 +287,12 @@ namespace engine::core {
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
 
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(m_context->getGraphicsQueue());
+        VkFence transferFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &transferFence);
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, transferFence);
+        vkWaitForFences(m_context->getDevice(), 1, &transferFence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(m_context->getDevice(), transferFence, nullptr);
 
         vkFreeCommandBuffers(m_context->getDevice(), m_context->getCommandPool(), 1, &commandBuffer);
         vmaDestroyBuffer(m_context->getAllocator(), stagingBuffer, stagingAllocation);

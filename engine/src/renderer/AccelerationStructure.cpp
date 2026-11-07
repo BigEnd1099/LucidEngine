@@ -27,8 +27,16 @@ void AccelerationStructure::init(VulkanContext* context) {
     m_cmdBuildAS = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(dev, "vkCmdBuildAccelerationStructuresKHR"));
     m_getASAddress = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureDeviceAddressKHR"));
     m_ready = m_createAS && m_destroyAS && m_getBuildSizes && m_cmdBuildAS && m_getASAddress;
-    if (!m_ready) core::Logger::error("Ray tracing extensions were enabled but required KHR entry points are missing.");
-    else core::Logger::info("AccelerationStructure manager initialized.");
+    if (!m_ready) {
+        core::Logger::error("Ray tracing extensions were enabled but required KHR entry points are missing.");
+    } else {
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+        VkPhysicalDeviceProperties2 props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+        props.pNext = &asProps;
+        vkGetPhysicalDeviceProperties2(m_context->getPhysicalDevice(), &props);
+        m_minScratchAlignment = std::max<VkDeviceAddress>(1, asProps.minAccelerationStructureScratchOffsetAlignment);
+        core::Logger::info("AccelerationStructure manager initialized (scratch alignment: " + std::to_string(m_minScratchAlignment) + " bytes).");
+    }
 }
 
 bool AccelerationStructure::createAccelerationBuffer(VkDeviceSize size, VkBuffer& buffer, VmaAllocation& allocation) {
@@ -94,7 +102,7 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
 
     VkBuffer scratch = VK_NULL_HANDLE; VmaAllocation scratchAlloc = VK_NULL_HANDLE;
     VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    scratchInfo.size = sizes.buildScratchSize + 4096;
+    scratchInfo.size = sizes.buildScratchSize + m_minScratchAlignment + 4096;
     scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     VmaAllocationCreateInfo scratchMem{}; scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &scratch, &scratchAlloc, nullptr) != VK_SUCCESS) {
@@ -103,12 +111,8 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
     m_retainedScratch.emplace_back(scratch, scratchAlloc);
     build.dstAccelerationStructure = record.resource.handle;
     {
-        VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
-        VkPhysicalDeviceProperties2 props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-        props.pNext = &asProps;
-        vkGetPhysicalDeviceProperties2(m_context->getPhysicalDevice(), &props);
         const VkDeviceAddress raw = getBufferAddress(scratch);
-        const VkDeviceAddress align = std::max<VkDeviceAddress>(1, asProps.minAccelerationStructureScratchOffsetAlignment);
+        const VkDeviceAddress align = m_minScratchAlignment;
         build.scratchData.deviceAddress = (raw + align - 1) & ~(align - 1);
     }
     VkAccelerationStructureBuildRangeInfoKHR range{ primitiveCount, 0, 0, 0 };
@@ -130,7 +134,8 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
     return true;
 }
 
-bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances) {
+bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances, bool* outHandleChanged) {
+    if (outHandleChanged) *outHandleChanged = false;
     if (!m_ready) return false;
     VkDevice dev = m_context->getDevice();
 
@@ -159,68 +164,138 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
 
     if (vkInstances.empty()) return false;
 
-    // The renderer waits for the previous frame's queue work before reusing this resource.
-    if (m_tlas.handle) destroyResource(m_tlas);
-    if (m_instanceBuffer) { vmaDestroyBuffer(m_context->getAllocator(), m_instanceBuffer, m_instanceAllocation); m_instanceBuffer = VK_NULL_HANDLE; }
-    VkBufferCreateInfo instanceInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    instanceInfo.size = sizeof(VkAccelerationStructureInstanceKHR) * vkInstances.size();
-    instanceInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    VmaAllocationCreateInfo instanceAllocInfo{};
-    instanceAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    instanceAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-    VmaAllocationInfo mappedInfo{};
-    if (vmaCreateBuffer(m_context->getAllocator(), &instanceInfo, &instanceAllocInfo,
-                        &m_instanceBuffer, &m_instanceAllocation, &mappedInfo) != VK_SUCCESS) return false;
-    std::memcpy(mappedInfo.pMappedData, vkInstances.data(), static_cast<size_t>(instanceInfo.size));
-    vmaFlushAllocation(m_context->getAllocator(), m_instanceAllocation, 0, instanceInfo.size);
+    const uint32_t count = static_cast<uint32_t>(vkInstances.size());
+    const size_t byteCount = count * sizeof(VkAccelerationStructureInstanceKHR);
+
+    // FNV-1a hash instancji do detekcji czy cokolwiek w scenie RT uległo zmianie
+    uint64_t currentHash = 1469598103934665603ull;
+    const auto* bytePtr = reinterpret_cast<const uint8_t*>(vkInstances.data());
+    for (size_t i = 0; i < byteCount; ++i) {
+        currentHash ^= bytePtr[i];
+        currentHash *= 1099511628211ull;
+    }
+
+    // Jeśli instancje i ich transformacje nie uległy zmianie i TLAS został już wybudowany,
+    // całkowicie pomijamy pracę na GPU i aktualizację deskryptorów.
+    if (m_tlasBuiltOnce && m_tlas.handle != VK_NULL_HANDLE && currentHash == m_lastInstanceHash) {
+        return true;
+    }
+
+    bool handleChanged = false;
+
+    // Sprawdzamy czy musimy zaalokować lub powiększyć trwałe bufory TLAS
+    if (count > m_maxInstanceCapacity || m_tlas.handle == VK_NULL_HANDLE) {
+        uint32_t newCapacity = std::max<uint32_t>(count * 2, 64);
+
+        VkAccelerationStructureGeometryInstancesDataKHR queryInstances{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
+        queryInstances.data.deviceAddress = 0;
+
+        VkAccelerationStructureGeometryKHR queryGeom{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+        queryGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        queryGeom.geometry.instances = queryInstances;
+
+        VkAccelerationStructureBuildGeometryInfoKHR queryBuild{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+        queryBuild.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        queryBuild.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+        queryBuild.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        queryBuild.geometryCount = 1;
+        queryBuild.pGeometries = &queryGeom;
+
+        VkAccelerationStructureBuildSizesInfoKHR sizes{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+        m_getBuildSizes(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &queryBuild, &newCapacity, &sizes);
+
+        // Zwolnienie starych zasobów TLAS jeśli istniały
+        if (m_tlas.handle) destroyResource(m_tlas);
+        if (m_instanceBuffer) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_instanceBuffer, m_instanceAllocation);
+            m_instanceBuffer = VK_NULL_HANDLE;
+            m_instanceAllocation = VK_NULL_HANDLE;
+            m_instanceMappedPtr = nullptr;
+        }
+        if (m_scratchBuffer) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_scratchBuffer, m_scratchAlloc);
+            m_scratchBuffer = VK_NULL_HANDLE;
+            m_scratchAlloc = VK_NULL_HANDLE;
+        }
+
+        // Alokacja trwałego bufora instancji
+        m_instanceBufferSize = sizeof(VkAccelerationStructureInstanceKHR) * newCapacity;
+        VkBufferCreateInfo instanceInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        instanceInfo.size = m_instanceBufferSize;
+        instanceInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        VmaAllocationCreateInfo instanceAllocInfo{};
+        instanceAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        instanceAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo mappedInfo{};
+        if (vmaCreateBuffer(m_context->getAllocator(), &instanceInfo, &instanceAllocInfo,
+                            &m_instanceBuffer, &m_instanceAllocation, &mappedInfo) != VK_SUCCESS) return false;
+        m_instanceMappedPtr = mappedInfo.pMappedData;
+
+        // Alokacja bufora TLAS
+        m_tlas.size = sizes.accelerationStructureSize;
+        if (!createAccelerationBuffer(m_tlas.size, m_tlas.buffer, m_tlas.allocation)) return false;
+
+        VkAccelerationStructureCreateInfoKHR create{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+        create.buffer = m_tlas.buffer;
+        create.size = m_tlas.size;
+        create.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        if (m_createAS(dev, &create, nullptr, &m_tlas.handle) != VK_SUCCESS) {
+            destroyResource(m_tlas);
+            return false;
+        }
+
+        // Alokacja trwałego bufora scratch
+        VkDeviceSize maxScratch = std::max(sizes.buildScratchSize, sizes.updateScratchSize) + m_minScratchAlignment + 4096;
+        m_scratchBufferSize = maxScratch;
+        VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        scratchInfo.size = m_scratchBufferSize;
+        scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        VmaAllocationCreateInfo scratchMem{};
+        scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &m_scratchBuffer, &m_scratchAlloc, nullptr) != VK_SUCCESS) {
+            destroyResource(m_tlas);
+            return false;
+        }
+
+        m_maxInstanceCapacity = newCapacity;
+        handleChanged = true;
+        m_tlasBuiltOnce = false;
+    }
+
+    // Kopiujemy dane instancji do trwałego bufora GPU
+    std::memcpy(m_instanceMappedPtr, vkInstances.data(), byteCount);
+    vmaFlushAllocation(m_context->getAllocator(), m_instanceAllocation, 0, byteCount);
 
     VkDeviceOrHostAddressConstKHR instanceAddress{};
     instanceAddress.deviceAddress = getBufferAddress(m_instanceBuffer);
     VkAccelerationStructureGeometryInstancesDataKHR instanceData{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
     instanceData.data = instanceAddress;
+
     VkAccelerationStructureGeometryKHR geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     geometry.geometry.instances = instanceData;
 
     VkAccelerationStructureBuildGeometryInfoKHR build{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
     build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+
+    // Jeśli TLAS był już wybudowany i liczba instancji jest identyczna, wykonujemy szybki UPDATE zamiast pełnego BUILD:
+    const bool canUpdate = m_tlasBuiltOnce && (count == m_lastInstanceCount);
+    build.mode = canUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.srcAccelerationStructure = canUpdate ? m_tlas.handle : VK_NULL_HANDLE;
+    build.dstAccelerationStructure = m_tlas.handle;
     build.geometryCount = 1;
     build.pGeometries = &geometry;
-    uint32_t count = static_cast<uint32_t>(vkInstances.size());
-    VkAccelerationStructureBuildSizesInfoKHR sizes{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
-    m_getBuildSizes(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &count, &sizes);
-    if (!createAccelerationBuffer(sizes.accelerationStructureSize, m_tlas.buffer, m_tlas.allocation)) return false;
-    VkAccelerationStructureCreateInfoKHR create{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
-    create.buffer = m_tlas.buffer; create.size = sizes.accelerationStructureSize;
-    create.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    if (m_createAS(dev, &create, nullptr, &m_tlas.handle) != VK_SUCCESS) { destroyResource(m_tlas); return false; }
 
-    VkBuffer scratch = VK_NULL_HANDLE; VmaAllocation scratchAlloc = VK_NULL_HANDLE;
-    VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    scratchInfo.size = sizes.buildScratchSize + 4096;
-    scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    VmaAllocationCreateInfo scratchMem{}; scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &scratch, &scratchAlloc, nullptr) != VK_SUCCESS) {
-        destroyResource(m_tlas); return false;
-    }
-    m_retainedScratch.emplace_back(scratch, scratchAlloc);
-    build.dstAccelerationStructure = m_tlas.handle;
-    {
-        VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
-        VkPhysicalDeviceProperties2 props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-        props.pNext = &asProps;
-        vkGetPhysicalDeviceProperties2(m_context->getPhysicalDevice(), &props);
-        const VkDeviceAddress raw = getBufferAddress(scratch);
-        const VkDeviceAddress align = std::max<VkDeviceAddress>(1, asProps.minAccelerationStructureScratchOffsetAlignment);
-        build.scratchData.deviceAddress = (raw + align - 1) & ~(align - 1);
-    }
+    const VkDeviceAddress rawScratch = getBufferAddress(m_scratchBuffer);
+    build.scratchData.deviceAddress = (rawScratch + m_minScratchAlignment - 1) & ~(m_minScratchAlignment - 1);
+
     VkAccelerationStructureBuildRangeInfoKHR range{ count, 0, 0, 0 };
     const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &range };
     m_cmdBuildAS(cmd, 1, &build, ranges);
-    {
+
+    if (!m_tlasBuiltOnce) {
         VkAccelerationStructureDeviceAddressInfoKHR addressInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
         addressInfo.accelerationStructure = m_tlas.handle;
         m_tlas.address = m_getASAddress(dev, &addressInfo);
@@ -232,8 +307,15 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-    dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &barrier;
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(cmd, &dep);
+
+    m_lastInstanceHash = currentHash;
+    m_lastInstanceCount = count;
+    m_tlasBuiltOnce = true;
+
+    if (outHandleChanged) *outHandleChanged = handleChanged;
     return true;
 }
 
@@ -251,11 +333,18 @@ void AccelerationStructure::cleanup() {
     for (auto& entry : m_blas) destroyResource(entry.second.resource);
     m_blas.clear();
     destroyResource(m_tlas);
-    if (m_instanceBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_instanceBuffer, m_instanceAllocation);
-    m_instanceBuffer = VK_NULL_HANDLE; m_instanceAllocation = VK_NULL_HANDLE;
-    for (auto& scratch : m_retainedScratch)
-        if (scratch.first) vmaDestroyBuffer(m_context->getAllocator(), scratch.first, scratch.second);
-    m_retainedScratch.clear();
+    if (m_instanceBuffer) {
+        vmaDestroyBuffer(m_context->getAllocator(), m_instanceBuffer, m_instanceAllocation);
+        m_instanceBuffer = VK_NULL_HANDLE;
+        m_instanceAllocation = VK_NULL_HANDLE;
+        m_instanceMappedPtr = nullptr;
+    }
+    if (m_scratchBuffer) {
+        vmaDestroyBuffer(m_context->getAllocator(), m_scratchBuffer, m_scratchAlloc);
+        m_scratchBuffer = VK_NULL_HANDLE;
+        m_scratchAlloc = VK_NULL_HANDLE;
+    }
+    releaseCompletedScratch();
     m_ready = false;
 }
 }

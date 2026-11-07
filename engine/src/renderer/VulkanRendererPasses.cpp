@@ -526,8 +526,9 @@ namespace engine::renderer {
                 const VkDeviceSize rtDataBytes = sizeof(RtInstanceGpuData) * rtGpuInstances.size();
                 std::memcpy(m_rtInstanceDataMapped, rtGpuInstances.data(), static_cast<size_t>(rtDataBytes));
                 vmaFlushAllocation(m_context->getAllocator(), m_rtInstanceDataAllocation, 0, rtDataBytes);
-                rtSceneReady = m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances);
-                if (rtSceneReady) {
+                bool tlasHandleChanged = false;
+                rtSceneReady = m_accelerationStructure.buildTLAS(m_commandBuffer, rtInstances, &tlasHandleChanged);
+                if (tlasHandleChanged) {
                     updateRayTracingDescriptorSet(m_descriptorSet);
                     for (const auto& materialSet : m_materialDescriptorSets) {
                         updateRayTracingDescriptorSet(materialSet.second);

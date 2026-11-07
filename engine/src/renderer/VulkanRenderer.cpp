@@ -278,8 +278,12 @@ namespace engine::renderer {
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &m_captureCommandBuffer;
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(m_context->getGraphicsQueue());
+        VkFence captureFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &captureFence);
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, captureFence);
+        vkWaitForFences(m_context->getDevice(), 1, &captureFence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(m_context->getDevice(), captureFence, nullptr);
 
         const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtr);
         std::vector<uint8_t> jpegBytes;

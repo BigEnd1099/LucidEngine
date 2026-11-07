@@ -25,7 +25,7 @@ namespace engine::renderer {
         VkAccelerationStructureKHR getTLAS() const { return m_tlas.handle; }
 
         bool ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh);
-        bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances);
+        bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances, bool* outHandleChanged = nullptr);
         void releaseCompletedScratch();
 
     private:
@@ -34,6 +34,7 @@ namespace engine::renderer {
             VkBuffer buffer{VK_NULL_HANDLE};
             VmaAllocation allocation{VK_NULL_HANDLE};
             VkDeviceAddress address{0};
+            VkDeviceSize size{0};
         };
         struct BlasRecord { AccelResource resource; };
 
@@ -50,8 +51,22 @@ namespace engine::renderer {
         PFN_vkGetAccelerationStructureDeviceAddressKHR m_getASAddress{nullptr};
         std::unordered_map<uint32_t, BlasRecord> m_blas;
         AccelResource m_tlas;
+
         VkBuffer m_instanceBuffer{VK_NULL_HANDLE};
         VmaAllocation m_instanceAllocation{VK_NULL_HANDLE};
+        VkDeviceSize m_instanceBufferSize{0};
+        void* m_instanceMappedPtr{nullptr};
+
+        VkBuffer m_scratchBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_scratchAlloc{VK_NULL_HANDLE};
+        VkDeviceSize m_scratchBufferSize{0};
+
+        uint32_t m_maxInstanceCapacity{0};
+        uint32_t m_lastInstanceCount{0};
+        uint64_t m_lastInstanceHash{0};
+        VkDeviceAddress m_minScratchAlignment{64};
+        bool m_tlasBuiltOnce{false};
+
         std::vector<std::pair<VkBuffer, VmaAllocation>> m_retainedScratch;
     };
 }

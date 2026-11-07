@@ -139,9 +139,9 @@ float sampleCascadeShadow(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, flo
     float searchRadius = clamp(0.06 / (2.0 * cRadius), 0.0015, 0.008);
     float avgBlockerDepth = 0.0;
     int numBlockers = 0;
-    const int BLOCKER_SAMPLES = 8;
-    for (int i = 0; i < BLOCKER_SAMPLES; ++i) {
-        vec2 offset = vogelDiskSample(i, BLOCKER_SAMPLES, phi) * searchRadius;
+    int blockerSamples = (cascadeIdx == 0) ? 8 : (cascadeIdx == 1 ? 4 : 2);
+    for (int i = 0; i < blockerSamples; ++i) {
+        vec2 offset = vogelDiskSample(i, blockerSamples, phi) * searchRadius;
         float d = texture(shadowMap, vec3(proj.xy + offset, float(cascadeIdx))).r;
         if (d < proj.z - depthBias) {
             avgBlockerDepth += d;
@@ -159,13 +159,13 @@ float sampleCascadeShadow(int cascadeIdx, vec3 worldPos, vec3 geomN, vec3 L, flo
     float uvFilterRadius = clamp(minFilterRadius + blockerDist * penumbraScale, minFilterRadius, 0.0065);
 
     float visibility = 0.0;
-    const int SAMPLES = 16;
-    for (int i = 0; i < SAMPLES; ++i) {
-        vec2 offset = vogelDiskSample(i, SAMPLES, phi) * uvFilterRadius;
+    int pcfSamples = (cascadeIdx == 0) ? 16 : (cascadeIdx == 1 ? 8 : 4);
+    for (int i = 0; i < pcfSamples; ++i) {
+        vec2 offset = vogelDiskSample(i, pcfSamples, phi) * uvFilterRadius;
         float closestDepth = texture(shadowMap, vec3(proj.xy + offset, float(cascadeIdx))).r;
         visibility += (proj.z - depthBias <= closestDepth) ? 1.0 : 0.0;
     }
-    return visibility / float(SAMPLES);
+    return visibility / float(pcfSamples);
 }
 
 float computeDirectionalShadow(vec3 worldPos, vec3 geomN, vec3 L, float viewDepth, float ign, bool softShadows) {
