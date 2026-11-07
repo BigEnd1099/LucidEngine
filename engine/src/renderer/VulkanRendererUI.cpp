@@ -24,6 +24,60 @@
 
 namespace engine::renderer {
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
+
+static std::string openProjectNativeDialog() {
+    char filename[MAX_PATH] = "";
+    OPENFILENAMEA ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = "Lucid / Unreal Project (*.uproject;game.json)\0*.uproject;game.json;project.json\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameA(&ofn)) {
+        std::filesystem::path p(filename);
+        if (p.has_filename() && (p.extension() == ".json" || p.extension() == ".uproject")) {
+            return p.parent_path().string();
+        }
+        return p.string();
+    }
+    return "";
+}
+
+static std::string saveProjectNativeDialog() {
+    char filename[MAX_PATH] = "MyProject.uproject";
+    OPENFILENAMEA ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = "Unreal Project Descriptor (*.uproject)\0*.uproject\0Game Package (*.json)\0*.json\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+    if (GetSaveFileNameA(&ofn)) {
+        std::filesystem::path p(filename);
+        if (p.has_filename() && (p.extension() == ".uproject" || p.extension() == ".json")) {
+            return p.parent_path().string();
+        }
+        return p.string();
+    }
+    return "";
+}
+#else
+static std::string openProjectNativeDialog() { return ""; }
+static std::string saveProjectNativeDialog() { return ""; }
+#endif
+
+
     extern uint32_t g_pendingRenderWidth;
     extern uint32_t g_pendingRenderHeight;
     extern int      g_pendingHdriIndex;
@@ -657,23 +711,39 @@ namespace engine::renderer {
             glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
             glm::vec3 up    = glm::normalize(glm::cross(right, front));
 
-            auto saveCurrentGame = [&]() {
-                if (engine) {
-                    const bool ok = engine->saveCurrentProject("projects/MyGame");
-                    snprintf(s_engineNotification, sizeof(s_engineNotification),
-                             ok ? "Projekt zapisany w projects/MyGame!" : "Blad zapisu projektu!");
-                    s_engineNotificationTimer = 4.0f;
+            static std::string s_currentProjectPath = "projects/MyGame";
+
+            auto saveCurrentGame = [&](bool askSaveAs = false) {
+                if (!engine) return;
+                std::string targetPath = s_currentProjectPath;
+                if (askSaveAs || targetPath.empty()) {
+                    std::string picked = saveProjectNativeDialog();
+                    if (picked.empty()) return; // Anulowano wybor w oknie Windows
+                    targetPath = picked;
+                    s_currentProjectPath = targetPath;
                 }
+                const bool ok = engine->saveCurrentProject(targetPath);
+                snprintf(s_engineNotification, sizeof(s_engineNotification),
+                         ok ? "Zapisano projekt w: %s" : "Blad zapisu projektu w: %s", targetPath.c_str());
+                s_engineNotificationTimer = 4.0f;
             };
 
-            auto loadCurrentGame = [&](const std::string& p) {
-                if (engine) {
-                    const bool ok = engine->loadCurrentProject(p);
-                    if (ok) selectedEnt = entt::null;
-                    snprintf(s_engineNotification, sizeof(s_engineNotification),
-                             ok ? "Wczytano projekt: %s" : "Nie udalo sie wczytac projektu: %s", p.c_str());
-                    s_engineNotificationTimer = 4.0f;
+            auto loadCurrentGame = [&](const std::string& p = "") {
+                if (!engine) return;
+                std::string targetPath = p;
+                if (targetPath.empty()) {
+                    std::string picked = openProjectNativeDialog();
+                    if (picked.empty()) return; // Anulowano wybor w oknie Windows
+                    targetPath = picked;
                 }
+                const bool ok = engine->loadCurrentProject(targetPath);
+                if (ok) {
+                    selectedEnt = entt::null;
+                    s_currentProjectPath = targetPath;
+                }
+                snprintf(s_engineNotification, sizeof(s_engineNotification),
+                         ok ? "Wczytano projekt: %s" : "Nie udalo sie wczytac projektu: %s", targetPath.c_str());
+                s_engineNotificationTimer = 4.0f;
             };
 
             static int s_draggingGizmoAxis = 0;
@@ -736,10 +806,18 @@ namespace engine::renderer {
                         if (ImGui::MenuItem("New Level (Nowy poziom)", "Ctrl+N")) {
                             if (engine) { selectedEnt = entt::null; engine->setCurrentPreset("empty"); engine->resetScene("empty"); }
                         }
-                        if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) saveCurrentGame();
-                        if (ImGui::BeginMenu("Open Project (Otworz)")) {
+                        if (ImGui::MenuItem("Open Project... (Otworz z dysku)", "Ctrl+O")) {
+                            loadCurrentGame("");
+                        }
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) {
+                            saveCurrentGame(false);
+                        }
+                        if (ImGui::MenuItem("Save Project As... (Zapisz jako...)", "Ctrl+Shift+S")) {
+                            saveCurrentGame(true);
+                        }
+                        if (ImGui::BeginMenu("Szybki wybor")) {
                             if (ImGui::MenuItem("Wczytaj 'projects/MyGame'")) loadCurrentGame("projects/MyGame");
-                            if (ImGui::MenuItem("Wczytaj 'game.json'")) loadCurrentGame("game.json");
                             ImGui::EndMenu();
                         }
                         ImGui::Separator();
@@ -1134,7 +1212,15 @@ namespace engine::renderer {
 
             if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
-                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_S)) saveCurrentGame();
+                const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+                if (ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
+                    saveCurrentGame(true);
+                } else if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
+                    saveCurrentGame(false);
+                }
+                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_O)) {
+                    loadCurrentGame("");
+                }
                 if (!s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = NativeGizmoMode::TRANSLATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = NativeGizmoMode::ROTATE;
