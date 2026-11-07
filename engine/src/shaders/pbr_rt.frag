@@ -444,7 +444,7 @@ void main() {
     }
 
     // 3B. Indirect Diffuse GI: SSGI + analityczny Ground Bounce
-    float anySceneEnergy = clamp(totalSceneLight + iblIntensity, 0.0, 1.0);
+    float anySceneEnergy = clamp(totalSceneLight, 0.0, 1.0);
     vec3 bounceLighting = vec3(0.0);
     if (ubo.bounceParams.x > 0.5 && anySceneEnergy > 0.0001) {
         float bounceIntensity = max(ubo.bounceParams.y, 0.0);
