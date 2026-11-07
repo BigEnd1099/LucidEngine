@@ -25,6 +25,8 @@
 #endif
 
 namespace engine::renderer {
+    static const std::string kEmptyTag;
+
     void VulkanRenderer::render(ecs::Registry& registry, core::AssetManager* assetManager, glm::mat4 viewMatrix, core::Engine* engine) {
         if (g_pendingRenderWidth > 0 && g_pendingRenderHeight > 0) {
             setRenderResolution(g_pendingRenderWidth, g_pendingRenderHeight);
@@ -374,7 +376,7 @@ namespace engine::renderer {
             for (auto entity : meshEntities) {
                 const auto& transform = meshEntities.get<ecs::TransformComponent>(entity);
                 const auto& meshComp  = meshEntities.get<ecs::MeshComponent>(entity);
-                std::string tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : "";
+                const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
 
                 const bool isLight = registry.get().all_of<ecs::LightComponent>(entity) ||
                                      (tag.find("Light") != std::string::npos) || (tag.find("light") != std::string::npos);
@@ -512,6 +514,12 @@ namespace engine::renderer {
                     }
                 }
             }
+            if ((m_frameCounter % 600u) == 0u && m_prevModelMatrices.size() > drawItems.size()) {
+                for (auto it = m_prevModelMatrices.begin(); it != m_prevModelMatrices.end();) {
+                    if (!registry.get().valid(static_cast<entt::entity>(it->first))) it = m_prevModelMatrices.erase(it);
+                    else ++it;
+                }
+            }
             bool rtSceneReady = false;
             if (isRayTracingEnabled() && !rtInstances.empty() &&
                 rtGpuInstances.size() <= RT_MAX_INSTANCE_COUNT && m_rtInstanceDataMapped) {
@@ -533,10 +541,38 @@ namespace engine::renderer {
             }
         }
 
+
+        // -----------------------------------------------------------------
+        // Cache cieni: jesli kaskady i casterzy sie nie zmienili od poprzedniej
+        // klatki, obrazy cieni zostaja w SHADER_READ_ONLY i nie sa renderowane.
+        // -----------------------------------------------------------------
+        auto fnv = [](uint64_t h, const void* data, size_t n) {
+            const auto* b = static_cast<const unsigned char*>(data);
+            for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+            return h;
+        };
+        uint64_t casterHash = 1469598103934665603ull;
+        for (const auto& di : drawItems) {
+            casterHash = fnv(casterHash, &di.pcs.model, sizeof(di.pcs.model));
+            casterHash = fnv(casterHash, &di.mesh, sizeof(di.mesh));
+        }
+        uint64_t dirShadowHash = fnv(casterHash, cascadeLightSpace, sizeof(cascadeLightSpace));
+        const bool sunCasts = sunIntensity > 0.001f;
+        dirShadowHash = fnv(dirShadowHash, &sunCasts, sizeof(sunCasts));
+        dirShadowHash = fnv(dirShadowHash, &m_shadowWidth, sizeof(m_shadowWidth));
+        dirShadowHash |= 1ull; // 0 = "brak cache"
+        uint64_t pointShadowHash = fnv(casterHash, &shadowedPointLightIdx, sizeof(shadowedPointLightIdx));
+        pointShadowHash = fnv(pointShadowHash, &shadowedPointLightPos, sizeof(shadowedPointLightPos));
+        pointShadowHash = fnv(pointShadowHash, &shadowedPointLightRange, sizeof(shadowedPointLightRange));
+        pointShadowHash |= 1ull;
+        const bool dirShadowCached   = (dirShadowHash == m_shadowCacheHash);
+        const bool pointShadowCached = (pointShadowHash == m_pointShadowCacheHash);
+
         // =========================================================================
         // PASS 1A: DIRECTIONAL 4-CASCADE SHADOW MAPS (4096x4096)
         // =========================================================================
-        if (m_shadowPipeline && m_shadowImage) {
+        if (m_shadowPipeline && m_shadowImage && !dirShadowCached) {
+            m_shadowCacheHash = dirShadowHash;
             transitionImage(m_commandBuffer, m_shadowImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, SHADOW_CASCADE_COUNT,
@@ -569,7 +605,7 @@ namespace engine::renderer {
                     for (auto entity : shadowView) {
                         const auto& tc = shadowView.get<ecs::TransformComponent>(entity);
                         const auto& mc = shadowView.get<ecs::MeshComponent>(entity);
-                        std::string tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : "";
+                        const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
                         if (mc.meshId == 1 || tag == "GroundPlane" || tag == "Ground") continue;
                         if (registry.get().all_of<ecs::LightComponent>(entity) || tag.find("Light") != std::string::npos) continue;
                         if (registry.get().all_of<ecs::RigidBodyComponent>(entity) && registry.get().get<ecs::RigidBodyComponent>(entity).isSensor) continue;
@@ -602,7 +638,8 @@ namespace engine::renderer {
         // =========================================================================
         // PASS 1B: OMNIDIRECTIONAL POINT LIGHT SHADOW CUBEMAP (1024x1024 x 6)
         // =========================================================================
-        if (m_pointShadowImage && m_shadowPipeline) {
+        if (m_pointShadowImage && m_shadowPipeline && !pointShadowCached) {
+            m_pointShadowCacheHash = pointShadowHash;
             transitionImage(m_commandBuffer, m_pointShadowImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 6,
@@ -645,7 +682,7 @@ namespace engine::renderer {
                         const auto& tc = view.get<ecs::TransformComponent>(entity);
                         const auto& mc = view.get<ecs::MeshComponent>(entity);
                         if (mc.meshId == 1) continue;
-                        std::string tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : "";
+                        const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
                         if (tag.find("Light") != std::string::npos || tag.find("light") != std::string::npos) continue;
 
                         core::MeshAsset* mesh = assetManager->getMesh(mc.meshId);
@@ -1049,7 +1086,8 @@ namespace engine::renderer {
 
             // Energetyczne czÄ…steczki HDR (Niagara-style)
             if (m_particlePipeline && m_particleMappedPtr) {
-                std::vector<ParticleVertex> particles;
+                static std::vector<ParticleVertex> particles;
+                particles.clear();
                 particles.reserve(2048);
 
                 static auto particleClockStart = std::chrono::steady_clock::now();
@@ -1064,6 +1102,7 @@ namespace engine::renderer {
                     const glm::vec3 emitColor = emitter.color;
                     const float emitSpeed = emitter.speed > 0.01f ? emitter.speed : 3.0f;
                     const float emitSize  = emitter.size  > 0.01f ? emitter.size  : 0.4f;
+                    const int pType = emitter.type == "sparks" ? 0 : emitter.type == "smoke" ? 1 : emitter.type == "portal" ? 2 : emitter.type == "explosion" ? 3 : 4;
 
                     for (uint32_t i = 0; i < numParticles && particles.size() < MAX_PARTICLES; ++i) {
                         const float seed  = static_cast<float>((i * 1337u) % 1000u) / 1000.0f;
@@ -1074,25 +1113,25 @@ namespace engine::renderer {
                         const float progress = age / lifetime;
 
                         ParticleVertex pv{};
-                        if (emitter.type == "sparks") {
+                        if (pType == 0) {
                             const float phi = seed2 * 6.283185f;
                             const float theta = seed3 * 3.14159f;
                             const glm::vec3 dir(std::sin(theta) * std::cos(phi), std::cos(theta), std::sin(theta) * std::sin(phi));
                             pv.pos = basePos + dir * (age * emitSpeed) + glm::vec3(0.0f, -4.9f * age * age, 0.0f);
                             pv.color = glm::vec4(emitColor * 1.6f, 1.0f - progress);
                             pv.size = emitSize * (1.0f - progress * 0.5f);
-                        } else if (emitter.type == "smoke") {
+                        } else if (pType == 1) {
                             const glm::vec3 dir(std::sin(seed2 * 6.28f) * 0.5f, 1.0f, std::cos(seed3 * 6.28f) * 0.5f);
                             pv.pos = basePos + dir * (age * emitSpeed * 0.6f);
                             pv.color = glm::vec4(emitColor * 0.6f, std::sin(progress * 3.14159f) * 0.35f);
                             pv.size = emitSize * (1.0f + progress * 2.5f);
-                        } else if (emitter.type == "portal") {
+                        } else if (pType == 2) {
                             const float angle = curTime * emitSpeed * 2.0f + seed * 6.283185f;
                             const float radius = 0.8f + 0.3f * std::sin(angle * 2.0f);
                             pv.pos = basePos + glm::vec3(std::cos(angle) * radius, (seed2 - 0.5f) * 0.5f + std::sin(angle * 3.0f) * 0.2f, std::sin(angle) * radius);
                             pv.color = glm::vec4(emitColor * 1.4f, 0.85f);
                             pv.size = emitSize * (0.8f + 0.4f * std::sin(curTime * 5.0f + seed));
-                        } else if (emitter.type == "explosion") {
+                        } else if (pType == 3) {
                             const float phi = seed2 * 6.283185f;
                             const float theta = seed3 * 3.14159f;
                             const glm::vec3 dir(std::sin(theta) * std::cos(phi), std::cos(theta), std::sin(theta) * std::sin(phi));

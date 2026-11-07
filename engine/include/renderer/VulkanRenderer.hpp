@@ -389,6 +389,8 @@ namespace engine::renderer {
 
         // Directional Cascaded Shadow Mapping (4 Cascades)
         static constexpr uint32_t SHADOW_CASCADE_COUNT = 4;
+        uint64_t m_shadowCacheHash{0};
+        uint64_t m_pointShadowCacheHash{0};
         uint32_t m_shadowWidth{4096};
         uint32_t m_shadowHeight{4096};
         VkImage m_shadowImage{VK_NULL_HANDLE};
