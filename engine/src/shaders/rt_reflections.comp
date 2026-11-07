@@ -148,7 +148,8 @@ void main() {
                 if (all(greaterThanEqual(hitUV, vec2(0.0))) && all(lessThanEqual(hitUV, vec2(1.0)))) {
                     float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
                     if (abs(clipPos.z / clipPos.w - screenDepth) < 0.02) {
-                        ivec2 hitPx = clamp(ivec2(hitUV * size), ivec2(0), isize - 1);
+                        ivec2 giSize = imageSize(imgGI);
+                        ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
                         // The RT GI cache is already BRDF weighted at its source pixel.
                         vec3 screenGI = imageLoad(imgGI, hitPx).rgb;
                         hitRadiance += screenGI;

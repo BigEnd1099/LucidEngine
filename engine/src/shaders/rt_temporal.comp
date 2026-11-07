@@ -44,7 +44,10 @@ void main() {
 
     vec4 raw = imageLoad(imgS, px);
     vec3 N = rtOctDecode(geom.xy);
-    float d = texelFetch(uDepth, px, 0).r;
+    vec2 curUV = (vec2(px) + 0.5) / size;
+    ivec2 fullDepthSize = textureSize(uDepth, 0).xy;
+    ivec2 fullPx = min(ivec2(curUV * vec2(fullDepthSize)), fullDepthSize - 1);
+    float d = texelFetch(uDepth, fullPx, 0).r;
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
     vec4  hist = vec4(0.0);
@@ -52,8 +55,9 @@ void main() {
     float histLen = 0.0;
     float wSum = 0.0;
 
-    vec2 curUV = (vec2(px) + 0.5) / size;
-    vec2 motion = texelFetch(uMotion, px, 0).xy;
+    ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
+    ivec2 fullMotionPx = min(ivec2(curUV * vec2(fullMotionSize)), fullMotionSize - 1);
+    vec2 motion = texelFetch(uMotion, fullMotionPx, 0).xy;
     vec4 pClip = pc.prevViewProj * vec4(P, 1.0);
     if (pc.f.z > 0.5) {
         vec2 prevUV = curUV - motion;

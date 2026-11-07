@@ -31,8 +31,11 @@ void main() {
     if (any(greaterThanEqual(px, isize))) return;
     vec2 size = vec2(isize);
 
-    vec4 geom = imageLoad(imgGeomCur, px);
-    if (geom.z < 0.0) { // sky
+    ivec2 geomCurSize = imageSize(imgGeomCur);
+    ivec2 geomPx = clamp(ivec2(((vec2(px) + 0.5) / size) * vec2(geomCurSize)), ivec2(0), geomCurSize - 1);
+    vec4 geom = imageLoad(imgGeomCur, geomPx);
+    float d = texelFetch(uDepth, px, 0).r;
+    if (d >= 1.0 || geom.z < 0.0) { // sky
         imageStore(imgReflHistCur, px, vec4(0.0));
         imageStore(imgRefl, px, vec4(0.0));
         return;
@@ -40,7 +43,6 @@ void main() {
 
     vec4 raw = imageLoad(imgRefl, px);
     vec3 N = rtOctDecode(geom.xy);
-    float d = texelFetch(uDepth, px, 0).r;
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
     vec4 hist = vec4(0.0);
@@ -61,7 +63,9 @@ void main() {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
             if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) continue;
-            vec4 g = imageLoad(imgGeomPrev, tp);
+            ivec2 geomPrevSize = imageSize(imgGeomPrev);
+            ivec2 geomTp = clamp(ivec2(((vec2(tp) + 0.5) / size) * vec2(geomPrevSize)), ivec2(0), geomPrevSize - 1);
+            vec4 g = imageLoad(imgGeomPrev, geomTp);
             if (g.z < 0.0) continue;
             if (abs(g.z - pClip.w) > 0.03 * pClip.w + 0.01) continue;
             if (dot(rtOctDecode(g.xy), N) < 0.85) continue;

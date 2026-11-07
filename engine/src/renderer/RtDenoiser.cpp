@@ -45,9 +45,11 @@ namespace engine::renderer {
         VkDevice dev = m_context->getDevice();
         m_width = width;
         m_height = height;
+        m_giWidth = std::max(1u, (m_width + 1u) / 2u);
+        m_giHeight = std::max(1u, (m_height + 1u) / 2u);
 
         VkSamplerCreateInfo si{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-        si.magFilter = si.minFilter = VK_FILTER_NEAREST;
+        si.magFilter = si.minFilter = VK_FILTER_LINEAR;
         si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
@@ -145,6 +147,8 @@ namespace engine::renderer {
         destroyImages();
         m_width = width;
         m_height = height;
+        m_giWidth = std::max(1u, (m_width + 1u) / 2u);
+        m_giHeight = std::max(1u, (m_height + 1u) / 2u);
         createImages();
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
         m_needsLayoutInit = true;
@@ -203,12 +207,12 @@ namespace engine::renderer {
         return pipeline;
     }
 
-    RtDenoiser::Image RtDenoiser::makeImage(VkFormat format) const {
+    RtDenoiser::Image RtDenoiser::makeImage(VkFormat format, uint32_t w, uint32_t h) const {
         Image img;
         VkImageCreateInfo ii{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.format = format;
-        ii.extent = { m_width, m_height, 1 };
+        ii.extent = { w, h, 1 };
         ii.mipLevels = 1;
         ii.arrayLayers = 1;
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -231,13 +235,13 @@ namespace engine::renderer {
     }
 
     void RtDenoiser::createImages() {
-        m_imgS = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
-        m_imgA = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
-        for (auto& g : m_geom) g = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT);
-        for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
-        m_imgRefl = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
-        for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
-        for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT);
+        m_imgS = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        m_imgA = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& g : m_geom) g = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        m_imgRefl = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
+        for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
+        for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
     }
 
     void RtDenoiser::destroyImages() {
@@ -420,11 +424,19 @@ namespace engine::renderer {
         const VkDescriptorSet sets[2] = { sceneSet, m_sets[m_parity] };
         const uint32_t gx = (m_width + 7u) / 8u;
         const uint32_t gy = (m_height + 7u) / 8u;
+        const uint32_t giGx = (m_giWidth + 7u) / 8u;
+        const uint32_t giGy = (m_giHeight + 7u) / 8u;
         const auto sync = [&]() {
             memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, kStorageRW,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, kStorageRW);
         };
-        const auto bind = [&](VkPipeline pipeline, const PushData& pd) {
+        const auto bindGI = [&](VkPipeline pipeline, const PushData& pd) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
+            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData), &pd);
+            vkCmdDispatch(cmd, giGx, giGy, 1);
+        };
+        const auto bindRefl = [&](VkPipeline pipeline, const PushData& pd) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
             vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData), &pd);
@@ -441,13 +453,13 @@ namespace engine::renderer {
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
-        bind(m_tracePipelineHandle, pd);   // 1. trace
+        bindGI(m_tracePipelineHandle, pd);   // 1. trace
         sync();
         if (m_timestampsSupported && m_queryPool) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
         }
 
-        bind(m_temporalPipeline, pd); // 2. temporal accumulation
+        bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
         sync();
         if (m_timestampsSupported && m_queryPool) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
@@ -457,7 +469,7 @@ namespace engine::renderer {
         pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
         pd.f.y = std::max(params.maxHistory, 1.0f);
         pd.u[0] = 0u; // PASS 0: no debug override, continue filtering to imgA
-        bind(m_atrousPipelines[0], pd);
+        bindGI(m_atrousPipelines[0], pd);
         sync();
         if (m_timestampsSupported && m_queryPool) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
@@ -466,7 +478,7 @@ namespace engine::renderer {
         // Pass 4: Atrous step 2 (A -> S, final output).
         // Here we pass the requested debug mode to pd.u[0]!
         pd.u[0] = static_cast<uint32_t>(params.debugMode);
-        bind(m_atrousPipelines[1], pd);
+        bindGI(m_atrousPipelines[1], pd);
         if (m_timestampsSupported && m_queryPool) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
         }
@@ -483,13 +495,13 @@ namespace engine::renderer {
             reflPd.u[2] = 0;
             reflPd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
-            bind(m_reflPipeline, reflPd);
+            bindRefl(m_reflPipeline, reflPd);
             sync();
             if (m_timestampsSupported && m_queryPool) {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
             }
 
-            bind(m_reflTemporalPipeline, reflPd);
+            bindRefl(m_reflTemporalPipeline, reflPd);
             sync();
             if (m_timestampsSupported && m_queryPool) {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 6);

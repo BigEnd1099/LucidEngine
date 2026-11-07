@@ -397,7 +397,7 @@ void main() {
     // denoised in the compute passes before this draw; here it is only fetched.
     vec4 rtIndirect = vec4(0.0, 0.0, 0.0, 1.0);
     if (ubo.rtParams.x > 0.5 && (ubo.rtParams.z > 0.5 || ubo.rtFeatureParams.x > 0.5 || ubo.rtFeatureParams.w > 0.5)) {
-        rtIndirect = texelFetch(rtIndirectTex, ivec2(gl_FragCoord.xy), 0);
+        rtIndirect = textureLod(rtIndirectTex, screenUV, 0.0);
     }
     if (ubo.rtParams.x > 0.5 && ubo.rtParams.z > 0.5) {
         combinedAO *= clamp(rtIndirect.a, 0.0, 1.0);

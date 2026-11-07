@@ -20,6 +20,7 @@ namespace engine::renderer {
         bool aoEnabled{true};
         bool reflectionsEnabled{true};
         bool giEnabled{true};
+        bool giHalfRes{true};
         float giIntensity{1.0f};
         int giBounces{2};
         int giSamples{1};

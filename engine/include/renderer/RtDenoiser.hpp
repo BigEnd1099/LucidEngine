@@ -80,10 +80,11 @@ namespace engine::renderer {
                               VkImageView gMotionView);
         VkShaderModule loadModule(const char* spvName) const;
         VkPipeline createPipeline(VkShaderModule module, int32_t specPass) const;
-        Image makeImage(VkFormat format) const;
+        Image makeImage(VkFormat format, uint32_t w, uint32_t h) const;
 
         VulkanContext* m_context{nullptr};
         uint32_t m_width{0}, m_height{0};
+        uint32_t m_giWidth{0}, m_giHeight{0};
         bool m_ready{false};
         bool m_needsLayoutInit{true};
         bool m_historyValid{false};

@@ -1895,6 +1895,7 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);
                         ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
                         ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
+                        ImGui::TextDisabled("Resolution: Half-Res Diffuse GI (4x compute speedup)");
                         ImGui::EndDisabled();
 
                         // GI + AO are traced in compute, then temporally accumulated and denoised.
