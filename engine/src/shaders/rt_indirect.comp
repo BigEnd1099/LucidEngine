@@ -6,36 +6,57 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
 
-// Pass 1/4 of the RT indirect pipeline: traces diffuse GI paths and ambient
-// visibility from the depth buffer. Output is *demodulated* (no albedo) and
-// noisy by design; rt_temporal / rt_atrous turn it into a clean signal.
+// Material-aware indirect path tracing. The output is the primary surface's
+// BRDF-weighted indirect contribution; temporal/atrous passes denoise it.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
-layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;        // out: rgb = GI radiance, a = AO visibility
+layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
-layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;  // out: xy = oct normal, z = linear depth (<0 = sky), w = history length
+layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 
 layout(push_constant) uniform PC {
-    mat4  unused;
-    vec4  f;   // unused here
-    uvec4 u;   // x = samples per pixel (1..16), y = frame index, z = flags (bit0 GI, bit1 AO), w = max bounces (1..15)
+    mat4 unused;
+    vec4 f;
+    uvec4 u; // x=samples, y=frame, z=flags (bit0 GI, bit1 AO), w=max bounces
 } pc;
 
-const float AO_DISTANCE     = 1.75;
-const float MAX_RAY_DIST    = 20.0;
-const float FIREFLY_CLAMP   = 24.0;   // per-path radiance clamp (max component)
-const int   MAX_BOUNCES     = 15;
+const float AO_DISTANCE = 1.75;
+const float MAX_RAY_DIST = 20.0;
+const float FIREFLY_CLAMP = 24.0;
+const int MAX_BOUNCES = 15;
 
 vec2 hash2(uvec2 p) {
     uint h = pcgHash(p.x + pcgHash(p.y ^ 0x9E3779B9u));
     uint h2 = pcgHash(h);
     return vec2(float(h >> 8u), float(h2 >> 8u)) * (1.0 / 16777216.0);
+}
+
+vec3 fresnelSchlickGI(float cosTheta, vec3 f0) {
+    float f = pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+    return f0 + (1.0 - f0) * f;
+}
+
+vec3 sampleGGXHalfVector(vec3 n, float roughness, vec2 u) {
+    float alpha = max(roughness * roughness, 1e-3);
+    float alpha2 = alpha * alpha;
+    float phi = 2.0 * PI * u.x;
+    float cosTheta = sqrt(max((1.0 - u.y) / (1.0 + (alpha2 - 1.0) * u.y), 0.0));
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    vec3 t, b;
+    buildBasis(n, t, b);
+    return normalize(t * (sinTheta * cos(phi)) + b * (sinTheta * sin(phi)) + n * cosTheta);
+}
+
+float smithG1GI(float nDotV, float alpha) {
+    float a2 = alpha * alpha;
+    float n2 = max(nDotV * nDotV, 1e-6);
+    return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-5);
 }
 
 void main() {
@@ -45,14 +66,14 @@ void main() {
     vec2 size = vec2(isize);
 
     float d = texelFetch(uDepth, px, 0).r;
-    if (d >= 1.0) { // sky
+    if (d >= 1.0) {
         imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
         imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
         return;
     }
 
     float zC = rtLinearDepth(d);
-    vec3 P  = rtWorldPos(vec2(px) + 0.5, d, size);
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
     vec3 toCam = ubo.cameraPos.xyz - P;
 
     vec4 gNR = texelFetch(uGNormalRoughness, px, 0);
@@ -60,15 +81,19 @@ void main() {
     if (dot(N, N) > 1e-4) {
         N = normalize(N);
     } else {
-        // Fallback: geometric normal from depth
         ivec2 mx = isize - 1;
-        ivec2 pL = clamp(px + ivec2(-1, 0), ivec2(0), mx), pR = clamp(px + ivec2(1, 0), ivec2(0), mx);
-        ivec2 pU = clamp(px + ivec2(0, -1), ivec2(0), mx), pD = clamp(px + ivec2(0, 1), ivec2(0), mx);
-        float dL = texelFetch(uDepth, pL, 0).r, dR = texelFetch(uDepth, pR, 0).r;
-        float dU = texelFetch(uDepth, pU, 0).r, dD = texelFetch(uDepth, pD, 0).r;
-
-        vec3 pl = rtWorldPos(vec2(pL) + 0.5, dL, size), pr = rtWorldPos(vec2(pR) + 0.5, dR, size);
-        vec3 pu = rtWorldPos(vec2(pU) + 0.5, dU, size), pd = rtWorldPos(vec2(pD) + 0.5, dD, size);
+        ivec2 pL = clamp(px + ivec2(-1, 0), ivec2(0), mx);
+        ivec2 pR = clamp(px + ivec2(1, 0), ivec2(0), mx);
+        ivec2 pU = clamp(px + ivec2(0, -1), ivec2(0), mx);
+        ivec2 pD = clamp(px + ivec2(0, 1), ivec2(0), mx);
+        float dL = texelFetch(uDepth, pL, 0).r;
+        float dR = texelFetch(uDepth, pR, 0).r;
+        float dU = texelFetch(uDepth, pU, 0).r;
+        float dD = texelFetch(uDepth, pD, 0).r;
+        vec3 pl = rtWorldPos(vec2(pL) + 0.5, dL, size);
+        vec3 pr = rtWorldPos(vec2(pR) + 0.5, dR, size);
+        vec3 pu = rtWorldPos(vec2(pU) + 0.5, dU, size);
+        vec3 pd = rtWorldPos(vec2(pD) + 0.5, dD, size);
         vec3 dx = (abs(rtLinearDepth(dR) - zC) < abs(rtLinearDepth(dL) - zC)) ? (pr - P) : (P - pl);
         vec3 dy = (abs(rtLinearDepth(dD) - zC) < abs(rtLinearDepth(dU) - zC)) ? (pd - P) : (P - pu);
         N = cross(dx, dy);
@@ -76,64 +101,99 @@ void main() {
     }
     if (dot(N, toCam) < 0.0) N = -N;
 
-    imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
+    vec4 gAM = texelFetch(uGAlbedoMetallic, px, 0);
+    vec3 primaryAlbedo = clamp(gAM.rgb, vec3(0.0), vec3(1.0));
+    float primaryMetallic = clamp(gAM.a, 0.0, 1.0);
+    float primaryRoughness = clamp(gNR.w, 0.0, 1.0);
+    vec3 primaryV = normalize(toCam);
+    float primaryNdotV = max(dot(N, primaryV), 1e-4);
+    vec3 primaryF0 = mix(vec3(0.04), primaryAlbedo, primaryMetallic);
+    float specularProbability = clamp(mix(0.04, 1.0, primaryMetallic), 0.04, 1.0);
 
-    if (ubo.rtParams.x < 0.5) { // TLAS not ready this frame
+    imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
+    if (ubo.rtParams.x < 0.5) {
         imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
-    const int  baseSamples = int(clamp(pc.u.x, 1u, 16u));
-    const uint frame       = pc.u.y;
-    const bool doGI        = (pc.u.z & 1u) != 0u;
-    const int  bounces     = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
+    const int baseSamples = int(clamp(pc.u.x, 1u, 16u));
+    const uint frame = pc.u.y;
+    const bool doGI = (pc.u.z & 1u) != 0u;
+    const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
     int samples = baseSamples;
     vec4 prevG = imageLoad(imgGeomPrev, px);
-    if (prevG.w < 4.0 && baseSamples < 4) {
-        samples = min(baseSamples * 2, 4);
-    }
+    if (prevG.w < 4.0 && baseSamples < 4) samples = min(baseSamples * 2, 4);
 
     rngInit(uvec2(px), frame);
-    // First-bounce directions: R2 low-discrepancy sequence advanced every frame, with a
-    // per-pixel random (Cranley-Patterson) offset. White in space, well-stratified in time,
-    // which is exactly what temporal accumulation converges fastest on.
     vec2 shift = hash2(uvec2(px));
     const vec2 R2 = vec2(0.75487766624669276, 0.56984029099805327);
-
-    float bias = 0.010 + 0.0006 * length(toCam);       // grows with distance (depth precision)
+    float bias = 0.010 + 0.0006 * length(toCam);
     vec3 origin = P + N * bias;
 
-    vec3  gi  = vec3(0.0);
+    vec3 gi = vec3(0.0);
     float occ = 0.0;
+    float aoSampleCount = 0.0;
 
     for (int s = 0; s < samples; ++s) {
-        uint  idx = (frame * uint(samples) + uint(s)) & 1023u;
-        vec2  u0  = fract(shift + float(idx) * R2);
+        uint idx = (frame * uint(samples) + uint(s)) & 1023u;
+        vec2 u0 = fract(shift + float(idx) * R2);
+        bool primarySpecular = (u0.x < specularProbability);
+        vec2 lobeU = primarySpecular
+            ? vec2(u0.x / specularProbability, u0.y)
+            : vec2((u0.x - specularProbability) / max(1.0 - specularProbability, 1e-4), u0.y);
 
         vec3 rayOrigin = origin;
         vec3 rayNormal = N;
-        vec3 throughput = vec3(1.0);
         vec3 pathRadiance = vec3(0.0);
-        vec3 nextDir = sampleCosineHemisphere(rayNormal, u0);
+        vec3 nextDir;
+        vec3 throughput;
+
+        if (primarySpecular) {
+            vec3 H = (primaryRoughness < 0.02) ? N : sampleGGXHalfVector(N, primaryRoughness, lobeU);
+            float vDotH = max(dot(primaryV, H), 1e-5);
+            nextDir = (primaryRoughness < 0.02)
+                ? normalize(reflect(-primaryV, N))
+                : normalize(reflect(-primaryV, H));
+            if (dot(nextDir, N) <= 0.0) {
+                throughput = vec3(0.0);
+            } else if (primaryRoughness < 0.02) {
+                throughput = fresnelSchlickGI(primaryNdotV, primaryF0) / specularProbability;
+            } else {
+                float nDotH = max(dot(N, H), 1e-5);
+                float nDotL = max(dot(N, nextDir), 0.0);
+                float alpha = max(primaryRoughness * primaryRoughness, 1e-3);
+                float alpha2 = alpha * alpha;
+                float denom = nDotH * nDotH * (alpha2 - 1.0) + 1.0;
+                float D = alpha2 / max(PI * denom * denom, 1e-8);
+                float G1V = smithG1GI(primaryNdotV, alpha);
+                float G1L = smithG1GI(nDotL, alpha);
+                vec3 F = fresnelSchlickGI(vDotH, primaryF0);
+                throughput = (F * (G1V * G1L * vDotH)
+                    / max(primaryNdotV * nDotH, 1e-5)) / specularProbability;
+            }
+        } else {
+            nextDir = sampleCosineHemisphere(rayNormal, lobeU);
+            vec3 F = fresnelSchlickGI(primaryNdotV, primaryF0);
+            vec3 kD = (vec3(1.0) - F) * (1.0 - primaryMetallic);
+            throughput = primaryAlbedo * kD / max(1.0 - specularProbability, 1e-4);
+            aoSampleCount += 1.0;
+        }
 
         for (int b = 0; b < MAX_BOUNCES; ++b) {
             if (b >= bounces) break;
             vec3 dir = nextDir;
-
             RtInstanceData hit;
             vec3 hitPosition, hitNormal;
             vec2 hitUv;
             vec4 hitTangent;
             float hitDistance;
-            bool found = traceSceneSurface(rayOrigin, dir, (b == 0) ? MAX_RAY_DIST : MAX_RAY_DIST,
-                                           hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance);
-            if (b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
+            bool found = traceSceneSurface(rayOrigin, dir, MAX_RAY_DIST,
+                hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance);
+            if (b == 0 && !primarySpecular && found && hitDistance < AO_DISTANCE) occ += 1.0;
             if (!found) {
-                // Ray miss: gather sky radiance on miss instead of pitch black
-                if (doGI && (ubo.skyboxMode & 2) != 0) {
+                if (doGI && (ubo.skyboxMode & 2) != 0)
                     pathRadiance += throughput * sampleRtSkyRadiance(dir);
-                }
                 break;
             }
             if (!doGI) break;
@@ -142,15 +202,19 @@ void main() {
 
             vec3 hitAlbedo = hit.baseColor.rgb *
                 pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0).rgb, vec3(0.0)), vec3(2.2));
-            float hitMetallic = clamp(hit.material.x *
-                textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).b, 0.0, 1.0);
-            float hitRoughness = clamp(hit.material.y *
-                textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).g, 0.0, 1.0);
+            vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+            float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
+            float hitRoughness = clamp(hit.material.y * hitOrm.g, 0.0, 1.0);
             vec3 hitF0 = mix(vec3(0.04), hitAlbedo, hitMetallic);
-            throughput *= mix(hitAlbedo, hitF0, hitMetallic);
+            vec3 hitF = fresnelSchlickGI(max(dot(normalize(hitNormal), -dir), 0.0), hitF0);
+            vec3 hitKd = (vec3(1.0) - hitF) * (1.0 - hitMetallic);
+            vec3 hitKs = hitF;
+            float hitSpecProbability = clamp(max(max(hitKs.r, hitKs.g), hitKs.b), 0.05, 0.95);
 
-            // Russian roulette from the third bounce: unbiased, and it makes high
-            // bounce counts affordable.
+            // Approximate mixture-BRDF throughput for the next bounce.
+            throughput *= mix(hitAlbedo * hitKd, hitKs, hitSpecProbability)
+                / max(hitSpecProbability, 0.05);
+
             if (b >= 2) {
                 float p = clamp(max(max(throughput.r, throughput.g), throughput.b), 0.1, 1.0);
                 if (rand1() > p) break;
@@ -160,10 +224,8 @@ void main() {
 
             rayNormal = normalize(hitNormal);
             rayOrigin = hitPosition + rayNormal * 0.014;
-            // Generate direction for subsequent bounce:
-            // For metallic surfaces, follow specular reflection lobe instead of purely diffuse cosine hemisphere
             vec3 cosineDir = sampleCosineHemisphere(rayNormal, rand2());
-            vec3 reflDir   = reflect(dir, rayNormal);
+            vec3 reflDir = reflect(dir, rayNormal);
             float specFollow = hitMetallic * (1.0 - hitRoughness * 0.7);
             nextDir = normalize(mix(cosineDir, reflDir, specFollow));
             if (dot(nextDir, rayNormal) <= 0.0) nextDir = reflect(nextDir, rayNormal);
@@ -171,7 +233,7 @@ void main() {
         gi += clampFirefly(pathRadiance, FIREFLY_CLAMP);
     }
 
-    gi  = sanitizeHDR(gi / float(samples));
-    float vis = 1.0 - occ / float(samples);
+    gi = sanitizeHDR(gi / float(samples));
+    float vis = (aoSampleCount > 0.0) ? (1.0 - occ / aoSampleCount) : 1.0;
     imageStore(imgS, px, vec4(gi, vis));
 }
