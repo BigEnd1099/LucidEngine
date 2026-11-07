@@ -291,9 +291,10 @@ void main() {
     vec3 dndv = dFdy(N);
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
-    float alpha = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 1e-5, 1.0);
-    float roughness = alpha;
-    alpha = roughness * roughness;
+    float roughness = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.0, 1.0);
+    float alphaRT = max(roughness * roughness, 1e-5);
+    // Sphere Light Approximation for direct analytical lights: real lights have physical radius
+    float alphaDirect = max(roughness * roughness, 0.02);
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
@@ -316,7 +317,7 @@ void main() {
             sunShadow = rayQueryOccluded(fragWorldPos + geomN * 0.015, sunDir, 10000.0) ? 0.0 : 1.0;
         }
         vec3 sunRadiance = ubo.sunColor.rgb * sunIntensity * sunShadow;
-        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alpha, roughness, energyCompensation, softShadows);
+        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows);
     }
 
     // 2. Lokalnie cieniowane światła Point, Spot oraz Area
@@ -373,7 +374,7 @@ void main() {
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
-        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alpha, roughness, energyCompensation, softShadows);
+        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows);
     }
 
     // 3. Oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
