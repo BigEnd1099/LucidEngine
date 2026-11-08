@@ -733,13 +733,11 @@ static std::string saveProjectNativeDialog() { return ""; }
                     if (picked.empty()) return; // Anulowano wybor w oknie Windows
                     targetPath = picked;
                 }
-                const bool ok = engine->loadCurrentProject(targetPath);
-                if (ok) {
-                    selectedEnt = entt::null;
-                    s_currentProjectPath = targetPath;
-                }
+                engine->requestLoadProject(targetPath);
+                selectedEnt = entt::null;
+                s_currentProjectPath = targetPath;
                 snprintf(s_engineNotification, sizeof(s_engineNotification),
-                         ok ? "Wczytano projekt: %s" : "Nie udalo sie wczytac projektu: %s", targetPath.c_str());
+                         "Wczytywanie projektu: %s", targetPath.c_str());
                 s_engineNotificationTimer = 4.0f;
             };
 

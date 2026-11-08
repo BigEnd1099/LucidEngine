@@ -633,6 +633,11 @@ namespace engine::core {
         } catch (...) {}
     }
 
+    void Engine::requestLoadProject(const std::string& path) {
+        m_pendingProjectLoadPath = path;
+        m_hasPendingProjectLoad = true;
+    }
+
     void Engine::run() {
         core::Logger::info("Engine started. Headless: " + std::string(m_headless ? "true" : "false"));
         auto lastTime = std::chrono::high_resolution_clock::now();
@@ -755,6 +760,13 @@ namespace engine::core {
                     }
                 }
 
+                if (m_hasPendingProjectLoad) {
+                    m_hasPendingProjectLoad = false;
+                    const std::string path = m_pendingProjectLoadPath;
+                    m_pendingProjectLoadPath.clear();
+                    loadCurrentProject(path);
+                }
+
                 auto current_now = std::chrono::high_resolution_clock::now();
                 float dt_real = std::chrono::duration<float>(current_now - lastTime).count();
                 lastTime = current_now;
@@ -845,6 +857,12 @@ namespace engine::core {
             if (trans.contains("sx")) t.scale.x = trans["sx"];
             if (trans.contains("sy")) t.scale.y = trans["sy"];
             if (trans.contains("sz")) t.scale.z = trans["sz"];
+            if (trans.contains("qw") && trans.contains("qx") && trans.contains("qy") && trans.contains("qz")) {
+                t.orientation = glm::quat(trans["qw"].get<float>(), trans["qx"].get<float>(),
+                                          trans["qy"].get<float>(), trans["qz"].get<float>());
+            } else {
+                t.orientation = glm::quat(glm::radians(t.rotation));
+            }
             m_registry->get().emplace<ecs::TransformComponent>(entity, t);
         } else {
             m_registry->get().emplace<ecs::TransformComponent>(entity, ecs::TransformComponent{});
@@ -2335,10 +2353,16 @@ function update(entities, dt, input, contacts) {
             }
 
             // 4. Restore entities
+            if (proj.contains("entities") && proj["entities"].is_array()) {
+                for (auto& e : proj["entities"]) if (e.is_object()) e.erase("id");
+            }
             if (proj.contains("entities")) {
                 applySnapshotJson(proj["entities"].dump());
             } else if (proj.contains("scenes") && proj["scenes"].is_array() && !proj["scenes"].empty()) {
-                const auto& sc = proj["scenes"][0];
+                auto& sc = proj["scenes"][0];
+                if (sc.contains("entities") && sc["entities"].is_array()) {
+                    for (auto& e : sc["entities"]) if (e.is_object()) e.erase("id");
+                }
                 if (sc.contains("entities")) {
                     applySnapshotJson(sc["entities"].dump());
                 }

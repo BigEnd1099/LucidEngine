@@ -179,7 +179,11 @@ namespace engine::renderer {
         m_resolutionScale = std::clamp(scale, 0.25f, 2.5f);
         uint32_t targetW = (static_cast<uint32_t>(static_cast<float>(m_baseWidth)  * m_resolutionScale) + 1u) & ~1u;
         uint32_t targetH = (static_cast<uint32_t>(static_cast<float>(m_baseHeight) * m_resolutionScale) + 1u) & ~1u;
-        setRenderResolution(targetW, targetH);
+        if (m_context && m_context->isHeadless()) {
+            setRenderResolution(targetW, targetH);
+        } else {
+            requestResolution(targetW, targetH);   // zastosowane w bezpiecznym miejscu w render()
+        }
     }
 
     void VulkanRenderer::createCommandBuffer() {

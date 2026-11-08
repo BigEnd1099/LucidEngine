@@ -83,6 +83,7 @@ namespace engine::core {
         nlohmann::json listDiskProjects(const std::string& baseDir = "projects");
         bool saveCurrentProject(const std::string& folderPath = "projects/MyGame");
         bool loadCurrentProject(const std::string& folderPath = "projects/MyGame");
+        void requestLoadProject(const std::string& path);
         std::string getCurrentScript() const;
         void setCurrentScript(const std::string& code);
 
@@ -234,6 +235,8 @@ namespace engine::core {
         int m_targetFps{0}; // 0 = unlimited, or 30, 60, 120, 240
         nlohmann::json m_preSimulationSnapshot = nlohmann::json::array();
         bool m_hasPreSimulationSnapshot{false};
+        std::string m_pendingProjectLoadPath;
+        bool m_hasPendingProjectLoad{false};
         float m_physicsAccumulator{0.0f};
         static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
         uint32_t m_currentTick{0};
