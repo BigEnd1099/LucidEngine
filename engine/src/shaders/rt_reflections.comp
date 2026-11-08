@@ -89,7 +89,7 @@ void main() {
     rngInit(uvec2(px), pc.u.y);
 
     bool infiniteBounces = (pc.u.w & 0x80000000u) != 0u;
-    int maxBounces = infiniteBounces ? 16 : clamp(int(pc.u.w), 2, 4);
+    int maxBounces = clamp(int(pc.u.w & 0xFFu), 2, infiniteBounces ? 8 : 4);
     vec3 accumulated = vec3(0.0);
     float spread = roughness * roughness * 0.85;
     int numActiveLights = min(ubo.numLights, 8);
