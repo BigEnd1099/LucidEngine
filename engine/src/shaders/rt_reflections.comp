@@ -150,24 +150,33 @@ void main() {
                     if (abs(clipPos.z / clipPos.w - screenDepth) < 0.02) {
                         ivec2 giSize = imageSize(imgGI);
                         ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
-                        // The RT GI cache is already BRDF weighted at its source pixel.
-                        vec3 screenGI = imageLoad(imgGI, hitPx).rgb;
-                        hitRadiance += screenGI;
+                        // RT GI is a separately controlled feature. Its cache stores
+                        // the source pixel's BRDF-weighted diffuse indirect contribution,
+                        // so it is added as outgoing radiance at this secondary hit.
+                        // Do not sample the cache when RT GI is disabled: stale contents
+                        // from a previous frame/setting must never leak into reflections.
+                        if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5) {
+                            vec3 screenGI = max(imageLoad(imgGI, hitPx).rgb, vec3(0.0));
+                            hitRadiance += screenGI;
+                        }
 
-                        // SSGI is diffuse irradiance. It becomes visible in a metal
-                        // reflection when the reflected ray hits a screen-visible
-                        // diffuse surface that received SSGI.
-                        vec4 albSamp = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
-                        vec3 texLinear = pow(max(albSamp.rgb, vec3(0.0)), vec3(2.2));
-                        vec3 hitAlbedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
-                        vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
-                        float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
-                        vec3 F0_hit = mix(vec3(0.04), hitAlbedo, hitMetallic);
-                        float hitNdotV = max(dot(normalize(hitNorm), -dir), 0.0);
-                        vec3 F_hit = F0_hit + (1.0 - F0_hit) * pow(1.0 - hitNdotV, 5.0);
-                        vec3 kD_hit = (vec3(1.0) - F_hit) * (1.0 - hitMetallic);
-                        vec3 screenSSGI = max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
-                        hitRadiance += (kD_hit * hitAlbedo / 3.14159265359) * screenSSGI;
+                        // Screen-space SSGI is a distinct approximation with its own
+                        // existing user control. Keep it independent from RT GI so users
+                        // can compare/enable either technique, or deliberately combine
+                        // both. The two are not silently forced on together.
+                        if (ubo.bounceParams.x > 0.5) {
+                            vec4 albSamp = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
+                            vec3 texLinear = pow(max(albSamp.rgb, vec3(0.0)), vec3(2.2));
+                            vec3 hitAlbedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
+                            vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+                            float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
+                            vec3 F0_hit = mix(vec3(0.04), hitAlbedo, hitMetallic);
+                            float hitNdotV = max(dot(normalize(hitNorm), -dir), 0.0);
+                            vec3 F_hit = F0_hit + (1.0 - F0_hit) * pow(1.0 - hitNdotV, 5.0);
+                            vec3 kD_hit = (vec3(1.0) - F_hit) * (1.0 - hitMetallic);
+                            vec3 screenSSGI = max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+                            hitRadiance += (kD_hit * hitAlbedo / 3.14159265359) * screenSSGI;
+                        }
                     }
                 }
             }
