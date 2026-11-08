@@ -159,8 +159,10 @@ void main() {
             float NdotV = max(dot(Nh, -curDir), 0.0);
             vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
             vec3 contW = F * (1.0 - hitRough);
-            bool canContinue = (bounce + 1 < maxBounces) && hitRough < 0.6 &&
-                max(contW.r, max(contW.g, contW.b)) > 0.06;
+            float maxContinueRoughness = clamp(pc.f.w, 0.05, 1.0);
+            float minContinueThroughput = clamp(uintBitsToFloat(pc.u.z), 0.001, 1.0);
+            bool canContinue = (bounce + 1 < maxBounces) && hitRough < maxContinueRoughness &&
+                max(contW.r, max(contW.g, contW.b)) > minContinueThroughput;
 
             vec3 local = shadeRtHitEx(hit, hitPos, hitNorm, hitUv, hitTangent, curDir, false, canContinue ? 0.0 : -1.0);
             local += screenIndirectAtHit(hit, hitPos, hitNorm, hitUv, curDir);
