@@ -80,14 +80,6 @@ static std::string saveProjectNativeDialog() { return ""; }
     extern uint32_t g_pendingRenderHeight;
     extern int      g_pendingHdriIndex;
 
-    
-
-    
-
-    ;
-
-    
-
     void VulkanRenderer::initImGui() {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
