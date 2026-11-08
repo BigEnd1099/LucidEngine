@@ -42,6 +42,13 @@ void main() {
     }
 
     vec4 raw = imageLoad(imgRefl, px);
+    if (raw.a <= 0.0) {
+        // Sky or skipped roughness > 0.75
+        imageStore(imgReflHistCur, px, vec4(0.0));
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+
     vec3 N = rtOctDecode(geom.xy);
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
@@ -75,42 +82,84 @@ void main() {
         }
     }
 
+    bool isCheckerSkipped = (raw.a > 0.1 && raw.a < 0.4);
     vec4 result;
-    if (wSum > 0.05) {
-        hist /= wSum;
 
-        // 3x3 Neighborhood Clamping for specular reflections
-        vec4 boxMin = raw;
-        vec4 boxMax = raw;
-        vec4 m1 = vec4(0.0);
-        vec4 m2 = vec4(0.0);
-        float count = 0.0;
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                ivec2 sp = px + ivec2(dx, dy);
-                if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
-                vec4 sVal = imageLoad(imgRefl, sp);
-                boxMin = min(boxMin, sVal);
-                boxMax = max(boxMax, sVal);
-                m1 += sVal;
-                m2 += sVal * sVal;
-                count += 1.0;
+    if (isCheckerSkipped) {
+        if (wSum > 0.05) {
+            // Re-use full history from previous frame when this pixel was active
+            result = vec4((hist / wSum).rgb, 1.0);
+        } else {
+            // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors
+            vec3 neighborSum = vec3(0.0);
+            float weightSum = 0.0;
+            const ivec2 offsets[4] = ivec2[](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+            for (int i = 0; i < 4; ++i) {
+                ivec2 np = px + offsets[i];
+                if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, isize))) continue;
+                vec4 nVal = imageLoad(imgRefl, np);
+                if (nVal.a < 0.5) continue;
+
+                float nDepth = texelFetch(uDepth, np, 0).r;
+                float depthDiff = abs(nDepth - d);
+                if (depthDiff > 0.005 * (1.0 + d * 10.0)) continue;
+
+                ivec2 nGeomPx = clamp(ivec2(((vec2(np) + 0.5) / size) * vec2(geomCurSize)), ivec2(0), geomCurSize - 1);
+                vec4 nGeom = imageLoad(imgGeomCur, nGeomPx);
+                vec3 nNormal = rtOctDecode(nGeom.xy);
+                float normalDot = max(dot(nNormal, N), 0.0);
+                if (normalDot < 0.75) continue;
+
+                float w = normalDot / (1.0 + depthDiff * 100.0);
+                neighborSum += nVal.rgb * w;
+                weightSum += w;
+            }
+            if (weightSum > 1e-4) {
+                result = vec4(neighborSum / weightSum, 1.0);
+            } else {
+                result = vec4(0.0);
             }
         }
-        m1 /= max(count, 1.0);
-        m2 /= max(count, 1.0);
-        vec4 sigma = sqrt(max(vec4(0.0), m2 - m1 * m1));
-        vec4 clampMin = min(boxMin, m1 - 2.5 * sigma) - vec4(0.05);
-        vec4 clampMax = max(boxMax, m1 + 2.5 * sigma) + vec4(0.05);
-        hist = clamp(hist, clampMin, clampMax);
-
-        // Firefly suppression on specular hits
-        raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(100.0));
-        // Accumulation factor (keep ~85% history for smooth specular without excessive lag)
-        float alpha = (pc.f.z > 0.5) ? clamp(4.0 / max(pc.f.x, 1.0), 0.03, 0.15) : 1.0;
-        result = mix(hist, raw, alpha);
     } else {
-        result = raw;
+        if (wSum > 0.05) {
+            hist /= wSum;
+
+            // 3x3 Neighborhood Clamping for specular reflections
+            vec4 boxMin = raw;
+            vec4 boxMax = raw;
+            vec4 m1 = vec4(0.0);
+            vec4 m2 = vec4(0.0);
+            float count = 0.0;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    ivec2 sp = px + ivec2(dx, dy);
+                    if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
+                    vec4 sVal = imageLoad(imgRefl, sp);
+                    if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
+                    boxMin = (count == 0.0) ? sVal : min(boxMin, sVal);
+                    boxMax = (count == 0.0) ? sVal : max(boxMax, sVal);
+                    m1 += sVal;
+                    m2 += sVal * sVal;
+                    count += 1.0;
+                }
+            }
+            if (count > 0.0) {
+                m1 /= count;
+                m2 /= count;
+                vec4 sigma = sqrt(max(vec4(0.0), m2 - m1 * m1));
+                vec4 clampMin = min(boxMin, m1 - 2.5 * sigma) - vec4(0.05);
+                vec4 clampMax = max(boxMax, m1 + 2.5 * sigma) + vec4(0.05);
+                hist = clamp(hist, clampMin, clampMax);
+            }
+
+            // Firefly suppression on specular hits
+            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(100.0));
+            // Accumulation factor (keep ~85% history for smooth specular without excessive lag)
+            float alpha = (pc.f.z > 0.5) ? clamp(4.0 / max(pc.f.x, 1.0), 0.03, 0.15) : 1.0;
+            result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
+        } else {
+            result = raw;
+        }
     }
 
     imageStore(imgReflHistCur, px, result);

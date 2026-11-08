@@ -220,11 +220,15 @@ vec3 sampleRtSkyRadiance(vec3 dir) {
 }
 
 // specSkyScale < 0 keeps legacy scaling; >= 0 explicitly controls environment specular.
-vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {
-    vec4 albedoSample = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
+// singleLightIdx < 0 evaluates all active lights; >= 0 importance-samples only that single light with singleLightWeight.
+// mipLod controls the texture mip level sampled at the hit (higher mip levels on secondary bounces reduce GPU cache thrashing).
+vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent,
+                  vec3 rayDir, bool isDiffuseGI, float specSkyScale,
+                  int singleLightIdx, float singleLightWeight, float mipLod) {
+    vec4 albedoSample = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, mipLod);
     vec3 texLinear = pow(max(albedoSample.rgb, vec3(0.0)), vec3(2.2));
     vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
-    vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+    vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, mipLod).rgb;
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
     float rawRoughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
 
@@ -234,7 +238,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     float effRoughness = isDiffuseGI ? clamp(rawRoughness, 0.20, 0.45) : max(rawRoughness, 0.12);
 
     vec3 shadingNormal = normalize(hitNormal);
-    vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, 0.0).xyz * 2.0 - 1.0;
+    vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, mipLod).xyz * 2.0 - 1.0;
     if (dot(tangentNormal.xy, tangentNormal.xy) > 1e-4) {
         vec3 T = normalize(hitTangent.xyz - dot(hitTangent.xyz, shadingNormal) * shadingNormal);
         vec3 B = cross(shadingNormal, T) * (abs(hitTangent.w) > 0.5 ? sign(hitTangent.w) : 1.0);
@@ -283,8 +287,17 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     }
 
     int numActiveLights = min(ubo.numLights, 8);
+    int startLight = 0;
+    int endLight = numActiveLights;
+    float lightMultiplier = 1.0;
 
-    for (int i = 0; i < numActiveLights; ++i) {
+    if (singleLightIdx >= 0 && numActiveLights > 0) {
+        startLight = clamp(singleLightIdx, 0, numActiveLights - 1);
+        endLight = startLight + 1;
+        lightMultiplier = singleLightWeight;
+    }
+
+    for (int i = startLight; i < endLight; ++i) {
         vec3 toLight = ubo.lightsPos[i].xyz - hitPosition;
         float distanceToLight = length(toLight);
         float range = max(ubo.lightsPos[i].w, 0.1);
@@ -320,7 +333,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         vec3 spec = (D * G * F) / max(4.0 * NdotV * ndotl, 0.001) * giSpecBoost;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.lightsCol[i].rgb *
-                    (intensity * 4.0 * attenuation * ndotl);
+                    (intensity * 4.0 * attenuation * ndotl * lightMultiplier);
     }
 
     // Ambient / Environment lighting at hit point
@@ -337,6 +350,10 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     }
 
     return sanitizeHDR(radiance);
+}
+
+vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {
+    return shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent, rayDir, isDiffuseGI, specSkyScale, -1, 1.0, 0.0);
 }
 
 vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI) {

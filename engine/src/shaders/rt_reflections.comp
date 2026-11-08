@@ -26,38 +26,63 @@ layout(push_constant) uniform PC {
 
 const float MAX_REFL_DIST = 1000.0;
 
-vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hitUv, vec3 dir) {
+// Indirect diffuse at a secondary hit.
+//  - hit visible on screen: reuse the denoised RT GI / SSGI cache,
+//  - hit off-screen or hidden in screen space: trace one cosine-weighted diffuse ray from the hit point.
+vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hitUv, vec3 dir, float pathEnergy, bool allowTrace) {
     bool useRtGI = (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5);
     bool useSSGI = (ubo.bounceParams.x > 0.5);
     if (!useRtGI && !useSSGI) return vec3(0.0);
 
-    vec4 clipPos = ubo.viewProj * vec4(hitPos, 1.0);
-    if (clipPos.w <= 0.001) return vec3(0.0);
-    vec2 hitUV = clipPos.xy / clipPos.w * 0.5 + 0.5;
-    if (any(lessThan(hitUV, vec2(0.0))) || any(greaterThan(hitUV, vec2(1.0)))) return vec3(0.0);
-    float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
-    if (abs(clipPos.z / clipPos.w - screenDepth) >= 0.02) return vec3(0.0);
-
-    vec4 albSamp = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
+    vec4 albSamp = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 2.0);
     vec3 texLinear = pow(max(albSamp.rgb, vec3(0.0)), vec3(2.2));
     vec3 hitAlbedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
-    vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+    vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 2.0).rgb;
     float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
     vec3 F0 = mix(vec3(0.04), hitAlbedo, hitMetallic);
-    float NdotV = max(dot(normalize(hitNorm), -dir), 0.0);
+    vec3 Nh = normalize(hitNorm);
+    float NdotV = max(dot(Nh, -dir), 0.0);
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
     vec3 diffuseResponse = (1.0 - F) * (1.0 - hitMetallic) * hitAlbedo;
+    if (max(diffuseResponse.r, max(diffuseResponse.g, diffuseResponse.b)) < 1e-3) return vec3(0.0);
 
-    vec3 add = vec3(0.0);
-    if (useRtGI) {
-        ivec2 giSize = imageSize(imgGI);
-        ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
-        add += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
+    // 1) Visible on screen: reuse the cached GI.
+    vec4 clipPos = ubo.viewProj * vec4(hitPos, 1.0);
+    if (clipPos.w > 0.001) {
+        vec2 hitUV = clipPos.xy / clipPos.w * 0.5 + 0.5;
+        if (all(greaterThanEqual(hitUV, vec2(0.0))) && all(lessThanEqual(hitUV, vec2(1.0)))) {
+            float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
+            if (abs(clipPos.z / clipPos.w - screenDepth) < 0.02) {
+                vec3 add = vec3(0.0);
+                if (useRtGI) {
+                    ivec2 giSize = imageSize(imgGI);
+                    ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
+                    add += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
+                }
+                if (useSSGI) {
+                    add += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+                }
+                return add;
+            }
+        }
     }
-    if (useSSGI) {
-        add += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+
+    // 2) Off-screen / hidden in screen space: one diffuse ray. Skipped for paths that carry almost no energy.
+    if (!allowTrace || pathEnergy < 0.1) return vec3(0.0);
+    vec3 gd = sampleCosineHemisphere(Nh, rand2());
+    RtInstanceData h2;
+    vec3 p2, n2;
+    vec2 uv2;
+    vec4 t2;
+    float dist2;
+    if (traceSceneSurface(hitPos + Nh * 0.012, gd, 60.0, h2, p2, n2, uv2, t2, dist2)) {
+        int numActiveLights = min(ubo.numLights, 8);
+        int singleLight = (numActiveLights > 0) ? clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1) : -1;
+        float singleWeight = (numActiveLights > 0) ? float(numActiveLights) : 1.0;
+        vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, singleLight, singleWeight, 2.0), 24.0);
+        return diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
     }
-    return add;
+    return vec3(0.0);
 }
 
 void main() {
@@ -75,6 +100,28 @@ void main() {
     if (dot(N, N) <= 1e-4) { imageStore(imgRefl, px, vec4(0.0)); return; }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
+    // Rough surfaces get (almost) no visible mirror reflection: skip tracing and let IBL handle them.
+    const float RT_REFL_MAX_ROUGHNESS = 0.75;
+    if (roughness > RT_REFL_MAX_ROUGHNESS) { imageStore(imgRefl, px, vec4(0.0)); return; }
+
+    bool useCheckerboard     = (pc.u.w & 0x00000100u) != 0u;
+    bool useStochasticLights = (pc.u.w & 0x00000200u) != 0u;
+    bool useLodBias          = (pc.u.w & 0x00000400u) != 0u;
+    bool useHalfRes          = (pc.u.w & 0x00000800u) != 0u;
+
+    // Wariant 1 & 4: Szachownica adaptacyjna wg chropowatosci (W1) lub globalna polowkowa (W4)
+    bool checkerSkip = false;
+    if (useHalfRes) {
+        checkerSkip = (((px.x + px.y + int(pc.u.y)) & 1) != 0);
+    } else if (useCheckerboard && roughness > 0.25) {
+        checkerSkip = (((px.x + px.y + int(pc.u.y)) & 1) != 0);
+    }
+
+    if (checkerSkip) {
+        // Zapisz znacznik alfa 0.25 do rekonstrukcji temporalnej / bilateralnej
+        imageStore(imgRefl, px, vec4(0.0, 0.0, 0.0, 0.25));
+        return;
+    }
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
     vec3 V = normalize(ubo.cameraPos.xyz - P);
     if (dot(N, V) < 0.0) N = -N;
@@ -86,10 +133,14 @@ void main() {
     int samples = baseSamples;
     vec4 prevG = imageLoad(imgGeomPrev, px);
     if (prevG.w < 4.0 && baseSamples < 4) samples = min(baseSamples * 2, 4);
+    // Mirror-like pixels: the primary ray is deterministic, extra samples only average RR / fallback noise.
+    if (roughness < 0.02)      samples = min(samples, 4);
+    else if (roughness < 0.15) samples = min(samples, 8);
     rngInit(uvec2(px), pc.u.y);
 
     bool infiniteBounces = (pc.u.w & 0x80000000u) != 0u;
     int maxBounces = clamp(int(pc.u.w & 0xFFu), 2, infiniteBounces ? 8 : 4);
+
     vec3 accumulated = vec3(0.0);
     float spread = roughness * roughness * 0.85;
     int numActiveLights = min(ubo.numLights, 8);
@@ -150,9 +201,10 @@ void main() {
                 break;
             }
 
-            vec4 alb = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
+            float bounceLod = useLodBias ? clamp(float(bounce), 0.0, 4.0) : 0.0;
+            vec4 alb = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, bounceLod);
             vec3 hitAlbedo = clamp(hit.baseColor.rgb * pow(max(alb.rgb, vec3(0.0)), vec3(2.2)), vec3(0.0), vec3(1.0));
-            vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+            vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, bounceLod).rgb;
             float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
             float hitRough = clamp(hit.material.y * orm.g, 0.0, 1.0);
             vec3 F0 = mix(vec3(0.04), hitAlbedo, metallic);
@@ -162,26 +214,32 @@ void main() {
             vec3 contW = F * (1.0 - hitRough);
             float maxContinueRoughness = clamp(pc.f.w, 0.05, 1.0);
             float minContinueThroughput = clamp(uintBitsToFloat(pc.u.z), 0.001, 1.0);
+            float contLum = max(contW.r, max(contW.g, contW.b));
             bool canContinue = (bounce + 1 < maxBounces) && hitRough < maxContinueRoughness &&
-                (infiniteBounces || max(contW.r, max(contW.g, contW.b)) > minContinueThroughput);
+                (infiniteBounces ? (contLum > 0.002) : (contLum > minContinueThroughput));
 
-            vec3 local = shadeRtHitEx(hit, hitPos, hitNorm, hitUv, hitTangent, curDir, false, canContinue ? 0.0 : -1.0);
-            local += screenIndirectAtHit(hit, hitPos, hitNorm, hitUv, curDir);
+            int singleLight = -1;
+            float singleWeight = 1.0;
+            if (bounce >= 1 && useStochasticLights && numActiveLights > 0) {
+                singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
+                singleWeight = float(numActiveLights);
+            }
+
+            vec3 local = shadeRtHitEx(hit, hitPos, hitNorm, hitUv, hitTangent, curDir, false,
+                                      canContinue ? 0.0 : -1.0, singleLight, singleWeight, bounceLod);
+            local += screenIndirectAtHit(hit, hitPos, hitNorm, hitUv, curDir,
+                                         max(throughput.r, max(throughput.g, throughput.b)), bounce < 2);
             pathRadiance += throughput * local;
             if (!canContinue) break;
 
-            throughput *= contW;
-
-            // Infinite mode uses Russian roulette instead of a biased hard throughput cutoff.
-            // Weak paths survive proportionally to their remaining energy; survivors are
-            // reweighted so the estimator remains unbiased (up to the 16-bounce safety cap).
-            if (infiniteBounces && bounce >= 2) {
-                float pathEnergy = max(throughput.r, max(throughput.g, throughput.b));
-                if (pathEnergy < minContinueThroughput) {
-                    float survivalProbability = clamp(pathEnergy / max(minContinueThroughput, 1e-4), 0.05, 1.0);
-                    if (rand1() > survivalProbability) break;
-                    throughput /= survivalProbability;
-                }
+            if (infiniteBounces) {
+                // Russian roulette proportional to the mirror-lobe weight: weak lobes (rough / dielectric hits)
+                // almost always terminate, strong lobes (metals) keep going. Unbiased, never amplifies.
+                float pCont = clamp(contLum, 0.05, 1.0);
+                if (rand1() > pCont) break;
+                throughput *= contW / pCont;
+            } else {
+                throughput *= contW;
             }
 
             vec3 reflected = reflect(curDir, Nh);

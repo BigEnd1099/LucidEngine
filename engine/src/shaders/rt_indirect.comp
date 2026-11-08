@@ -115,11 +115,18 @@ if (ubo.rtParams.x < 0.5) {
 const int baseSamples = int(clamp(pc.u.x, 1u, 16u));
 const uint frame = pc.u.y;
 const bool doGI = (pc.u.z & 1u) != 0u;
+const bool useCheckerboard = (pc.u.z & 4u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
+// Checkerboard for GI: skip alternating pixels every other frame (cuts GI ray tracing cost by 50%)
+bool checkerSkip = useCheckerboard && (((px.x + px.y + int(frame)) & 1) != 0);
+if (checkerSkip) {
+    // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
+    imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
+    return;
+}
+
 int samples = baseSamples;
-vec4 prevG = imageLoad(imgGeomPrev, px);
-if (prevG.w < 4.0 && baseSamples < 4) samples = min(baseSamples * 2, 4);
 
 rngInit(uvec2(px), frame);
 vec2 shift = hash2(uvec2(px));
@@ -165,11 +172,20 @@ for (int s = 0; s < samples; ++s) {
         if (!found) break;
         if (!doGI) break;
 
-        pathRadiance += throughput * shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent, dir, true);
+        float bounceLod = clamp(float(b), 0.0, 4.0);
+        int numActiveLights = min(ubo.numLights, 8);
+        int singleLight = -1;
+        float singleWeight = 1.0;
+        if (b >= 1 && numActiveLights > 0) {
+            singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
+            singleWeight = float(numActiveLights);
+        }
+
+        pathRadiance += throughput * shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent, dir, true, -1.0, singleLight, singleWeight, bounceLod);
 
         vec3 hitAlbedo = hit.baseColor.rgb *
-            pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0).rgb, vec3(0.0)), vec3(2.2));
-        vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, 0.0).rgb;
+            pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, bounceLod).rgb, vec3(0.0)), vec3(2.2));
+        vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, bounceLod).rgb;
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
         float hitRoughness = clamp(hit.material.y * hitOrm.g, 0.0, 1.0);
 
@@ -223,12 +239,16 @@ for (int s = 0; s < samples; ++s) {
             nextDir = sampleCosineHemisphere(rayNormal, rand2());
         }
 
-        if (b >= 2) {
-            float p = clamp(max(max(throughput.r, throughput.g), throughput.b), 0.1, 1.0);
+        float thLum = max(max(throughput.r, throughput.g), throughput.b);
+        if (thLum < 0.005) break;
+
+        if (b >= 1) {
+            // Russian roulette starts from the second hit (b >= 1):
+            // terminate weak paths proportional to energy, keeping bright paths unbiased.
+            float p = clamp(thLum, 0.08, 1.0);
             if (rand1() > p) break;
             throughput /= p;
         }
-        if (max(max(throughput.r, throughput.g), throughput.b) < 0.003) break;
     }
     gi += clampFirefly(pathRadiance, FIREFLY_CLAMP);
 }

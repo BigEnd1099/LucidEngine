@@ -21,6 +21,7 @@ namespace engine::renderer {
         bool reflectionsEnabled{true};
         bool giEnabled{true};
         bool giHalfRes{true};
+        bool giCheckerboard{true};
         float giIntensity{1.0f};
         int giBounces{2};
         int reflectionBounces{2};
@@ -34,6 +35,12 @@ namespace engine::renderer {
         bool denoiseEnabled{true};
         bool svgfEnabled{true};
         RtDebugMode debugMode{RtDebugMode::None};
+
+        // 4 RT Reflection Optimization Variants:
+        bool reflectionCheckerboard{true};      // Variant 1: Roughness-adaptive checkerboard (roughness > 0.25)
+        bool reflectionStochasticLights{true};  // Variant 2: Stochastic 1-light direct illumination on bounce >= 1
+        bool reflectionLodBias{true};           // Variant 3: Mip LOD bias increasing with bounce depth
+        bool reflectionHalfRes{false};          // Variant 4: Global half-resolution reflections with bilateral filter
     };
 
 } // namespace engine::renderer
