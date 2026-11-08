@@ -25,6 +25,7 @@ namespace engine::renderer {
             uint32_t  reflectionSamples{1};
             uint32_t  bounces{2};          // diffuse GI bounces, 1..15
             uint32_t  reflectionBounces{2}; // reflection path length, 2..4
+            bool      reflectionInfiniteBounces{false}; // adaptive path, capped at 16 hits
             float     reflectionMaxRoughness{0.60f};
             float     reflectionMinThroughput{0.06f};
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
