@@ -495,7 +495,7 @@ namespace engine::renderer {
             reflPd.u[1] = params.frameIndex;
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
             reflPd.u[3] = params.reflectionInfiniteBounces
-                ? (0x80000000u | 16u)
+                ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u);
 
             bindRefl(m_reflPipeline, reflPd);
