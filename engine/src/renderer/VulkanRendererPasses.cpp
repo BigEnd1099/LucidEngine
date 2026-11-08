@@ -317,7 +317,6 @@ namespace engine::renderer {
             static glm::vec4 s_prevLightsDir[8]{};
             static glm::vec4 s_prevSunDir{0.0f};
             static glm::vec4 s_prevSunCol{0.0f};
-            static glm::vec3 s_prevCamPos{0.0f};
             static int s_prevNumLights{-1};
             static bool s_hasPrevState{false};
 
@@ -326,9 +325,6 @@ namespace engine::renderer {
                 s_hasPrevState = true;
             } else {
                 if (s_prevNumLights != ubo.numLights) {
-                    rtLightOrCameraMoved = true;
-                }
-                if (glm::distance(s_prevCamPos, camPos) > 0.005f) {
                     rtLightOrCameraMoved = true;
                 }
                 if (glm::distance(glm::vec3(s_prevSunDir), glm::vec3(ubo.sunDirection)) > 0.001f ||
@@ -346,7 +342,6 @@ namespace engine::renderer {
                     }
                 }
             }
-            s_prevCamPos = camPos;
             s_prevSunDir = ubo.sunDirection;
             s_prevSunCol = ubo.sunColor;
             s_prevNumLights = ubo.numLights;
@@ -979,6 +974,10 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         }
+
+        // Keep the motion-vector camera history current even when GTAO and light bounce are disabled.
+        m_prevViewProj = vp;
+        m_hasPreviousViewProj = true;
 
         // =========================================================================
         // PASS 2C: RT INDIRECT (diffuse GI + AO): trace -> temporal accumulation -> a-trous

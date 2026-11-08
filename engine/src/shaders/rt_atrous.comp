@@ -149,6 +149,6 @@ void main() {
     }
 
     // Short history -> trust the spatial estimate; long history -> keep the temporal detail.
-    float s = clamp(pc.f.x * (1.0 / (1.0 + gC.w * 0.15)), 0.0, 1.0);
+    float s = clamp(pc.f.x * (1.0 / (1.0 + gC.w * 0.04)), 0.0, 1.0);
     storeDst(px, mix(center, filtered, s));
 }
