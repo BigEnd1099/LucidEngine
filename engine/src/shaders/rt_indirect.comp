@@ -6,8 +6,8 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
 
-// Material-aware indirect path tracing. The output is the primary surface's
-// BRDF-weighted indirect contribution; temporal/atrous passes denoise it.
+// Diffuse indirect path tracing. The output is primary-surface diffuse irradiance
+// (demodulated from albedo/BRDF) so temporal and à-trous filtering preserve texture detail.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "rt_common.glsl"
@@ -40,6 +40,23 @@ return vec2(float(h >> 8u), float(h2 >> 8u)) * (1.0 / 16777216.0);
 vec3 fresnelSchlickGI(float cosTheta, vec3 f0) {
 float f = pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 return f0 + (1.0 - f0) * f;
+}
+
+vec3 sampleGGXHalfVectorGI(vec3 n, float roughness, vec2 u) {
+    float alpha = max(roughness * roughness, 1e-4);
+    float alpha2 = alpha * alpha;
+    float phi = 2.0 * PI * u.x;
+    float cosTheta = sqrt(max((1.0 - u.y) / (1.0 + (alpha2 - 1.0) * u.y), 0.0));
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    vec3 t, b;
+    buildBasis(n, t, b);
+    return normalize(t * (sinTheta * cos(phi)) + b * (sinTheta * sin(phi)) + n * cosTheta);
+}
+
+float smithG1GGXGI(float nDotV, float alpha) {
+    float a2 = alpha * alpha;
+    float n2 = max(nDotV * nDotV, 1e-6);
+    return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
 void main() {
@@ -88,15 +105,6 @@ if (dot(N, N) > 1e-4) {
 }
 if (dot(N, toCam) < 0.0) N = -N;
 
-vec4 gAM = texelFetch(uGAlbedoMetallic, fullPx, 0);
-vec3 primaryAlbedo = clamp(gAM.rgb, vec3(0.0), vec3(1.0));
-float primaryMetallic = clamp(gAM.a, 0.0, 1.0);
-vec3 primaryV = normalize(toCam);
-float primaryNdotV = max(dot(N, primaryV), 1e-4);
-vec3 primaryF0 = mix(vec3(0.04), primaryAlbedo, primaryMetallic);
-vec3 primaryF = fresnelSchlickGI(primaryNdotV, primaryF0);
-vec3 primaryKd = (vec3(1.0) - primaryF) * (1.0 - primaryMetallic);
-vec3 primaryThroughput = primaryAlbedo * primaryKd;
 
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
@@ -135,7 +143,8 @@ for (int s = 0; s < samples; ++s) {
     vec3 rayNormal = N;
     vec3 pathRadiance = vec3(0.0);
     vec3 nextDir = sampleCosineHemisphere(rayNormal, u0);
-    vec3 throughput = primaryThroughput;
+    // Store incident diffuse irradiance only; the PBR pass applies the primary material BRDF after denoising.
+    vec3 throughput = vec3(1.0);
 
     for (int b = 0; b < MAX_BOUNCES; ++b) {
         if (b >= bounces) break;
@@ -169,30 +178,51 @@ for (int s = 0; s < samples; ++s) {
         rayOrigin = hitPosition + rayNormal * 0.014;
 
         vec3 hitF0 = mix(vec3(0.04), hitAlbedo, hitMetallic);
-        vec3 hitF = fresnelSchlickGI(max(dot(rayNormal, -dir), 0.0), hitF0);
+        vec3 hitV = normalize(-dir);
+        float hitNdotV = max(dot(rayNormal, hitV), 1e-5);
+        vec3 hitF = fresnelSchlickGI(hitNdotV, hitF0);
         vec3 hitKd = (vec3(1.0) - hitF) * (1.0 - hitMetallic);
-        vec3 hitKs = hitF;
         vec3 hitDiffuseWeight = hitAlbedo * hitKd;
 
-        // Stochastic lobe selection (Diffuse vs Specular) for secondary bounces
-        float specLum = max(max(hitKs.r, hitKs.g), hitKs.b);
+        // Stochastic BRDF-lobe selection. The selected lobe's probability is
+        // divided out below, so the mixture remains unbiased even when clamped
+        // away from zero to keep rare lobes sampleable.
+        float specLum = max(max(hitF.r, hitF.g), hitF.b);
         float diffLum = max(max(hitDiffuseWeight.r, hitDiffuseWeight.g), hitDiffuseWeight.b);
         float totalLum = specLum + diffLum;
         if (totalLum < 1e-5) break;
 
         float hitSpecProbability = clamp(specLum / totalLum, 0.05, 0.95);
-        vec3 cosineDir = sampleCosineHemisphere(rayNormal, rand2());
-
         if (rand1() < hitSpecProbability) {
-            throughput *= hitKs / hitSpecProbability;
-            vec3 reflDir = reflect(dir, rayNormal);
-            nextDir = normalize(mix(reflDir, cosineDir, hitRoughness * hitRoughness));
+            vec3 F;
+            float specWeight;
+            vec3 nextSpecDir;
+            if (hitRoughness < 0.02) {
+                // Delta mirror limit: the directional PDF cancels analytically.
+                nextSpecDir = reflect(dir, rayNormal);
+                F = hitF;
+                specWeight = 1.0;
+            } else {
+                vec3 H = sampleGGXHalfVectorGI(rayNormal, hitRoughness, rand2());
+                float vDotH = max(dot(hitV, H), 1e-5);
+                float nDotH = max(dot(rayNormal, H), 1e-5);
+                nextSpecDir = normalize(reflect(dir, H));
+                float nDotL = dot(rayNormal, nextSpecDir);
+                if (nDotL <= 1e-5) break;
+
+                float alpha = max(hitRoughness * hitRoughness, 1e-4);
+                float G1V = smithG1GGXGI(hitNdotV, alpha);
+                float G1L = smithG1GGXGI(nDotL, alpha);
+                F = fresnelSchlickGI(vDotH, hitF0);
+                // f_s * cos(theta_l) / pdf_L for NDF-sampled GGX.
+                specWeight = (G1V * G1L * vDotH) / max(hitNdotV * nDotH, 1e-5);
+            }
+            throughput *= F * (specWeight / hitSpecProbability);
+            nextDir = nextSpecDir;
         } else {
             throughput *= hitDiffuseWeight / (1.0 - hitSpecProbability);
-            nextDir = cosineDir;
+            nextDir = sampleCosineHemisphere(rayNormal, rand2());
         }
-
-        if (dot(nextDir, rayNormal) <= 0.0) nextDir = reflect(nextDir, rayNormal);
 
         if (b >= 2) {
             float p = clamp(max(max(throughput.r, throughput.g), throughput.b), 0.1, 1.0);
