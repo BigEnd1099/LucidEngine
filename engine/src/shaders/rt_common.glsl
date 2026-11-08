@@ -219,7 +219,8 @@ vec3 sampleRtSkyRadiance(vec3 dir) {
     return sky;
 }
 
-vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI) {
+// specSkyScale < 0 keeps legacy scaling; >= 0 explicitly controls environment specular.
+vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {
     vec4 albedoSample = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, 0.0);
     vec3 texLinear = pow(max(albedoSample.rgb, vec3(0.0)), vec3(2.2));
     vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
@@ -331,10 +332,15 @@ vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv
 
         vec3 R = reflect(-V, hitNormal);
         vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * (1.0 - rawRoughness);
-        radiance += specSky * (isDiffuseGI ? 0.15 : 0.4);
+        float skyScale = (specSkyScale >= 0.0) ? specSkyScale : (isDiffuseGI ? 0.15 : 0.4);
+        radiance += specSky * skyScale;
     }
 
     return sanitizeHDR(radiance);
+}
+
+vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI) {
+    return shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent, rayDir, isDiffuseGI, -1.0);
 }
 
 vec3 shadeRtHit(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir) {
