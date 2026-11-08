@@ -3,6 +3,7 @@
 #include "utils/FileIO.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <stdexcept>
 #include <vector>
 
@@ -489,11 +490,11 @@ namespace engine::renderer {
             PushData reflPd{};
             reflPd.m = m_prevViewProj;
             reflPd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(params.reflectionSamples),
-                                 m_historyValid ? 1.0f : 0.0f, 0.0f);
+                                 m_historyValid ? 1.0f : 0.0f, std::clamp(params.reflectionMaxRoughness, 0.02f, 1.0f));
             reflPd.u[0] = std::clamp(params.reflectionSamples, 1u, 16u);
             reflPd.u[1] = params.frameIndex;
-            reflPd.u[2] = 0;
-            reflPd.u[3] = std::clamp(params.bounces, 1u, 15u);
+            reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
+            reflPd.u[3] = std::clamp(params.reflectionBounces, 2u, 4u);
 
             bindRefl(m_reflPipeline, reflPd);
             sync();

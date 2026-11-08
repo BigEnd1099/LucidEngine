@@ -1001,6 +1001,9 @@ namespace engine::renderer {
                 rtp.reflectionsEnabled = m_rtSettings.reflectionsEnabled;
                 rtp.reflectionSamples = static_cast<uint32_t>(std::clamp(m_rtSettings.reflectionSamples, 1, 16));
                 rtp.bounces = static_cast<uint32_t>(std::clamp(m_rtSettings.giBounces, 1, 15));
+                rtp.reflectionBounces = static_cast<uint32_t>(std::clamp(m_rtSettings.reflectionBounces, 2, 4));
+                rtp.reflectionMaxRoughness = m_rtSettings.reflectionMaxRoughness;
+                rtp.reflectionMinThroughput = m_rtSettings.reflectionMinThroughput;
                 rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
                 rtp.spatialStrength = m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0f;
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;

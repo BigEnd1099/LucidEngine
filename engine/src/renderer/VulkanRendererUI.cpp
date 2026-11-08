@@ -1943,6 +1943,9 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
                         ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
+                        ImGui::SliderInt("RT Reflection Bounces", &m_rtSettings.reflectionBounces, 2, 4, "%d");
+                        ImGui::SliderFloat("Reflection Continuation Roughness", &m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f, "%.2f");
+                        ImGui::SliderFloat("Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
                         ImGui::EndDisabled();
                         ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);
@@ -1996,6 +1999,9 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::EndDisabled();
                         m_rtSettings.giSamples = std::clamp(m_rtSettings.giSamples, 1, 16);
                         m_rtSettings.reflectionSamples = std::clamp(m_rtSettings.reflectionSamples, 1, 16);
+                        m_rtSettings.reflectionBounces = std::clamp(m_rtSettings.reflectionBounces, 2, 4);
+                        m_rtSettings.reflectionMaxRoughness = std::clamp(m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f);
+                        m_rtSettings.reflectionMinThroughput = std::clamp(m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f);
                         m_rtSettings.maxHistory = std::clamp(m_rtSettings.maxHistory, 4, 256);
                         ImGui::EndDisabled();
                         ImGui::EndDisabled();
