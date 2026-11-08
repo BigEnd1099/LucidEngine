@@ -531,11 +531,16 @@ void main() {
         bounceLighting = (ssgiBounce + groundBounce) * bounceIntensity;
     }
 
-    // 3C. Material-aware RT GI. The compute pass already evaluates the primary
-    // BRDF, so do not multiply by albedo/(1-metallic) a second time.
+    // 3C. Demodulated RT diffuse GI. The compute/denoiser pipeline stores
+    // incident diffuse irradiance (without primary albedo or BRDF), preventing
+    // texture detail from being blurred into neighboring pixels. Apply the
+    // primary Lambert/Fresnel diffuse response only after denoising.
     vec3 rtDiffuseGI = vec3(0.0);
     if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5) {
-        rtDiffuseGI = sanitizeHDR(rtIndirect.rgb) * max(ubo.rtFeatureParams.z, 0.0);
+        vec3 rtGI_F = fresnelSchlick(NdotV, F0);
+        vec3 rtGI_Kd = (vec3(1.0) - rtGI_F) * (1.0 - metallic);
+        rtDiffuseGI = sanitizeHDR(rtIndirect.rgb) * albedo * rtGI_Kd
+            * max(ubo.rtFeatureParams.z, 0.0);
     }
 
     // 4. Emisja
