@@ -17,6 +17,7 @@
 #include "network/JsonRpcDispatcher.hpp"
 #include "script/QuickJSContext.hpp"
 #include "renderer/VulkanContext.hpp"
+#include "core/EditorPreferences.hpp"
 #include "renderer/VulkanRenderer.hpp"
 
 #include "network/UdpAnimationServer.hpp"
@@ -178,6 +179,13 @@ namespace engine::core {
         bool isVsyncEnabled() const;
         float getUiScale() const;
 
+        // User Preferences & Config API
+        EditorPreferences& getPreferences() { return m_preferences; }
+        const EditorPreferences& getPreferences() const { return m_preferences; }
+        void applyPreferences();
+        bool saveUserPreferences(const std::string& path = "");
+        bool loadUserPreferences(const std::string& path = "");
+
         // Input API (Gamepad, Keyboard, Mouse from Studio)
         void setInputState(const nlohmann::json& input) { m_inputState = input; }
         nlohmann::json getInputState() const { return m_inputState; }
@@ -256,6 +264,7 @@ namespace engine::core {
         std::string m_cameraMode{"editor"};
         entt::entity m_selectedEntity{entt::null};
         EnvironmentSettings m_envSettings;
+        EditorPreferences m_preferences;
 
         nlohmann::json m_inputState = nlohmann::json::object();
 

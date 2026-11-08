@@ -577,6 +577,20 @@ static std::string saveProjectNativeDialog() { return ""; }
             static bool s_showContentDrawer = false;
             static bool s_showOutputLog = false;
             static bool s_showScriptStudio = false;
+            static bool s_showPreferencesWindow = false;
+
+            static bool s_prefsLoaded = false;
+            if (!s_prefsLoaded && engine) {
+                s_prefsLoaded = true;
+                const auto& pref = engine->getPreferences();
+                s_showPlaceActors   = pref.showPlaceActors;
+                s_showOutliner      = pref.showOutliner;
+                s_showDetails       = pref.showDetails;
+                s_showContentDrawer = pref.showContentDrawer;
+                s_showOutputLog     = pref.showOutputLog;
+                s_showScriptStudio  = pref.showScriptStudio;
+                m_uiScale           = pref.uiScale;
+            }
 
             if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
                 s_immersivePlay = !s_immersivePlay;
@@ -593,10 +607,18 @@ static std::string saveProjectNativeDialog() { return ""; }
 
             if (!s_splittersInit) {
                 s_splittersInit = true;
-                s_userLeftPanelW  = 260.0f * s_uiScale;
-                s_userRightPanelW = 310.0f * s_uiScale;
-                s_userOutlinerH   = 240.0f * s_uiScale;
-                s_userDrawerH     = 220.0f * s_uiScale;
+                if (engine && engine->getPreferences().userLeftPanelW > 50.0f) {
+                    const auto& pref = engine->getPreferences();
+                    s_userLeftPanelW  = pref.userLeftPanelW;
+                    s_userRightPanelW = pref.userRightPanelW;
+                    s_userOutlinerH   = pref.userOutlinerH;
+                    s_userDrawerH     = pref.userDrawerH;
+                } else {
+                    s_userLeftPanelW  = 260.0f * s_uiScale;
+                    s_userRightPanelW = 310.0f * s_uiScale;
+                    s_userOutlinerH   = 240.0f * s_uiScale;
+                    s_userDrawerH     = 220.0f * s_uiScale;
+                }
             }
 
             const float topTitleBarH  = s_immersivePlay ? 0.0f : (28.0f * s_uiScale);
@@ -720,6 +742,10 @@ static std::string saveProjectNativeDialog() { return ""; }
                     s_currentProjectPath = targetPath;
                 }
                 const bool ok = engine->saveCurrentProject(targetPath);
+                if (ok) {
+                    engine->getPreferences().lastProjectPath = targetPath;
+                    if (engine->getPreferences().autoSavePreferences) engine->saveUserPreferences();
+                }
                 snprintf(s_engineNotification, sizeof(s_engineNotification),
                          ok ? "Zapisano projekt w: %s" : "Blad zapisu projektu w: %s", targetPath.c_str());
                 s_engineNotificationTimer = 4.0f;
@@ -736,6 +762,8 @@ static std::string saveProjectNativeDialog() { return ""; }
                 engine->requestLoadProject(targetPath);
                 selectedEnt = entt::null;
                 s_currentProjectPath = targetPath;
+                engine->getPreferences().lastProjectPath = targetPath;
+                if (engine->getPreferences().autoSavePreferences) engine->saveUserPreferences();
                 snprintf(s_engineNotification, sizeof(s_engineNotification),
                          "Wczytywanie projektu: %s", targetPath.c_str());
                 s_engineNotificationTimer = 4.0f;
@@ -765,6 +793,20 @@ static std::string saveProjectNativeDialog() { return ""; }
             static int s_cameraSpeed = 4;
             static int s_placeActorCategory = 2;
             static int s_detailsTab = 0;
+
+            static bool s_camPrefsInit = false;
+            if (!s_camPrefsInit && engine) {
+                s_camPrefsInit = true;
+                const auto& pref = engine->getPreferences();
+                s_camFlySpeed     = pref.camFlySpeed;
+                s_cameraSpeed     = pref.cameraSpeed;
+                s_snapEnabled     = pref.snapEnabled;
+                s_snapStep        = pref.snapStep;
+                s_gizmoSpaceLocal = pref.gizmoSpaceLocal;
+                if (!pref.lastProjectPath.empty()) {
+                    s_currentProjectPath = pref.lastProjectPath;
+                }
+            }
 
             if (selectedEnt != entt::null && !registry.get().valid(selectedEnt)) {
                 selectedEnt = entt::null;
@@ -826,6 +868,10 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::EndMenu();
                     }
                     if (ImGui::BeginMenu("Edit")) {
+                        if (ImGui::MenuItem("Editor Preferences... (Preferencje)", "Ctrl+,")) {
+                            s_showPreferencesWindow = true;
+                        }
+                        ImGui::Separator();
                         if (ImGui::MenuItem("World & Graphics Settings")) { s_detailsTab = 1; s_showDetails = true; }
                         ImGui::EndMenu();
                     }
@@ -836,6 +882,8 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::MenuItem("Content Drawer", "Ctrl+Space", &s_showContentDrawer);
                         ImGui::MenuItem("Output Log", nullptr, &s_showOutputLog);
                         ImGui::MenuItem("Blueprints / Scripts", nullptr, &s_showScriptStudio);
+                        ImGui::Separator();
+                        ImGui::MenuItem("Editor Preferences...", "Ctrl+,", &s_showPreferencesWindow);
                         ImGui::Separator();
                         if (ImGui::BeginMenu("Skala Interfejsu (UI Scale)")) {
                             if (ImGui::MenuItem("85% (Kompaktowe)", nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
@@ -1220,6 +1268,9 @@ static std::string saveProjectNativeDialog() { return ""; }
                 if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_O)) {
                     loadCurrentGame("");
                 }
+                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Comma)) {
+                    s_showPreferencesWindow = !s_showPreferencesWindow;
+                }
                 if (!s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = NativeGizmoMode::TRANSLATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = NativeGizmoMode::ROTATE;
@@ -1404,8 +1455,11 @@ static std::string saveProjectNativeDialog() { return ""; }
             }
 
             if (s_isRmbNavigating && engine) {
-                camYaw += ImGui::GetIO().MouseDelta.x * 0.20f;
-                camPitch = glm::clamp(camPitch - ImGui::GetIO().MouseDelta.y * 0.20f, -89.0f, 89.0f);
+                float sens = engine->getPreferences().camMouseSensitivity;
+                float yDelta = ImGui::GetIO().MouseDelta.y * sens;
+                if (engine->getPreferences().invertY) yDelta = -yDelta;
+                camYaw += ImGui::GetIO().MouseDelta.x * sens;
+                camPitch = glm::clamp(camPitch - yDelta, -89.0f, 89.0f);
                 const glm::vec3 cf = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
                 const glm::vec3 cr = glm::normalize(glm::cross(cf, glm::vec3(0.0f, 1.0f, 0.0f)));
                 float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed / 4.0f);
@@ -2280,6 +2334,282 @@ static std::string saveProjectNativeDialog() { return ""; }
                         engine->setCurrentScript(scriptBuf);
                     }
                     ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
+                }
+                ImGui::End();
+            }
+
+            if (s_showPreferencesWindow && engine) {
+                ImGui::SetNextWindowSize(ImVec2(820 * s_uiScale, 560 * s_uiScale), ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowSizeConstraints(ImVec2(500 * s_uiScale, 380 * s_uiScale), ImVec2(screenW, screenH));
+                if (ImGui::Begin("Editor Preferences (Preferencje Edytora)###EditorPrefsDialog", &s_showPreferencesWindow, ImGuiWindowFlags_NoCollapse)) {
+                    auto& pref = engine->getPreferences();
+
+                    // Header
+                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  LUCID ENGINE - PREFERENCJE I KONFIGURACJA UZYTKOWNIKA");
+                    ImGui::TextDisabled("  Zarzadzaj ukladem UI, sterowaniem kamera, grafika Vulkana i zachowaniem edytora.");
+                    ImGui::Separator();
+
+                    static int s_prefCategory = 0; // 0=UI, 1=Camera, 2=Graphics, 3=Audio, 4=Storage
+                    const float leftColW = 190.0f * s_uiScale;
+
+                    ImGui::Columns(2, "PrefsColumns", true);
+                    ImGui::SetColumnWidth(0, leftColW);
+
+                    // Category List (Left side)
+                    const char* categories[] = {
+                        "  Interfejs (UI)",
+                        "  Kamera i Viewport",
+                        "  Grafika i Vulkan",
+                        "  Dzwiek (Audio)",
+                        "  Zapis i Projekty"
+                    };
+
+                    for (int i = 0; i < 5; ++i) {
+                        bool selected = (s_prefCategory == i);
+                        if (ImGui::Selectable(categories[i], selected, 0, ImVec2(0, 28.0f * s_uiScale))) {
+                            s_prefCategory = i;
+                        }
+                    }
+
+                    ImGui::NextColumn();
+
+                    // Details Panel (Right side)
+                    ImGui::BeginChild("PrefDetailsChild", ImVec2(0, -42.0f * s_uiScale), true);
+
+                    if (s_prefCategory == 0) {
+                        // Category 0: UI & Layout
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "UKLAD I SKALA INTERFEJSU");
+                        ImGui::Separator();
+
+                        float curUiScale = pref.uiScale;
+                        if (ImGui::SliderFloat("Skala Interfejsu (UI Scale)", &curUiScale, 0.70f, 2.0f, "%.2fx")) {
+                            pref.uiScale = curUiScale;
+                            m_uiScale = curUiScale;
+                            engine->setUiScale(curUiScale);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("100%")) { pref.uiScale = 1.0f; m_uiScale = 1.0f; engine->setUiScale(1.0f); }
+                        ImGui::SameLine();
+                        if (ImGui::Button("125%")) { pref.uiScale = 1.25f; m_uiScale = 1.25f; engine->setUiScale(1.25f); }
+                        ImGui::SameLine();
+                        if (ImGui::Button("150%")) { pref.uiScale = 1.50f; m_uiScale = 1.50f; engine->setUiScale(1.50f); }
+
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Widocznosc domyslna paneli:");
+                        if (ImGui::Checkbox("Place Actors (Aktorzy)", &pref.showPlaceActors)) s_showPlaceActors = pref.showPlaceActors;
+                        if (ImGui::Checkbox("Outliner (Drzewo sceny)", &pref.showOutliner)) s_showOutliner = pref.showOutliner;
+                        if (ImGui::Checkbox("Details (Wlasciwosci / Inspektor)", &pref.showDetails)) s_showDetails = pref.showDetails;
+                        if (ImGui::Checkbox("Content Drawer (Przegladarka assetow)", &pref.showContentDrawer)) s_showContentDrawer = pref.showContentDrawer;
+                        if (ImGui::Checkbox("Output Log (Konsola logow)", &pref.showOutputLog)) s_showOutputLog = pref.showOutputLog;
+                        if (ImGui::Checkbox("Blueprints / QuickJS Studio", &pref.showScriptStudio)) s_showScriptStudio = pref.showScriptStudio;
+
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Wymiary paneli:");
+                        if (ImGui::SliderFloat("Szerokosc panelu lewego", &s_userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = s_userLeftPanelW;
+                        if (ImGui::SliderFloat("Szerokosc panelu prawego", &s_userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = s_userRightPanelW;
+                        if (ImGui::SliderFloat("Wysokosc Outlinera", &s_userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = s_userOutlinerH;
+                        if (ImGui::SliderFloat("Wysokosc dolnej szuflady", &s_userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = s_userDrawerH;
+
+                        ImGui::Spacing();
+                        if (ImGui::Button(" Zresetuj uklad paneli do domyslnego ")) {
+                            s_userLeftPanelW  = 260.0f * s_uiScale;
+                            s_userRightPanelW = 310.0f * s_uiScale;
+                            s_userOutlinerH   = 240.0f * s_uiScale;
+                            s_userDrawerH     = 220.0f * s_uiScale;
+                            s_showPlaceActors = true;
+                            s_showOutliner    = true;
+                            s_showDetails     = true;
+                            pref.userLeftPanelW  = s_userLeftPanelW;
+                            pref.userRightPanelW = s_userRightPanelW;
+                            pref.userOutlinerH   = s_userOutlinerH;
+                            pref.userDrawerH     = s_userDrawerH;
+                            pref.showPlaceActors = true;
+                            pref.showOutliner    = true;
+                            pref.showDetails     = true;
+                        }
+
+                        ImGui::Spacing();
+                        ImGui::Checkbox("Automatycznie zapisuj preferencje przy zmianach", &pref.autoSavePreferences);
+
+                    } else if (s_prefCategory == 1) {
+                        // Category 1: Camera & Viewport
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "STEROWANIE I NAWIGACJA W VIEWPORCIE");
+                        ImGui::Separator();
+
+                        if (ImGui::SliderFloat("Bazowa predkosc kamery (Fly Speed)", &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) s_camFlySpeed = pref.camFlySpeed;
+                        if (ImGui::SliderInt("Mnoznik biegu kamery (1..8)", &pref.cameraSpeed, 1, 8)) s_cameraSpeed = pref.cameraSpeed;
+                        ImGui::SliderFloat("Czulosz myszy (Mouse Sensitivity)", &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
+                        ImGui::Checkbox("Odwroc os pionowa (Invert Mouse Y)", &pref.invertY);
+
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Przyciaganie (Snapping) & Transformacja:");
+                        if (ImGui::Checkbox("Wlacz przyciaganie do siatki (Grid Snap)", &pref.snapEnabled)) s_snapEnabled = pref.snapEnabled;
+                        if (ImGui::InputFloat("Krok przyciagania (Snap Step)", &pref.snapStep, 0.1f, 1.0f, "%.2f")) s_snapStep = pref.snapStep;
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("0.25")) { pref.snapStep = 0.25f; s_snapStep = 0.25f; }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("0.50")) { pref.snapStep = 0.50f; s_snapStep = 0.50f; }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("1.00")) { pref.snapStep = 1.00f; s_snapStep = 1.00f; }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("2.00")) { pref.snapStep = 2.00f; s_snapStep = 2.00f; }
+
+                        if (ImGui::Checkbox("Uklad lokalny gizmo (Local Space)", &pref.gizmoSpaceLocal)) s_gizmoSpaceLocal = pref.gizmoSpaceLocal;
+
+                    } else if (s_prefCategory == 2) {
+                        // Category 2: Graphics & Rendering
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "USTAWIENIA GRAFIKI I VULKANA");
+                        ImGui::Separator();
+
+                        const char* fpsLabels[] = {"Bez limitu (Unlimited)", "30 FPS", "60 FPS", "120 FPS", "240 FPS"};
+                        int fpsValues[] = {0, 30, 60, 120, 240};
+                        int curFpsIdx = 0;
+                        for (int f = 0; f < 5; ++f) {
+                            if (pref.targetFps == fpsValues[f]) { curFpsIdx = f; break; }
+                        }
+                        if (ImGui::Combo("Limit FPS", &curFpsIdx, fpsLabels, 5)) {
+                            pref.targetFps = fpsValues[curFpsIdx];
+                            engine->setTargetFps(pref.targetFps);
+                        }
+
+                        if (ImGui::Checkbox("V-Sync (Synchronizacja pionowa)", &pref.vsync)) {
+                            engine->setVsyncEnabled(pref.vsync);
+                        }
+
+                        const char* aaLabels[] = {"Wylaczony (Off)", "FXAA Fast (Szybki)", "FXAA Quality (Wysoka jakosc)", "FXAA Ultra (Maksymalny)"};
+                        if (ImGui::Combo("Antyaliasing (AA)", &pref.antiAliasingMode, aaLabels, 4)) {
+                            m_antiAliasingMode = pref.antiAliasingMode;
+                            setAntiAliasingMode(pref.antiAliasingMode);
+                        }
+
+                        if (ImGui::SliderFloat("Skala rozdzielczosci (Resolution Scale)", &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
+                            setResolutionScale(pref.resolutionScale);
+                        }
+                        ImGui::Checkbox("Automatyczne dopasowanie rozdzielczosci do Viewportu", &pref.autoViewportResolution);
+
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Efekty Post-Process & Oswietlenie:");
+
+                        if (ImGui::SliderFloat("Zasieg cieni (Shadow Distance)", &pref.shadowDistance, 20.0f, 200.0f, "%.0f m")) {
+                            setShadowDistance(pref.shadowDistance);
+                        }
+
+                        if (ImGui::Checkbox("Bloom", &pref.bloomEnabled)) setBloomEnabled(pref.bloomEnabled);
+                        if (pref.bloomEnabled) {
+                            if (ImGui::SliderFloat("  Intensywnosc Bloom", &pref.bloomIntensity, 0.0f, 3.0f, "%.2f")) setBloomIntensity(pref.bloomIntensity);
+                            if (ImGui::SliderFloat("  Prog Bloom (Threshold)", &pref.bloomThreshold, 0.1f, 5.0f, "%.2f")) setBloomThreshold(pref.bloomThreshold);
+                        }
+
+                        if (ImGui::Checkbox("GTAO (Ground-Truth Ambient Occlusion)", &pref.gtaoEnabled)) setGtaoEnabled(pref.gtaoEnabled);
+                        if (pref.gtaoEnabled) {
+                            if (ImGui::SliderFloat("  Promien GTAO (Radius)", &pref.gtaoRadius, 0.1f, 3.0f, "%.2f m")) setGtaoRadius(pref.gtaoRadius);
+                            if (ImGui::SliderFloat("  Intensywnosc GTAO", &pref.gtaoIntensity, 0.0f, 3.0f, "%.2f")) setGtaoIntensity(pref.gtaoIntensity);
+                        }
+
+                        bool rtSupported = m_context && m_context->isRayTracingSupported();
+                        if (rtSupported) {
+                            if (ImGui::Checkbox("Hardware Ray Tracing (RTX / Vulkan KHR)", &pref.rayTracingEnabled)) {
+                                setRayTracingEnabled(pref.rayTracingEnabled);
+                            }
+                        } else {
+                            ImGui::TextDisabled("Hardware Ray Tracing: Niedostepne na tym GPU");
+                        }
+
+                        if (ImGui::SliderFloat("Ekspozycja (Exposure)", &pref.exposure, 0.1f, 5.0f, "%.2f")) {
+                            setExposure(pref.exposure);
+                        }
+
+                    } else if (s_prefCategory == 3) {
+                        // Category 3: Audio
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "GLOSNOSC I SYSTEM AUDIO");
+                        ImGui::Separator();
+
+                        ImGui::SliderFloat("Glosnosc glowna (Master Volume)", &pref.masterVolume, 0.0f, 1.0f, "%.0f%%");
+                        ImGui::SliderFloat("Efekty dzwiekowe (SFX Volume)", &pref.sfxVolume, 0.0f, 1.0f, "%.0f%%");
+
+                        ImGui::Spacing();
+                        ImGui::TextDisabled("System: Spatial 3D Audio Engine (Doppler, Distance Attenuation)");
+
+                    } else if (s_prefCategory == 4) {
+                        // Category 4: Storage & Projects
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "PLIKI, PROJEKTY I ZAPIS");
+                        ImGui::Separator();
+
+                        static char projPathBuf[512] = "";
+                        static bool s_projBufInit = false;
+                        if (!s_projBufInit) {
+                            s_projBufInit = true;
+                            std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
+                        }
+                        if (ImGui::InputText("Ostatni projekt", projPathBuf, sizeof(projPathBuf))) {
+                            pref.lastProjectPath = projPathBuf;
+                        }
+                        ImGui::Checkbox("Automatycznie wczytuj ostatni projekt przy starcie", &pref.loadLastProjectOnStartup);
+
+                        ImGui::Spacing();
+                        ImGui::Separator();
+                        ImGui::TextDisabled("Sciezka pliku konfiguracyjnego:");
+                        ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "%s", pref.getDefaultConfigPath().c_str());
+
+                        const bool fileExists = std::filesystem::exists(pref.getDefaultConfigPath());
+                        ImGui::TextDisabled("Status pliku na dysku: %s", fileExists ? "Istnieje (Zapisany)" : "Brak (Zostanie utworzony)");
+                    }
+
+                    ImGui::EndChild();
+
+                    // Bottom Action Bar
+                    ImGui::Separator();
+                    if (ImGui::Button(" 💾 Zapisz preferencje (Save) ")) {
+                        // Sync current UI state into pref
+                        pref.uiScale = m_uiScale;
+                        pref.showPlaceActors = s_showPlaceActors;
+                        pref.showOutliner = s_showOutliner;
+                        pref.showDetails = s_showDetails;
+                        pref.showContentDrawer = s_showContentDrawer;
+                        pref.showOutputLog = s_showOutputLog;
+                        pref.showScriptStudio = s_showScriptStudio;
+                        pref.userLeftPanelW = s_userLeftPanelW;
+                        pref.userRightPanelW = s_userRightPanelW;
+                        pref.userOutlinerH = s_userOutlinerH;
+                        pref.userDrawerH = s_userDrawerH;
+                        pref.camFlySpeed = s_camFlySpeed;
+                        pref.cameraSpeed = s_cameraSpeed;
+                        pref.snapEnabled = s_snapEnabled;
+                        pref.snapStep = s_snapStep;
+                        pref.gizmoSpaceLocal = s_gizmoSpaceLocal;
+                        pref.lastProjectPath = s_currentProjectPath;
+
+                        bool ok = engine->saveUserPreferences();
+                        snprintf(s_engineNotification, sizeof(s_engineNotification),
+                                 ok ? "Zapisano preferencje do: %s" : "Blad zapisu preferencji!",
+                                 pref.getDefaultConfigPath().c_str());
+                        s_engineNotificationTimer = 4.0f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" ⚡ Zastosuj (Apply) ")) {
+                        engine->applyPreferences();
+                        snprintf(s_engineNotification, sizeof(s_engineNotification), "Zastosowano preferencje");
+                        s_engineNotificationTimer = 3.0f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" 🔄 Przywroc domyslne (Reset) ")) {
+                        engine->getPreferences() = core::EditorPreferences{};
+                        engine->applyPreferences();
+                        s_userLeftPanelW  = 260.0f * s_uiScale;
+                        s_userRightPanelW = 310.0f * s_uiScale;
+                        s_userOutlinerH   = 240.0f * s_uiScale;
+                        s_userDrawerH     = 220.0f * s_uiScale;
+                        s_showPlaceActors = true;
+                        s_showOutliner    = true;
+                        s_showDetails     = true;
+                        snprintf(s_engineNotification, sizeof(s_engineNotification), "Przywrocono ustawienia domyslne");
+                        s_engineNotificationTimer = 3.0f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" Zamknij (Close) ")) {
+                        s_showPreferencesWindow = false;
+                    }
+                    ImGui::Columns(1);
                 }
                 ImGui::End();
             }

@@ -136,6 +136,9 @@ namespace engine::core {
 #endif
         m_renderer = std::make_unique<renderer::VulkanRenderer>(m_vulkanContext.get(), renderW, renderH);
 
+        loadUserPreferences();
+        applyPreferences();
+
         m_networkThread = std::jthread([this]() {
             try {
                 if (m_unifiedServer) m_unifiedServer->start();
@@ -160,6 +163,9 @@ namespace engine::core {
     }
 
     Engine::~Engine() {
+        if (m_preferences.autoSavePreferences) {
+            saveUserPreferences();
+        }
         stop();
         m_renderer.reset();
         if (m_vulkanContext) {
@@ -673,8 +679,12 @@ namespace engine::core {
                             s_lastX = curX;
                             s_lastY = curY;
 
-                            m_camYaw += dx * 0.15f;
-                            m_camPitch = glm::clamp(m_camPitch - dy * 0.15f, -89.0f, 89.0f);
+                            float sens = m_preferences.camMouseSensitivity * 0.75f;
+                            float yDelta = dy * sens;
+                            if (m_preferences.invertY) yDelta = -yDelta;
+                            m_camYaw += dx * sens;
+                            m_camPitch = glm::clamp(m_camPitch - yDelta, -89.0f, 89.0f);
+
                         }
 
                         // Fly Movement in camera direction
@@ -689,7 +699,8 @@ namespace engine::core {
                         glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
                         glm::vec3 up(0.0f, 1.0f, 0.0f);
 
-                        float speed = (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ? 35.0f : 12.0f;
+                        float baseSpeed = m_preferences.camFlySpeed * (m_preferences.cameraSpeed / 4.0f);
+                        float speed = (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ? (baseSpeed * 3.0f) : baseSpeed;
                         glm::vec3 moveDir(0.0f);
                         if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) moveDir += fwd;
                         if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) moveDir -= fwd;
@@ -1749,6 +1760,34 @@ function update(entities, dt, input, contacts) {
 
     float Engine::getUiScale() const {
         return m_renderer ? m_renderer->getUiScale() : 1.0f;
+
+    }
+
+    void Engine::applyPreferences() {
+        setTargetFps(m_preferences.targetFps);
+        setVsyncEnabled(m_preferences.vsync);
+        if (m_renderer) {
+            m_renderer->setUiScale(m_preferences.uiScale);
+            m_renderer->setAntiAliasingMode(m_preferences.antiAliasingMode);
+            m_renderer->setResolutionScale(m_preferences.resolutionScale);
+            m_renderer->setShadowDistance(m_preferences.shadowDistance);
+            m_renderer->setBloomEnabled(m_preferences.bloomEnabled);
+            m_renderer->setBloomIntensity(m_preferences.bloomIntensity);
+            m_renderer->setBloomThreshold(m_preferences.bloomThreshold);
+            m_renderer->setGtaoEnabled(m_preferences.gtaoEnabled);
+            m_renderer->setGtaoRadius(m_preferences.gtaoRadius);
+            m_renderer->setGtaoIntensity(m_preferences.gtaoIntensity);
+            m_renderer->setRayTracingEnabled(m_preferences.rayTracingEnabled);
+            m_renderer->setExposure(m_preferences.exposure);
+        }
+    }
+
+    bool Engine::saveUserPreferences(const std::string& path) {
+        return m_preferences.saveToFile(path);
+    }
+
+    bool Engine::loadUserPreferences(const std::string& path) {
+        return m_preferences.loadFromFile(path);
     }
 
     void Engine::initTestScene() {

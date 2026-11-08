@@ -370,6 +370,43 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.getPreferences") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", eng->getPreferences().toJson()}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setPreferences") {
+                nlohmann::json params = nlohmann::json::object();
+                if (json.contains("params") && json["params"].is_object()) {
+                    params = json["params"];
+                }
+                queue.push([params, client, id](core::Engine* eng) {
+                    eng->getPreferences().fromJson(params);
+                    eng->applyPreferences();
+                    if (eng->getPreferences().autoSavePreferences) {
+                        eng->saveUserPreferences();
+                    }
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", true}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.savePreferences") {
+                queue.push([client, id](core::Engine* eng) {
+                    bool ok = eng->saveUserPreferences();
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", ok}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.getUiScale") {
                 queue.push([client, id](core::Engine* eng) {
                     nlohmann::json res = {
