@@ -24,6 +24,7 @@ namespace engine::renderer {
         float giIntensity{1.0f};
         int giBounces{2};
         int reflectionBounces{2};
+        bool reflectionInfiniteBounces{false};
         float reflectionMaxRoughness{0.60f};
         float reflectionMinThroughput{0.06f};
         int giSamples{1};

@@ -88,7 +88,8 @@ void main() {
     if (prevG.w < 4.0 && baseSamples < 4) samples = min(baseSamples * 2, 4);
     rngInit(uvec2(px), pc.u.y);
 
-    int maxBounces = clamp(int(pc.u.w), 2, 4);
+    bool infiniteBounces = (pc.u.w & 0x80000000u) != 0u;
+    int maxBounces = infiniteBounces ? 16 : clamp(int(pc.u.w), 2, 4);
     vec3 accumulated = vec3(0.0);
     float spread = roughness * roughness * 0.85;
     int numActiveLights = min(ubo.numLights, 8);
@@ -162,7 +163,7 @@ void main() {
             float maxContinueRoughness = clamp(pc.f.w, 0.05, 1.0);
             float minContinueThroughput = clamp(uintBitsToFloat(pc.u.z), 0.001, 1.0);
             bool canContinue = (bounce + 1 < maxBounces) && hitRough < maxContinueRoughness &&
-                max(contW.r, max(contW.g, contW.b)) > minContinueThroughput;
+                (infiniteBounces || max(contW.r, max(contW.g, contW.b)) > minContinueThroughput);
 
             vec3 local = shadeRtHitEx(hit, hitPos, hitNorm, hitUv, hitTangent, curDir, false, canContinue ? 0.0 : -1.0);
             local += screenIndirectAtHit(hit, hitPos, hitNorm, hitUv, curDir);
@@ -170,6 +171,19 @@ void main() {
             if (!canContinue) break;
 
             throughput *= contW;
+
+            // Infinite mode uses Russian roulette instead of a biased hard throughput cutoff.
+            // Weak paths survive proportionally to their remaining energy; survivors are
+            // reweighted so the estimator remains unbiased (up to the 16-bounce safety cap).
+            if (infiniteBounces && bounce >= 2) {
+                float pathEnergy = max(throughput.r, max(throughput.g, throughput.b));
+                if (pathEnergy < minContinueThroughput) {
+                    float survivalProbability = clamp(pathEnergy / max(minContinueThroughput, 1e-4), 0.05, 1.0);
+                    if (rand1() > survivalProbability) break;
+                    throughput /= survivalProbability;
+                }
+            }
+
             vec3 reflected = reflect(curDir, Nh);
             vec3 tH, bH;
             buildBasis(reflected, tH, bH);
