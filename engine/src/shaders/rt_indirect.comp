@@ -159,11 +159,10 @@ for (int s = 0; s < samples; ++s) {
 
         if (b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
 
-        if (!found) {
-            if (doGI && (ubo.skyboxMode & 2) == 0 && (ubo.skyboxMode & 1) != 0)
-                pathRadiance += throughput * sampleRtSkyRadiance(dir);
-            break;
-        }
+        // Environment lighting is owned exclusively by the IBL switch (skyboxMode bit 1)
+        // in the PBR pass and in shadeRtHit(). A visible skybox must never light the
+        // scene through RT GI, and rays that miss simply carry no extra radiance.
+        if (!found) break;
         if (!doGI) break;
 
         pathRadiance += throughput * shadeRtHit(hit, hitPosition, hitNormal, hitUv, hitTangent, dir, true);
