@@ -493,7 +493,7 @@ namespace engine::renderer {
             reflPd.u[0] = std::clamp(params.reflectionSamples, 1u, 16u);
             reflPd.u[1] = params.frameIndex;
             reflPd.u[2] = 0;
-            reflPd.u[3] = std::clamp(params.bounces, 1u, 15u);
+            reflPd.u[3] = std::clamp(params.reflectionBounces, 2u, 4u);
 
             bindRefl(m_reflPipeline, reflPd);
             sync();
