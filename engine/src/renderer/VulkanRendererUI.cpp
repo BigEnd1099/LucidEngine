@@ -1943,9 +1943,14 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
                         ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
+                        ImGui::Checkbox("Infinite Bounce (adaptive, max 16)", &m_rtSettings.reflectionInfiniteBounces);
+                        ImGui::BeginDisabled(m_rtSettings.reflectionInfiniteBounces);
                         ImGui::SliderInt("RT Reflection Bounces", &m_rtSettings.reflectionBounces, 2, 4, "%d");
+                        ImGui::EndDisabled();
                         ImGui::SliderFloat("Reflection Continuation Roughness", &m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f, "%.2f");
-                        ImGui::SliderFloat("Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
+                        ImGui::SliderFloat(m_rtSettings.reflectionInfiniteBounces ? "Russian Roulette Energy Threshold" : "Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
+                        if (m_rtSettings.reflectionInfiniteBounces)
+                            ImGui::TextDisabled("Adaptive path termination; hard safety limit: 16 surface hits.");
                         ImGui::EndDisabled();
                         ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);
