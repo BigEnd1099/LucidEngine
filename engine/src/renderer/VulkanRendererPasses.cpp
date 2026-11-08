@@ -997,6 +997,7 @@ namespace engine::renderer {
                 rtp.samples = static_cast<uint32_t>(std::clamp(m_rtSettings.giSamples, 1, 16));
                 rtp.frameIndex = m_frameCounter;
                 rtp.giEnabled = m_rtSettings.giEnabled;
+                rtp.giCheckerboard = m_rtSettings.giCheckerboard;
                 rtp.aoEnabled = m_rtSettings.aoEnabled;
                 rtp.reflectionsEnabled = m_rtSettings.reflectionsEnabled;
                 rtp.reflectionSamples = static_cast<uint32_t>(std::clamp(m_rtSettings.reflectionSamples, 1, 16));
@@ -1005,6 +1006,10 @@ namespace engine::renderer {
                 rtp.reflectionInfiniteBounces = m_rtSettings.reflectionInfiniteBounces;
                 rtp.reflectionMaxRoughness = m_rtSettings.reflectionMaxRoughness;
                 rtp.reflectionMinThroughput = m_rtSettings.reflectionMinThroughput;
+                rtp.reflectionCheckerboard = m_rtSettings.reflectionCheckerboard;
+                rtp.reflectionStochasticLights = m_rtSettings.reflectionStochasticLights;
+                rtp.reflectionLodBias = m_rtSettings.reflectionLodBias;
+                rtp.reflectionHalfRes = m_rtSettings.reflectionHalfRes;
                 rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
                 rtp.spatialStrength = m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0f;
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;

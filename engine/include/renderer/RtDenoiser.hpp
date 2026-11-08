@@ -20,6 +20,7 @@ namespace engine::renderer {
             uint32_t  samples{1};          // paths per pixel per frame, 1..16
             uint32_t  frameIndex{0};
             bool      giEnabled{true};
+            bool      giCheckerboard{true};
             bool      aoEnabled{true};
             bool      reflectionsEnabled{true};
             uint32_t  reflectionSamples{1};
@@ -33,6 +34,11 @@ namespace engine::renderer {
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
             bool      lightChanged{false}; // Resets accumulation when lights or camera change
             RtDebugMode debugMode{RtDebugMode::None};
+
+            bool      reflectionCheckerboard{true};
+            bool      reflectionStochasticLights{true};
+            bool      reflectionLodBias{true};
+            bool      reflectionHalfRes{false};
         };
 
         struct GpuTimings {

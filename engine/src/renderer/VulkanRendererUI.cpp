@@ -892,6 +892,15 @@ static std::string saveProjectNativeDialog() { return ""; }
                             if (ImGui::MenuItem("150% (Bardzo duze / 4K)", nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) m_uiScale = 1.50f;
                             ImGui::EndMenu();
                         }
+                        if (ImGui::BeginMenu("Skala Renderowania (Resolution Scale)")) {
+                            if (ImGui::MenuItem("50% (Wydajnosc / Performance)", nullptr, std::abs(m_resolutionScale - 0.50f) < 0.04f)) setResolutionScale(0.50f);
+                            if (ImGui::MenuItem("67% (Jakosc / Quality)", nullptr, std::abs(m_resolutionScale - 0.67f) < 0.04f)) setResolutionScale(0.67f);
+                            if (ImGui::MenuItem("75% (Zrownowazona / Balanced)", nullptr, std::abs(m_resolutionScale - 0.75f) < 0.04f)) setResolutionScale(0.75f);
+                            if (ImGui::MenuItem("100% (Natywna / 1:1)", nullptr, std::abs(m_resolutionScale - 1.00f) < 0.04f)) setResolutionScale(1.00f);
+                            if (ImGui::MenuItem("125% (Super-Sampling)", nullptr, std::abs(m_resolutionScale - 1.25f) < 0.04f)) setResolutionScale(1.25f);
+                            if (ImGui::MenuItem("150% (Ultra DSR)", nullptr, std::abs(m_resolutionScale - 1.50f) < 0.04f)) setResolutionScale(1.50f);
+                            ImGui::EndMenu();
+                        }
                         if (ImGui::MenuItem("Zresetuj uklad okien do domyslnego")) {
                             s_userLeftPanelW  = 260.0f * s_uiScale;
                             s_userRightPanelW = 310.0f * s_uiScale;
@@ -1951,11 +1960,26 @@ static std::string saveProjectNativeDialog() { return ""; }
                         ImGui::SliderFloat(m_rtSettings.reflectionInfiniteBounces ? "Russian Roulette Energy Threshold" : "Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
                         if (m_rtSettings.reflectionInfiniteBounces)
                             ImGui::TextDisabled("Adaptive path termination; hard safety limit: 16 surface hits.");
+                        ImGui::Checkbox("Roughness Checkerboard (Variant 1)", &m_rtSettings.reflectionCheckerboard);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Smooth surfaces (roughness <= 0.25) traced at full 1:1; rough surfaces traced on alternating checkerboard and bilaterally reconstructed.");
+                        ImGui::Checkbox("Stochastic Lights on Bounces (Variant 2)", &m_rtSettings.reflectionStochasticLights);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all 8 lights, cutting shadow rays from 9 to 2.");
+                        ImGui::Checkbox("Bounce Depth Mip LOD Bias (Variant 3)", &m_rtSettings.reflectionLodBias);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Increases texture mip LOD with bounce depth (textureLod float(bounce)) to reduce GPU texture cache thrashing.");
+                        ImGui::Checkbox("Global Half-Res Reflections (Variant 4)", &m_rtSettings.reflectionHalfRes);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Forces all reflections into half-resolution with edge-aware bilateral normal/depth reconstruction.");
                         ImGui::EndDisabled();
                         ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);
                         ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
                         ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
+                        ImGui::Checkbox("GI Checkerboard (Half-Rate Trace)", &m_rtSettings.giCheckerboard);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Traces GI on alternating checkerboard pixels, cutting ray tracing work by 50% and reconstructing via temporal history & bilateral filter.");
                         ImGui::TextDisabled("Resolution: Half-Res Diffuse GI (4x compute speedup)");
                         ImGui::EndDisabled();
 
@@ -2275,14 +2299,22 @@ static std::string saveProjectNativeDialog() { return ""; }
                         }
 
                         float resSc = m_resolutionScale;
-                        if (ImGui::SliderFloat("Resolution Scale", &resSc, 0.50f, 2.00f, "%.2fx")) {
-                            m_resolutionScale = std::clamp(resSc, 0.50f, 2.00f);
-                            if (!m_autoViewportResolution) {
+                        if (ImGui::SliderFloat("Resolution Scale (Skala renderu)", &resSc, 0.25f, 2.00f, "%.2fx")) {
+                            setResolutionScale(resSc);
+                            if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) {
                                 requestResolution(
-                                    (static_cast<uint32_t>(m_baseWidth  * m_resolutionScale) + 1u) & ~1u,
-                                    (static_cast<uint32_t>(m_baseHeight * m_resolutionScale) + 1u) & ~1u);
+                                    (static_cast<uint32_t>(viewportPanelSize.x * m_resolutionScale) + 1u) & ~1u,
+                                    (static_cast<uint32_t>(viewportPanelSize.y * m_resolutionScale) + 1u) & ~1u);
                             }
+                            if (engine) engine->getPreferences().resolutionScale = m_resolutionScale;
                         }
+                        if (ImGui::Button("50%##ResSc")) { setResolutionScale(0.50f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.50f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.50f) + 1u) & ~1u); }
+                        ImGui::SameLine();
+                        if (ImGui::Button("67%##ResSc")) { setResolutionScale(0.67f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.67f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.67f) + 1u) & ~1u); }
+                        ImGui::SameLine();
+                        if (ImGui::Button("75%##ResSc")) { setResolutionScale(0.75f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.75f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.75f) + 1u) & ~1u); }
+                        ImGui::SameLine();
+                        if (ImGui::Button("100%##ResSc")) { setResolutionScale(1.00f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 1.00f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 1.00f) + 1u) & ~1u); }
                         ImGui::SliderFloat("UI Scale", &m_uiScale, 0.75f, 1.65f, "%.2fx");
                     }
                 }

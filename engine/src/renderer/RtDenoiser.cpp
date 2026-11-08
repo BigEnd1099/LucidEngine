@@ -451,7 +451,7 @@ namespace engine::renderer {
                          m_historyValid ? 1.0f : 0.0f, params.svgfEnabled ? 1.0f : 0.0f);
         pd.u[0] = samples;
         pd.u[1] = params.frameIndex;
-        pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u);
+        pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) | (params.giCheckerboard ? 4u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
         bindGI(m_tracePipelineHandle, pd);   // 1. trace
@@ -494,9 +494,15 @@ namespace engine::renderer {
             reflPd.u[0] = std::clamp(params.reflectionSamples, 1u, 16u);
             reflPd.u[1] = params.frameIndex;
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
-            reflPd.u[3] = params.reflectionInfiniteBounces
+            uint32_t reflFlags = 0;
+            if (params.reflectionCheckerboard)     reflFlags |= (1u << 8);  // 0x100
+            if (params.reflectionStochasticLights) reflFlags |= (1u << 9);  // 0x200
+            if (params.reflectionLodBias)          reflFlags |= (1u << 10); // 0x400
+            if (params.reflectionHalfRes)          reflFlags |= (1u << 11); // 0x800
+
+            reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 16u)
-                : std::clamp(params.reflectionBounces, 2u, 4u);
+                : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
 
             bindRefl(m_reflPipeline, reflPd);
             sync();

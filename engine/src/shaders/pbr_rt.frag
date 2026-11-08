@@ -432,8 +432,22 @@ void main() {
 
         ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
     }
-    if (ubo.rtParams.x > 0.5 && ubo.rtParams.w > 0.5) {
-        vec3 reflSample = texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec4 reflSample4 = (ubo.rtParams.x > 0.5 && ubo.rtParams.w > 0.5)
+        ? texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0) : vec4(0.0);
+    if (reflSample4.a > 0.1 && reflSample4.a < 0.4) {
+        // Fallback bilateral cross-filter in case temporal pass was bypassed
+        vec3 cSum = vec3(0.0);
+        float wSum = 0.0;
+        ivec2 cCoord = ivec2(gl_FragCoord.xy);
+        const ivec2 crossOff[4] = ivec2[](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+        for (int k = 0; k < 4; ++k) {
+            vec4 ns = texelFetch(rtReflectionsTex, cCoord + crossOff[k], 0);
+            if (ns.a > 0.5) { cSum += ns.rgb; wSum += 1.0; }
+        }
+        if (wSum > 0.0) reflSample4 = vec4(cSum / wSum, 1.0);
+    }
+    if (reflSample4.a > 0.5) {
+        vec3 reflSample = reflSample4.rgb;
         vec3 fresnel = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
         float specAO = mix(1.0, computeSpecularAO(max(dot(N, V), 0.0), combinedAO, roughness), smoothstep(0.0, 0.1, roughness));
         vec3 rtSpecular = sanitizeHDR(reflSample) * fresnel * specAO;
