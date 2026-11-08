@@ -127,8 +127,8 @@ void main() {
         raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(60.0));
         newLen = min(histLen + spp, maxHist);
         // Exponential Moving Average (EMA) with minimum blend factor so dynamic changes fade in a fraction of a second
-        // Cumulative average up to maxHist samples. The floor only prevents stagnation.
-        float alpha = clamp(spp / newLen, 0.01, 1.0);
+        // Cumulative average up to maxHist samples. Keep the floor below the UI's 256-sample limit.
+        float alpha = clamp(spp / newLen, 0.001, 1.0);
         result = mix(hist, raw, alpha);
 
         // SVGF moments accumulation
