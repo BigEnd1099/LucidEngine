@@ -23,7 +23,8 @@ namespace engine::renderer {
             bool      aoEnabled{true};
             bool      reflectionsEnabled{true};
             uint32_t  reflectionSamples{1};
-            uint32_t  bounces{2};          // 1..15
+            uint32_t  bounces{2};          // diffuse GI bounces, 1..15
+            uint32_t  reflectionBounces{2}; // reflection path length, 2..4
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
