@@ -147,6 +147,15 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
+        void drawEditorDetailsPanel(ecs::Registry& registry, core::Engine* engine,
+                                    entt::entity& selectedEntity, bool immersivePlay,
+                                    bool showDetails, bool showOutliner, float uiScale,
+                                    float leftPanelW, float centerViewportW, float topTotalH,
+                                    float outlinerH, float rightPanelW, float detailsH,
+                                    const glm::vec3& cameraPosition, const glm::vec3& cameraForward,
+                                    float cameraYaw, float cameraPitch, float cameraFov,
+                                    const glm::vec2& viewportPanelSize);
+
 #endif
 
         VulkanContext* m_context{nullptr};
@@ -174,6 +183,7 @@ namespace engine::renderer {
         VmaAllocation m_rtInstanceDataAllocation{VK_NULL_HANDLE};
         void* m_rtInstanceDataMapped{nullptr};
         bool m_iblEnabled{true};
+        int m_detailsTab{0};
         uint32_t m_width{1920};
         uint32_t m_height{1080};
         uint32_t m_baseWidth{1920};
