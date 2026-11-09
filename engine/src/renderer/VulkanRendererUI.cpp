@@ -463,7 +463,7 @@ namespace engine::renderer {
                             s_showPreferencesWindow = true;
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("World & Graphics Settings")) { s_detailsTab = 1; s_showDetails = true; }
+                        if (ImGui::MenuItem("World & Graphics Settings")) { m_detailsTab = 1; s_showDetails = true; }
                         ImGui::EndMenu();
                     }
                     if (ImGui::BeginMenu("Window")) {
@@ -592,7 +592,7 @@ namespace engine::renderer {
             // Szybki dostep do oswietlenia i renderera
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.32f, 1.0f));
             ImVec2 gPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { s_detailsTab = 1; s_showDetails = true; }
+            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { m_detailsTab = 1; s_showDetails = true; }
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * s_uiScale, gPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
             ImGui::PopStyleColor();
             ImGui::SameLine();
@@ -663,7 +663,7 @@ namespace engine::renderer {
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
                     if (ImGui::Button("##DockBtn", ImVec2(itemSz, itemSz))) {
                         s_activeToolMode = i;
-                        if (i == 5) { s_detailsTab = 1; s_showDetails = true; }
+                        if (i == 5) { m_detailsTab = 1; s_showDetails = true; }
                     }
                     ImGui::PopStyleColor();
                     drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
