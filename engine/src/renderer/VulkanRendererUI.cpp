@@ -7,6 +7,7 @@
 #include "renderer/EditorPreferencesPanel.hpp"
 #include "renderer/EditorTopBarPanel.hpp"
 #include "renderer/EditorViewportOverlay.hpp"
+#include "renderer/EditorCameraNavigation.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -695,39 +696,12 @@ namespace engine::renderer {
                 }
             }
 
-            if (s_isRmbNavigating && engine) {
-                float sens = engine->getPreferences().camMouseSensitivity;
-                float yDelta = ImGui::GetIO().MouseDelta.y * sens;
-                if (engine->getPreferences().invertY) yDelta = -yDelta;
-                camYaw += ImGui::GetIO().MouseDelta.x * sens;
-                camPitch = glm::clamp(camPitch - yDelta, -89.0f, 89.0f);
-                const glm::vec3 cf = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                const glm::vec3 cr = glm::normalize(glm::cross(cf, glm::vec3(0.0f, 1.0f, 0.0f)));
-                float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed / 4.0f);
-                if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) speed *= 3.0f;
-                if (ImGui::IsKeyDown(ImGuiKey_W)) camPos += cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_S)) camPos -= cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_A)) camPos -= cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_D)) camPos += cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_E)) camPos.y += speed;
-                if (ImGui::IsKeyDown(ImGuiKey_Q)) camPos.y -= speed;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isMmbPanning && engine) {
-                camPos -= (right * ImGui::GetIO().MouseDelta.x - up * ImGui::GetIO().MouseDelta.y) * 0.04f;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isAltOrbiting && engine) {
-                const glm::vec3 pivot = hasSelectedTransform ? registry.get().get<ecs::TransformComponent>(selectedEnt).position : (camPos + front * 10.0f);
-                const float orbitDist = std::max(0.5f, glm::length(camPos - pivot));
-                camYaw += ImGui::GetIO().MouseDelta.x * 0.25f;
-                camPitch = glm::clamp(camPitch - ImGui::GetIO().MouseDelta.y * 0.25f, -89.0f, 89.0f);
-                const glm::vec3 of = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                engine->setCamera(pivot - of * orbitDist, camYaw, camPitch, camFov);
-            }
-            if (isHovered && std::abs(ImGui::GetIO().MouseWheel) > 0.01f && engine) {
-                engine->setCamera(camPos + front * (ImGui::GetIO().MouseWheel * 3.0f), camYaw, camPitch, camFov);
-            }
+            EditorCameraNavigationState cameraNavigationState{
+                s_isRmbNavigating, s_isMmbPanning, s_isAltOrbiting, isHovered,
+                hasSelectedTransform, selectedEnt, camPos, front, right, up,
+                camYaw, camPitch, camFov
+            };
+            drawEditorCameraNavigation(engine, registry, cameraNavigationState);
 
             // Ikony świateł 3D w stylu Blender / UE5
             {
