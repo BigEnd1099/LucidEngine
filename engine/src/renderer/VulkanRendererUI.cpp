@@ -4,6 +4,10 @@
 #include "renderer/EditorProjectDialogs.hpp"
 #include "renderer/EditorUiBottomPanels.hpp"
 #include "renderer/EditorOutlinerPanel.hpp"
+#include "renderer/EditorPreferencesPanel.hpp"
+#include "renderer/EditorTopBarPanel.hpp"
+#include "renderer/EditorViewportOverlay.hpp"
+#include "renderer/EditorCameraNavigation.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -103,7 +107,7 @@ namespace engine::renderer {
         }
     }
 
-    enum class NativeGizmoMode { TRANSLATE = 0, ROTATE = 1, SCALE = 2 };
+    enum class EditorGizmoMode { TRANSLATE = 0, ROTATE = 1, SCALE = 2 };
 
     static float distToSegment(const ImVec2& p, const ImVec2& a, const ImVec2& b) {
         const float abx = b.x - a.x;
@@ -304,7 +308,7 @@ namespace engine::renderer {
             };
 
             static entt::entity selectedEnt = entt::null;
-            static NativeGizmoMode s_gizmoMode = NativeGizmoMode::TRANSLATE;
+            static EditorGizmoMode s_gizmoMode = EditorGizmoMode::TRANSLATE;
             static char s_engineNotification[128] = "";
             static float s_engineNotificationTimer = 0.0f;
 
@@ -408,382 +412,20 @@ namespace engine::renderer {
                 selectedEnt = engine->getSelectedEntity();
             }
 
-            // 1. TOP WINDOW BAR
-            if (!s_immersivePlay) {
-                ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, topTitleBarH), ImGuiCond_Always);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 3));
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.035f, 0.035f, 0.055f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.035f, 0.035f, 0.055f, 1.0f));
-                ImGuiWindowFlags titleFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
-                ImGui::Begin("TopTitleBar", nullptr, titleFlags);
+            EditorTopBarUiState topBarState{
+                s_immersivePlay, s_showPreferencesWindow, s_showPlaceActors,
+                s_showOutliner, s_showDetails, s_showContentDrawer,
+                s_showOutputLog, s_showScriptStudio, s_uiScale,
+                m_resolutionScale, m_antiAliasingMode,
+                s_userLeftPanelW, s_userRightPanelW, s_userOutlinerH, s_userDrawerH,
+                s_engineNotification, s_engineNotificationTimer,
+                [&](bool saveAs) { saveCurrentGame(saveAs); },
+                [&](const std::string& path) { loadCurrentGame(path); }
+            };
+            drawEditorTopBarPanel(engine, topBarState, screenW, topTitleBarH,
+                                  topLevelTabsH, topToolbarH, selectedEnt);
 
-                if (ImGui::BeginMenuBar()) {
-                    ImDrawList* tdl = ImGui::GetWindowDrawList();
-                    ImVec2 badgePos = ImGui::GetCursorScreenPos();
-                    const float badgeR = 8.0f * s_uiScale;
-                    ImVec2 badgeCenter(badgePos.x + badgeR + 2.0f, badgePos.y + topTitleBarH * 0.42f);
-                    tdl->AddCircleFilled(badgeCenter, badgeR, IM_COL32(0, 140, 235, 255), 16);
-                    tdl->AddText(ImVec2(badgeCenter.x - 3.5f * s_uiScale, badgeCenter.y - 6.5f * s_uiScale), IM_COL32(255, 255, 255, 255), "L");
-                    ImGui::Dummy(ImVec2(badgeR * 2.0f + 4.0f, badgeR * 2.0f));
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "LUCID");
-                    ImGui::SameLine(0.0f, 14.0f * s_uiScale);
 
-                    if (ImGui::BeginMenu("File")) {
-                        if (ImGui::MenuItem("New Level (Nowy poziom)", "Ctrl+N")) {
-                            if (engine) { selectedEnt = entt::null; engine->setCurrentPreset("empty"); engine->resetScene("empty"); }
-                        }
-                        if (ImGui::MenuItem("Open Project... (Otworz z dysku)", "Ctrl+O")) {
-                            loadCurrentGame("");
-                        }
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) {
-                            saveCurrentGame(false);
-                        }
-                        if (ImGui::MenuItem("Save Project As... (Zapisz jako...)", "Ctrl+Shift+S")) {
-                            saveCurrentGame(true);
-                        }
-                        if (ImGui::BeginMenu("Szybki wybor")) {
-                            if (ImGui::MenuItem("Wczytaj 'projects/MyGame'")) loadCurrentGame("projects/MyGame");
-                            ImGui::EndMenu();
-                        }
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Kompiluj pelna gre (.exe)", "Ctrl+Shift+P")) {
-                            saveCurrentGame();
-                            if (engine && engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame")) {
-                                snprintf(s_engineNotification, sizeof(s_engineNotification), "Gra skompilowana do Build/Windows/MyLucidGame/!");
-                                s_engineNotificationTimer = 5.0f;
-                            }
-                        }
-                        ImGui::EndMenu();
-                    }
-                    if (ImGui::BeginMenu("Edit")) {
-                        if (ImGui::MenuItem("Editor Preferences... (Preferencje)", "Ctrl+,")) {
-                            s_showPreferencesWindow = true;
-                        }
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("World & Graphics Settings")) { m_detailsTab = 1; s_showDetails = true; }
-                        ImGui::EndMenu();
-                    }
-                    if (ImGui::BeginMenu("Window")) {
-                        ImGui::MenuItem("Place Actors", nullptr, &s_showPlaceActors);
-                        ImGui::MenuItem("Outliner", nullptr, &s_showOutliner);
-                        ImGui::MenuItem("Details", nullptr, &s_showDetails);
-                        ImGui::MenuItem("Content Drawer", "Ctrl+Space", &s_showContentDrawer);
-                        ImGui::MenuItem("Output Log", nullptr, &s_showOutputLog);
-                        ImGui::MenuItem("Blueprints / Scripts", nullptr, &s_showScriptStudio);
-                        ImGui::Separator();
-                        ImGui::MenuItem("Editor Preferences...", "Ctrl+,", &s_showPreferencesWindow);
-                        ImGui::Separator();
-                        if (ImGui::BeginMenu("Skala Interfejsu (UI Scale)")) {
-                            if (ImGui::MenuItem("85% (Kompaktowe)", nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
-                            if (ImGui::MenuItem("100% (Standard)", nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) m_uiScale = 1.0f;
-                            if (ImGui::MenuItem("125% (Duze)", nullptr, std::abs(m_uiScale - 1.25f) < 0.05f)) m_uiScale = 1.25f;
-                            if (ImGui::MenuItem("150% (Bardzo duze / 4K)", nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) m_uiScale = 1.50f;
-                            ImGui::EndMenu();
-                        }
-                        if (ImGui::BeginMenu("Skala Renderowania (Resolution Scale)")) {
-                            if (ImGui::MenuItem("50% (Wydajnosc / Performance)", nullptr, std::abs(m_resolutionScale - 0.50f) < 0.04f)) setResolutionScale(0.50f);
-                            if (ImGui::MenuItem("67% (Jakosc / Quality)", nullptr, std::abs(m_resolutionScale - 0.67f) < 0.04f)) setResolutionScale(0.67f);
-                            if (ImGui::MenuItem("75% (Zrownowazona / Balanced)", nullptr, std::abs(m_resolutionScale - 0.75f) < 0.04f)) setResolutionScale(0.75f);
-                            if (ImGui::MenuItem("100% (Natywna / 1:1)", nullptr, std::abs(m_resolutionScale - 1.00f) < 0.04f)) setResolutionScale(1.00f);
-                            if (ImGui::MenuItem("125% (Super-Sampling)", nullptr, std::abs(m_resolutionScale - 1.25f) < 0.04f)) setResolutionScale(1.25f);
-                            if (ImGui::MenuItem("150% (Ultra DSR)", nullptr, std::abs(m_resolutionScale - 1.50f) < 0.04f)) setResolutionScale(1.50f);
-                            ImGui::EndMenu();
-                        }
-                        if (ImGui::MenuItem("Zresetuj uklad okien do domyslnego")) {
-                            s_userLeftPanelW  = 260.0f * s_uiScale;
-                            s_userRightPanelW = 310.0f * s_uiScale;
-                            s_userOutlinerH   = 240.0f * s_uiScale;
-                            s_userDrawerH     = 220.0f * s_uiScale;
-                            s_showPlaceActors = true;
-                            s_showOutliner    = true;
-                            s_showDetails     = true;
-                        }
-                        ImGui::Separator();
-                        if (ImGui::BeginMenu("FPS")) {
-                            int curFps = engine ? engine->getTargetFps() : 0;
-                            if (ImGui::MenuItem("30 FPS", nullptr, curFps == 30)) { if (engine) engine->setTargetFps(30); }
-                            if (ImGui::MenuItem("60 FPS", nullptr, curFps == 60)) { if (engine) engine->setTargetFps(60); }
-                            if (ImGui::MenuItem("120 FPS", nullptr, curFps == 120)) { if (engine) engine->setTargetFps(120); }
-                            if (ImGui::MenuItem("240 FPS", nullptr, curFps == 240)) { if (engine) engine->setTargetFps(240); }
-                            if (ImGui::MenuItem("Unlimited (Brak limitu)", nullptr, curFps == 0)) { if (engine) engine->setTargetFps(0); }
-                            ImGui::Separator();
-                            bool vsync = engine ? engine->isVsyncEnabled() : true;
-                            if (ImGui::MenuItem("V-Sync", nullptr, vsync)) {
-                                if (engine) engine->setVsyncEnabled(!vsync);
-                            }
-                            ImGui::EndMenu();
-                        }
-                        if (ImGui::BeginMenu("Anti-Aliasing (FXAA 3.11)")) {
-                            if (ImGui::MenuItem("Off (Brak AA)", nullptr, m_antiAliasingMode == 0)) m_antiAliasingMode = 0;
-                            if (ImGui::MenuItem("FXAA Fast", nullptr, m_antiAliasingMode == 1)) m_antiAliasingMode = 1;
-                            if (ImGui::MenuItem("FXAA Quality (Subpixel)", nullptr, m_antiAliasingMode == 2)) m_antiAliasingMode = 2;
-                            if (ImGui::MenuItem("FXAA Ultra", nullptr, m_antiAliasingMode == 3)) m_antiAliasingMode = 3;
-                            ImGui::EndMenu();
-                        }
-                        ImGui::EndMenu();
-                    }
-                    if (ImGui::BeginMenu("Tools")) {
-                        if (ImGui::MenuItem("Execute QuickJS Script")) s_showScriptStudio = true;
-                        if (ImGui::MenuItem("Export TypeScript (.d.ts)") && engine) engine->exportTypeDefinitions();
-                        ImGui::EndMenu();
-                    }
-
-                    const float projOffset = screenW * 0.52f;
-                    if (ImGui::GetCursorPosX() < projOffset) ImGui::SameLine(projOffset);
-                    ImGui::TextDisabled("Renderer:");
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Vulkan 1.3 Cubemap IBL + Kulla-Conty PBR");
-                    ImGui::EndMenuBar();
-                }
-                ImGui::End();
-                ImGui::PopStyleColor(2);
-                ImGui::PopStyleVar();
-
-                // 2. LEVEL TABS STRIP
-                ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.043f, 0.067f, 1.0f));
-                ImGui::Begin("LevelTabsStrip", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
-
-                const std::string curPreset = engine ? engine->getCurrentPreset() : "empty";
-                ImVec2 tabStart = ImGui::GetCursorScreenPos();
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.086f, 0.086f, 0.125f, 1.0f));
-                if (ImGui::Button("    CzystyPoziom.scene  (Persistent)   x ", ImVec2(0, topLevelTabsH - 4.0f)) && engine) {
-                    selectedEnt = entt::null;
-                    engine->resetScene(curPreset);
-                }
-                ImGui::PopStyleColor();
-                ImVec2 tabEnd = ImGui::GetItemRectMax();
-                ImGui::GetWindowDrawList()->AddLine(tabStart, ImVec2(tabEnd.x, tabStart.y), IM_COL32(0, 130, 240, 255), 2.0f);
-                drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * s_uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
-
-                ImGui::End();
-                ImGui::PopStyleColor();
-                ImGui::PopStyleVar();
-            }
-
-            // 3. MAIN TOOLBAR (Stacja kontroli symulacji, zapis i perspektywa)
-            ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH + topLevelTabsH), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(screenW, topToolbarH), ImGuiCond_Always);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 5));
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.082f, 1.0f));
-            ImGui::Begin("MainToolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
-
-            const float btnH = topToolbarH - 10.0f;
-
-            // Zapisz projekt z ikona dysku
-            ImVec2 sPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Zapisz ", ImVec2(0, btnH))) saveCurrentGame();
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * s_uiScale, sPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zapisz biezacy stan projektu [Ctrl+S]");
-            ImGui::SameLine();
-
-            // Studio Skryptow
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.72f, 1.0f, 1.0f));
-            if (ImGui::Button(" </> Skrypty ", ImVec2(0, btnH))) s_showScriptStudio = !s_showScriptStudio;
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Otworz QuickJS ESM Live Coding & Skrypty (F4)");
-            ImGui::SameLine();
-
-            // Szybki dostep do oswietlenia i renderera
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.32f, 1.0f));
-            ImVec2 gPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { m_detailsTab = 1; s_showDetails = true; }
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * s_uiScale, gPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
-
-            // Centrum sterowania symulacja (Simulation Transport Dock)
-            const float transportPos = screenW * 0.44f;
-            if (ImGui::GetCursorPosX() < transportPos) ImGui::SameLine(transportPos);
-            const bool isPaused = engine ? engine->isPaused() : true;
-
-            ImVec2 plPos = ImGui::GetCursorScreenPos();
-            if (!isPaused) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.55f, 0.25f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                if (ImGui::Button("     PLAYING ", ImVec2(0, btnH)) && engine) engine->playSimulation();
-                ImGui::PopStyleColor(2);
-            } else {
-                if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) engine->playSimulation();
-            }
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * s_uiScale, plPos.y + btnH * 0.5f), 5.0f * s_uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Uruchom symulacje fizyki Jolt i skrypty");
-            ImGui::SameLine();
-
-            ImVec2 paPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Pauza ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * s_uiScale, paPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wstrzymaj symulacje fizyki");
-            ImGui::SameLine();
-
-            ImVec2 stPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) engine->stopSimulation();
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * s_uiScale, stPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
-            ImGui::SameLine();
-
-            if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wykonaj krok symulacji o 1 klatke fizyki (1/60s)");
-
-            // Wybor perspektywy kamery po prawej stronie paska
-            ImGui::SameLine(screenW - 170.0f * s_uiScale);
-            static int s_camMode = 0;
-            const char* camModes[] = { "Perspektywa", "Ortogonalna" };
-            ImGui::SetNextItemWidth(155.0f * s_uiScale);
-            ImGui::Combo("##CameraModeCombo", &s_camMode, camModes, IM_ARRAYSIZE(camModes));
-
-            ImGui::End();
-            ImGui::PopStyleColor();
-            ImGui::PopStyleVar();
-
-            // 4A. FAR-LEFT TOOL DOCK & 4B. PLACE ACTORS PALETTE
-            const float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (36.0f * s_uiScale) : 0.0f;
-            if (!s_immersivePlay && s_showPlaceActors) {
-                ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(toolDockW, contentH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.055f, 0.075f, 1.0f));
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * s_uiScale, 8.0f * s_uiScale));
-                ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-
-                static int s_activeToolMode = 1;
-                const VectorIconType dockIcons[6] = {
-                    VectorIconType::Pointer, VectorIconType::Cube, VectorIconType::Mountain,
-                    VectorIconType::Leaf, VectorIconType::Brush, VectorIconType::Gear
-                };
-                const float itemSz = 26.0f * s_uiScale;
-                for (int i = 0; i < 6; ++i) {
-                    ImGui::PushID(200 + i);
-                    const bool active = (s_activeToolMode == i);
-                    ImVec2 p = ImGui::GetCursorScreenPos();
-                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
-                    if (ImGui::Button("##DockBtn", ImVec2(itemSz, itemSz))) {
-                        s_activeToolMode = i;
-                        if (i == 5) { m_detailsTab = 1; s_showDetails = true; }
-                    }
-                    ImGui::PopStyleColor();
-                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
-                    ImGui::PopID();
-                    ImGui::Spacing();
-                }
-                ImGui::End();
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
-
-                const float placePanelW = leftPanelW - toolDockW;
-                ImGui::SetNextWindowPos(ImVec2(toolDockW, topTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
-                ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
-                ImGui::SameLine(placePanelW - 22.0f * s_uiScale);
-                if (ImGui::SmallButton("<")) s_showPlaceActors = false;
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin panel Place Actors");
-                static char classSearch[64] = "";
-                ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
-                ImGui::Separator();
-
-                auto spawnCard = [&](const char* title, const char* desc, int spawnType, VectorIconType iconType, ImU32 iconCol) {
-                    if (classSearch[0] != '\0') {
-                        std::string tL = title, sL = classSearch;
-                        std::transform(tL.begin(), tL.end(), tL.begin(), ::tolower);
-                        std::transform(sL.begin(), sL.end(), sL.begin(), ::tolower);
-                        if (tL.find(sL) == std::string::npos) return;
-                    }
-                    ImGui::PushID(title);
-                    const float cardH = 38.0f * s_uiScale;
-                    ImGui::BeginChild(title, ImVec2(0, cardH), true, ImGuiWindowFlags_NoScrollbar);
-                    ImDrawList* cdl = ImGui::GetWindowDrawList();
-                    ImVec2 cPos = ImGui::GetWindowPos();
-                    const float tileSz = 26.0f * s_uiScale;
-                    ImVec2 tileMin(cPos.x + 5.0f * s_uiScale, cPos.y + (cardH - tileSz) * 0.5f);
-                    cdl->AddRectFilled(tileMin, ImVec2(tileMin.x + tileSz, tileMin.y + tileSz), IM_COL32(18, 24, 34, 255), 4.0f);
-                    drawEditorVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
-
-                    ImGui::SetCursorPos(ImVec2(36.0f * s_uiScale, 3.5f * s_uiScale));
-                    ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", title);
-                    ImGui::SetCursorPos(ImVec2(36.0f * s_uiScale, 19.0f * s_uiScale));
-                    ImGui::TextColored(ImVec4(0.58f, 0.64f, 0.74f, 1.0f), "%s", desc);
-                    ImGui::EndChild();
-                    const bool clicked = ImGui::IsItemClicked();
-                    ImGui::PopID();
-
-                    if (clicked) {
-                        auto entity = registry.createEntity();
-                        glm::vec3 spawnPos = camPos + front * 7.0f;
-                        if (spawnPos.y < 0.5f) spawnPos.y = 0.5f;
-
-                        if (spawnType == 0) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PlatformBlock"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos, glm::vec3(0.0f), glm::vec3(2.0f, 0.8f, 2.0f));
-                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{2});
-                            ecs::RigidBodyComponent rb; rb.mass = 0.0f; rb.shapeType = 0;
-                            registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
-                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.2f, 0.45f, 0.75f, 1.0f); mat.roughness = 0.45f;
-                            registry.get().emplace<ecs::MaterialComponent>(entity, mat);
-                        } else if (spawnType == 1) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"Player"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(spawnPos.x, std::max(2.0f, spawnPos.y), spawnPos.z));
-                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{2});
-                            ecs::RigidBodyComponent rb; rb.mass = 1.0f; rb.shapeType = 2; rb.capsuleRadius = 0.6f; rb.capsuleHalfHeight = 0.8f;
-                            rb.lockRotationX = true; rb.lockRotationZ = true;
-                            registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
-                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.0f, 0.85f, 1.0f, 1.0f); mat.metallic = 0.25f; mat.roughness = 0.25f;
-                            registry.get().emplace<ecs::MaterialComponent>(entity, mat);
-                        } else if (spawnType == 3) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PointLight"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 2.5f, 0.0f));
-                            registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"point", glm::vec3(1.0f, 0.95f, 0.8f), 4.0f, 20.0f});
-                        } else if (spawnType == 7) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"ChromeSphere"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 2.0f, 0.0f));
-                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{3});
-                            ecs::RigidBodyComponent rb; rb.mass = 1.0f; rb.shapeType = 1; rb.restitution = 0.75f;
-                            registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
-                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.95f, 0.82f, 0.55f, 1.0f); mat.metallic = 1.0f; mat.roughness = 0.08f;
-                            registry.get().emplace<ecs::MaterialComponent>(entity, mat);
-                        } else if (spawnType == 8) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"FireVFX"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos);
-                            registry.get().emplace<ecs::ParticleEmitterComponent>(entity, ecs::ParticleEmitterComponent{"fire", glm::vec3(1.0f, 0.4f, 0.0f), 200, 3.0f, 0.4f});
-                        } else if (spawnType == 9) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"DirectionalLight (Sun)"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, camPos + glm::vec3(0.0f, 12.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));
-                            registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"directional", glm::vec3(1.0f, 0.98f, 0.92f), 3.5f, 0.0f});
-                        } else if (spawnType == 10) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"SpotLight"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 4.0f, 0.0f), glm::vec3(-60.0f, 0.0f, 0.0f), glm::vec3(1.0f));
-                            registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"spot", glm::vec3(1.0f, 0.95f, 0.85f), 5.0f, 25.0f, 25.0f, 40.0f, 2.0f, 2.0f});
-                        } else if (spawnType == 11) {
-                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"AreaLight"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 3.5f, 0.0f), glm::vec3(-45.0f, 0.0f, 0.0f), glm::vec3(1.0f));
-                            registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"area", glm::vec3(1.0f, 0.98f, 0.95f), 6.0f, 20.0f, 25.0f, 40.0f, 3.0f, 2.0f});
-                        }
-                        selectedEnt = entity;
-                        if (engine) engine->setSelectedEntity(selectedEnt);
-                    }
-                };
-
-                ImGui::BeginChild("PlaceActorListScroll", ImVec2(0, 0), false);
-                spawnCard("Platform Cube",     "Static Jolt Box Actor",            0,  VectorIconType::Cube,      IM_COL32(148, 163, 184, 255));
-                spawnCard("PBR Sphere",        "Metallic GGX / IBL Test Sphere",   7,  VectorIconType::TriggerSphere, IM_COL32(250, 204, 21, 255));
-                spawnCard("Character (WASD)",  "Controllable Capsule Player",      1,  VectorIconType::Character, IM_COL32(52, 211, 153, 255));
-                spawnCard("Directional Light", "4-Cascade Vogel PCF Sun",          9,  VectorIconType::Light,     IM_COL32(250, 204, 21, 255));
-                spawnCard("Point Light",       "Omnidirectional Shadow Light",     3,  VectorIconType::Light,     IM_COL32(250, 204, 21, 255));
-                spawnCard("Spot Light",        "Conical Spotlight Emitter",        10, VectorIconType::Light,     IM_COL32(245, 158, 11, 255));
-                spawnCard("Area Light",        "Karis Rectangular Emitter",        11, VectorIconType::Light,     IM_COL32(56, 189, 248, 255));
-                spawnCard("Fire VFX",          "Soft Gaussian HDR Particles",      8,  VectorIconType::Sparkles,  IM_COL32(251, 146, 60, 255));
-                ImGui::EndChild();
-
-                ImGui::End();
-                ImGui::PopStyleColor();
-            }
 
             // 5. CENTER PANEL: BORDERLESS 3D VIEWPORT
             ImGui::SetNextWindowPos(ImVec2(leftPanelW, topTotalH), ImGuiCond_Always);
@@ -872,9 +514,9 @@ namespace engine::renderer {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
                 }
                 if (!s_isRmbNavigating) {
-                    if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = NativeGizmoMode::TRANSLATE;
-                    if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = NativeGizmoMode::ROTATE;
-                    if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = NativeGizmoMode::SCALE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = EditorGizmoMode::ROTATE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = EditorGizmoMode::SCALE;
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_F) && selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
                     const auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
@@ -1012,7 +654,7 @@ namespace engine::renderer {
 
             if (s_draggingGizmoAxis > 0 && hasSelectedTransform) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                if (s_gizmoMode == EditorGizmoMode::TRANSLATE) {
                     glm::vec3 curRayOrig, curRayDir;
                     getRayFromScreen(mousePos, curRayOrig, curRayDir);
                     const float denom = glm::dot(curRayDir, s_dragPlaneNormal);
@@ -1030,7 +672,7 @@ namespace engine::renderer {
                             if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                         }
                     }
-                } else if (s_gizmoMode == NativeGizmoMode::ROTATE) {
+                } else if (s_gizmoMode == EditorGizmoMode::ROTATE) {
                     const float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.14159265f);
                     float dAngle = curAngle - s_lastRotAngle;
                     while (dAngle > 180.0f) dAngle -= 360.0f;
@@ -1044,7 +686,7 @@ namespace engine::renderer {
                     else if (s_draggingGizmoAxis == 3) t.rotation.z += finalAngle;
                     t.orientation = glm::quat(glm::radians(t.rotation));
                     if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                } else if (s_gizmoMode == EditorGizmoMode::SCALE) {
                     float scaleFactor = hypotf(mousePos.x - s_dragPivotScreen.x, mousePos.y - s_dragPivotScreen.y) / s_dragInitialDist;
                     if (s_snapEnabled) scaleFactor = std::max(0.1f, std::round(scaleFactor / 0.25f) * 0.25f);
                     if (s_draggingGizmoAxis == 1) t.scale.x = std::max(0.01f, s_dragInitialScale.x * scaleFactor);
@@ -1054,39 +696,12 @@ namespace engine::renderer {
                 }
             }
 
-            if (s_isRmbNavigating && engine) {
-                float sens = engine->getPreferences().camMouseSensitivity;
-                float yDelta = ImGui::GetIO().MouseDelta.y * sens;
-                if (engine->getPreferences().invertY) yDelta = -yDelta;
-                camYaw += ImGui::GetIO().MouseDelta.x * sens;
-                camPitch = glm::clamp(camPitch - yDelta, -89.0f, 89.0f);
-                const glm::vec3 cf = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                const glm::vec3 cr = glm::normalize(glm::cross(cf, glm::vec3(0.0f, 1.0f, 0.0f)));
-                float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed / 4.0f);
-                if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) speed *= 3.0f;
-                if (ImGui::IsKeyDown(ImGuiKey_W)) camPos += cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_S)) camPos -= cf * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_A)) camPos -= cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_D)) camPos += cr * speed;
-                if (ImGui::IsKeyDown(ImGuiKey_E)) camPos.y += speed;
-                if (ImGui::IsKeyDown(ImGuiKey_Q)) camPos.y -= speed;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isMmbPanning && engine) {
-                camPos -= (right * ImGui::GetIO().MouseDelta.x - up * ImGui::GetIO().MouseDelta.y) * 0.04f;
-                engine->setCamera(camPos, camYaw, camPitch, camFov);
-            }
-            if (s_isAltOrbiting && engine) {
-                const glm::vec3 pivot = hasSelectedTransform ? registry.get().get<ecs::TransformComponent>(selectedEnt).position : (camPos + front * 10.0f);
-                const float orbitDist = std::max(0.5f, glm::length(camPos - pivot));
-                camYaw += ImGui::GetIO().MouseDelta.x * 0.25f;
-                camPitch = glm::clamp(camPitch - ImGui::GetIO().MouseDelta.y * 0.25f, -89.0f, 89.0f);
-                const glm::vec3 of = glm::normalize(glm::vec3(cosf(glm::radians(camYaw)) * cosf(glm::radians(camPitch)), sinf(glm::radians(camPitch)), sinf(glm::radians(camYaw)) * cosf(glm::radians(camPitch))));
-                engine->setCamera(pivot - of * orbitDist, camYaw, camPitch, camFov);
-            }
-            if (isHovered && std::abs(ImGui::GetIO().MouseWheel) > 0.01f && engine) {
-                engine->setCamera(camPos + front * (ImGui::GetIO().MouseWheel * 3.0f), camYaw, camPitch, camFov);
-            }
+            EditorCameraNavigationState cameraNavigationState{
+                s_isRmbNavigating, s_isMmbPanning, s_isAltOrbiting, isHovered,
+                hasSelectedTransform, s_camFlySpeed, s_cameraSpeed,
+                selectedEnt, camPos, front, right, up, camYaw, camPitch, camFov
+            };
+            drawEditorCameraNavigation(engine, registry, cameraNavigationState);
 
             // Ikony świateł 3D w stylu Blender / UE5
             {
@@ -1124,58 +739,11 @@ namespace engine::renderer {
                 }
             }
 
-            if (!s_immersivePlay) {
-                // Pigułka narzędzi Gizmo (lewy górny róg Viewportu)
-                ImGui::SetCursorPos(ImVec2(10.0f * s_uiScale, 10.0f * s_uiScale));
-                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
-                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                const float leftOverlayW = (s_showPlaceActors ? 270.0f : 345.0f) * s_uiScale;
-                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(leftOverlayW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
-                if (!s_showPlaceActors) {
-                    if (ImGui::Button("> Aktorzy", ImVec2(0, 22.0f * s_uiScale))) s_showPlaceActors = true;
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin panel Place Actors");
-                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-                }
-                auto gizmoToolBtn = [&](const char* id, NativeGizmoMode mode, VectorIconType icon) {
-                    const bool active = (s_gizmoMode == mode);
-                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.47f, 0.83f, 1.0f) : ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
-                    ImVec2 p = ImGui::GetCursorScreenPos();
-                    const float sz = 22.0f * s_uiScale;
-                    if (ImGui::Button(id, ImVec2(sz, sz))) s_gizmoMode = mode;
-                    ImGui::PopStyleColor();
-                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f), 5.2f * s_uiScale, icon, IM_COL32(255, 255, 255, 245));
-                    ImGui::SameLine(0.0f, 3.0f * s_uiScale);
-                };
-                gizmoToolBtn("##GizT", NativeGizmoMode::TRANSLATE, VectorIconType::Translate);
-                gizmoToolBtn("##GizR", NativeGizmoMode::ROTATE,    VectorIconType::Rotate);
-                gizmoToolBtn("##GizS", NativeGizmoMode::SCALE,     VectorIconType::Scale);
-                if (ImGui::Button(s_snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * s_uiScale))) s_snapEnabled = !s_snapEnabled;
-                ImGui::SameLine();
-                if (ImGui::Button((" Cam " + std::to_string(s_cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * s_uiScale))) s_cameraSpeed = (s_cameraSpeed % 8) + 1;
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
-
-                // Pigułka statusu (prawy górny róg Viewportu)
-                const float trPillW = ((s_showOutliner || s_showDetails) ? 350.0f : 435.0f) * s_uiScale;
-                ImGui::SetCursorPos(ImVec2(std::max(10.0f, viewportPanelSize.x - trPillW - 10.0f * s_uiScale), 10.0f * s_uiScale));
-                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
-                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                ImGui::BeginChild("VpOverlayTopRight", ImVec2(trPillW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
-                if (!s_showOutliner && !s_showDetails) {
-                    if (ImGui::Button("Inspektor <", ImVec2(0, 22.0f * s_uiScale))) { s_showOutliner = true; s_showDetails = true; }
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin prawy panel inspektora");
-                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-                }
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Cubemap IBL + ACES");
-                ImGui::SameLine();
-                ImGui::TextDisabled("|");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.20f, 0.92f, 0.58f, 1.0f), "%ux%u (EV %.2f)", m_width, m_height, m_exposure);
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
-            }
+            EditorViewportOverlayState viewportOverlayState{
+                s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
+                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode
+            };
+            drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
             ImGui::End();
             ImGui::PopStyleColor();
@@ -1199,301 +767,17 @@ namespace engine::renderer {
                                    s_uiScale, ImGui::GetIO().Framerate, m_width, m_height);
 
 
-            if (s_showScriptStudio) {
-                ImGui::SetNextWindowSize(ImVec2(750 * s_uiScale, 520 * s_uiScale), ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(360 * s_uiScale, 240 * s_uiScale), ImVec2(screenW, screenH));
-                if (ImGui::Begin("Blueprints / QuickJS Script Studio", &s_showScriptStudio)) {
-                    static char scriptBuf[16384] = "";
-                    static bool s_scriptInit = false;
-                    if (engine && (!s_scriptInit || scriptBuf[0] == '\0')) {
-                        s_scriptInit = true;
-                        const std::string code = engine->getCurrentScript();
-                        std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
-                    }
-                    if (ImGui::Button(" Zastosuj i Uruchom Skrypt ") && engine) {
-                        engine->loadScript(scriptBuf);
-                        engine->setCurrentScript(scriptBuf);
-                    }
-                    ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
-                }
-                ImGui::End();
-            }
-
-            if (s_showPreferencesWindow && engine) {
-                ImGui::SetNextWindowSize(ImVec2(820 * s_uiScale, 560 * s_uiScale), ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(500 * s_uiScale, 380 * s_uiScale), ImVec2(screenW, screenH));
-                if (ImGui::Begin("Editor Preferences (Preferencje Edytora)###EditorPrefsDialog", &s_showPreferencesWindow, ImGuiWindowFlags_NoCollapse)) {
-                    auto& pref = engine->getPreferences();
-
-                    // Header
-                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  LUCID ENGINE - PREFERENCJE I KONFIGURACJA UZYTKOWNIKA");
-                    ImGui::TextDisabled("  Zarzadzaj ukladem UI, sterowaniem kamera, grafika Vulkana i zachowaniem edytora.");
-                    ImGui::Separator();
-
-                    static int s_prefCategory = 0; // 0=UI, 1=Camera, 2=Graphics, 3=Audio, 4=Storage
-                    const float leftColW = 190.0f * s_uiScale;
-
-                    ImGui::Columns(2, "PrefsColumns", true);
-                    ImGui::SetColumnWidth(0, leftColW);
-
-                    // Category List (Left side)
-                    const char* categories[] = {
-                        "  Interfejs (UI)",
-                        "  Kamera i Viewport",
-                        "  Grafika i Vulkan",
-                        "  Dzwiek (Audio)",
-                        "  Zapis i Projekty"
-                    };
-
-                    for (int i = 0; i < 5; ++i) {
-                        bool selected = (s_prefCategory == i);
-                        if (ImGui::Selectable(categories[i], selected, 0, ImVec2(0, 28.0f * s_uiScale))) {
-                            s_prefCategory = i;
-                        }
-                    }
-
-                    ImGui::NextColumn();
-
-                    // Details Panel (Right side)
-                    ImGui::BeginChild("PrefDetailsChild", ImVec2(0, -42.0f * s_uiScale), true);
-
-                    if (s_prefCategory == 0) {
-                        // Category 0: UI & Layout
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "UKLAD I SKALA INTERFEJSU");
-                        ImGui::Separator();
-
-                        float curUiScale = pref.uiScale;
-                        if (ImGui::SliderFloat("Skala Interfejsu (UI Scale)", &curUiScale, 0.70f, 2.0f, "%.2fx")) {
-                            pref.uiScale = curUiScale;
-                            m_uiScale = curUiScale;
-                            engine->setUiScale(curUiScale);
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("100%")) { pref.uiScale = 1.0f; m_uiScale = 1.0f; engine->setUiScale(1.0f); }
-                        ImGui::SameLine();
-                        if (ImGui::Button("125%")) { pref.uiScale = 1.25f; m_uiScale = 1.25f; engine->setUiScale(1.25f); }
-                        ImGui::SameLine();
-                        if (ImGui::Button("150%")) { pref.uiScale = 1.50f; m_uiScale = 1.50f; engine->setUiScale(1.50f); }
-
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Widocznosc domyslna paneli:");
-                        if (ImGui::Checkbox("Place Actors (Aktorzy)", &pref.showPlaceActors)) s_showPlaceActors = pref.showPlaceActors;
-                        if (ImGui::Checkbox("Outliner (Drzewo sceny)", &pref.showOutliner)) s_showOutliner = pref.showOutliner;
-                        if (ImGui::Checkbox("Details (Wlasciwosci / Inspektor)", &pref.showDetails)) s_showDetails = pref.showDetails;
-                        if (ImGui::Checkbox("Content Drawer (Przegladarka assetow)", &pref.showContentDrawer)) s_showContentDrawer = pref.showContentDrawer;
-                        if (ImGui::Checkbox("Output Log (Konsola logow)", &pref.showOutputLog)) s_showOutputLog = pref.showOutputLog;
-                        if (ImGui::Checkbox("Blueprints / QuickJS Studio", &pref.showScriptStudio)) s_showScriptStudio = pref.showScriptStudio;
-
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Wymiary paneli:");
-                        if (ImGui::SliderFloat("Szerokosc panelu lewego", &s_userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = s_userLeftPanelW;
-                        if (ImGui::SliderFloat("Szerokosc panelu prawego", &s_userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = s_userRightPanelW;
-                        if (ImGui::SliderFloat("Wysokosc Outlinera", &s_userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = s_userOutlinerH;
-                        if (ImGui::SliderFloat("Wysokosc dolnej szuflady", &s_userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = s_userDrawerH;
-
-                        ImGui::Spacing();
-                        if (ImGui::Button(" Zresetuj uklad paneli do domyslnego ")) {
-                            s_userLeftPanelW  = 260.0f * s_uiScale;
-                            s_userRightPanelW = 310.0f * s_uiScale;
-                            s_userOutlinerH   = 240.0f * s_uiScale;
-                            s_userDrawerH     = 220.0f * s_uiScale;
-                            s_showPlaceActors = true;
-                            s_showOutliner    = true;
-                            s_showDetails     = true;
-                            pref.userLeftPanelW  = s_userLeftPanelW;
-                            pref.userRightPanelW = s_userRightPanelW;
-                            pref.userOutlinerH   = s_userOutlinerH;
-                            pref.userDrawerH     = s_userDrawerH;
-                            pref.showPlaceActors = true;
-                            pref.showOutliner    = true;
-                            pref.showDetails     = true;
-                        }
-
-                        ImGui::Spacing();
-                        ImGui::Checkbox("Automatycznie zapisuj preferencje przy zmianach", &pref.autoSavePreferences);
-
-                    } else if (s_prefCategory == 1) {
-                        // Category 1: Camera & Viewport
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "STEROWANIE I NAWIGACJA W VIEWPORCIE");
-                        ImGui::Separator();
-
-                        if (ImGui::SliderFloat("Bazowa predkosc kamery (Fly Speed)", &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) s_camFlySpeed = pref.camFlySpeed;
-                        if (ImGui::SliderInt("Mnoznik biegu kamery (1..8)", &pref.cameraSpeed, 1, 8)) s_cameraSpeed = pref.cameraSpeed;
-                        ImGui::SliderFloat("Czulosz myszy (Mouse Sensitivity)", &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
-                        ImGui::Checkbox("Odwroc os pionowa (Invert Mouse Y)", &pref.invertY);
-
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Przyciaganie (Snapping) & Transformacja:");
-                        if (ImGui::Checkbox("Wlacz przyciaganie do siatki (Grid Snap)", &pref.snapEnabled)) s_snapEnabled = pref.snapEnabled;
-                        if (ImGui::InputFloat("Krok przyciagania (Snap Step)", &pref.snapStep, 0.1f, 1.0f, "%.2f")) s_snapStep = pref.snapStep;
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("0.25")) { pref.snapStep = 0.25f; s_snapStep = 0.25f; }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("0.50")) { pref.snapStep = 0.50f; s_snapStep = 0.50f; }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("1.00")) { pref.snapStep = 1.00f; s_snapStep = 1.00f; }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("2.00")) { pref.snapStep = 2.00f; s_snapStep = 2.00f; }
-
-                        if (ImGui::Checkbox("Uklad lokalny gizmo (Local Space)", &pref.gizmoSpaceLocal)) s_gizmoSpaceLocal = pref.gizmoSpaceLocal;
-
-                    } else if (s_prefCategory == 2) {
-                        // Category 2: Graphics & Rendering
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "USTAWIENIA GRAFIKI I VULKANA");
-                        ImGui::Separator();
-
-                        const char* fpsLabels[] = {"Bez limitu (Unlimited)", "30 FPS", "60 FPS", "120 FPS", "240 FPS"};
-                        int fpsValues[] = {0, 30, 60, 120, 240};
-                        int curFpsIdx = 0;
-                        for (int f = 0; f < 5; ++f) {
-                            if (pref.targetFps == fpsValues[f]) { curFpsIdx = f; break; }
-                        }
-                        if (ImGui::Combo("Limit FPS", &curFpsIdx, fpsLabels, 5)) {
-                            pref.targetFps = fpsValues[curFpsIdx];
-                            engine->setTargetFps(pref.targetFps);
-                        }
-
-                        if (ImGui::Checkbox("V-Sync (Synchronizacja pionowa)", &pref.vsync)) {
-                            engine->setVsyncEnabled(pref.vsync);
-                        }
-
-                        const char* aaLabels[] = {"Wylaczony (Off)", "FXAA Fast (Szybki)", "FXAA Quality (Wysoka jakosc)", "FXAA Ultra (Maksymalny)"};
-                        if (ImGui::Combo("Antyaliasing (AA)", &pref.antiAliasingMode, aaLabels, 4)) {
-                            m_antiAliasingMode = pref.antiAliasingMode;
-                            setAntiAliasingMode(pref.antiAliasingMode);
-                        }
-
-                        if (ImGui::SliderFloat("Skala rozdzielczosci (Resolution Scale)", &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
-                            setResolutionScale(pref.resolutionScale);
-                        }
-                        ImGui::Checkbox("Automatyczne dopasowanie rozdzielczosci do Viewportu", &pref.autoViewportResolution);
-
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Efekty Post-Process & Oswietlenie:");
-
-                        if (ImGui::SliderFloat("Zasieg cieni (Shadow Distance)", &pref.shadowDistance, 20.0f, 200.0f, "%.0f m")) {
-                            setShadowDistance(pref.shadowDistance);
-                        }
-
-                        if (ImGui::Checkbox("Bloom", &pref.bloomEnabled)) setBloomEnabled(pref.bloomEnabled);
-                        if (pref.bloomEnabled) {
-                            if (ImGui::SliderFloat("  Intensywnosc Bloom", &pref.bloomIntensity, 0.0f, 3.0f, "%.2f")) setBloomIntensity(pref.bloomIntensity);
-                            if (ImGui::SliderFloat("  Prog Bloom (Threshold)", &pref.bloomThreshold, 0.1f, 5.0f, "%.2f")) setBloomThreshold(pref.bloomThreshold);
-                        }
-
-                        if (ImGui::Checkbox("GTAO (Ground-Truth Ambient Occlusion)", &pref.gtaoEnabled)) setGtaoEnabled(pref.gtaoEnabled);
-                        if (pref.gtaoEnabled) {
-                            if (ImGui::SliderFloat("  Promien GTAO (Radius)", &pref.gtaoRadius, 0.1f, 3.0f, "%.2f m")) setGtaoRadius(pref.gtaoRadius);
-                            if (ImGui::SliderFloat("  Intensywnosc GTAO", &pref.gtaoIntensity, 0.0f, 3.0f, "%.2f")) setGtaoIntensity(pref.gtaoIntensity);
-                        }
-
-                        bool rtSupported = m_context && m_context->isRayTracingSupported();
-                        if (rtSupported) {
-                            if (ImGui::Checkbox("Hardware Ray Tracing (RTX / Vulkan KHR)", &pref.rayTracingEnabled)) {
-                                setRayTracingEnabled(pref.rayTracingEnabled);
-                            }
-                        } else {
-                            ImGui::TextDisabled("Hardware Ray Tracing: Niedostepne na tym GPU");
-                        }
-
-                        if (ImGui::SliderFloat("Ekspozycja (Exposure)", &pref.exposure, 0.1f, 5.0f, "%.2f")) {
-                            setExposure(pref.exposure);
-                        }
-
-                    } else if (s_prefCategory == 3) {
-                        // Category 3: Audio
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "GLOSNOSC I SYSTEM AUDIO");
-                        ImGui::Separator();
-
-                        ImGui::SliderFloat("Glosnosc glowna (Master Volume)", &pref.masterVolume, 0.0f, 1.0f, "%.0f%%");
-                        ImGui::SliderFloat("Efekty dzwiekowe (SFX Volume)", &pref.sfxVolume, 0.0f, 1.0f, "%.0f%%");
-
-                        ImGui::Spacing();
-                        ImGui::TextDisabled("System: Spatial 3D Audio Engine (Doppler, Distance Attenuation)");
-
-                    } else if (s_prefCategory == 4) {
-                        // Category 4: Storage & Projects
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "PLIKI, PROJEKTY I ZAPIS");
-                        ImGui::Separator();
-
-                        static char projPathBuf[512] = "";
-                        static bool s_projBufInit = false;
-                        if (!s_projBufInit) {
-                            s_projBufInit = true;
-                            std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
-                        }
-                        if (ImGui::InputText("Ostatni projekt", projPathBuf, sizeof(projPathBuf))) {
-                            pref.lastProjectPath = projPathBuf;
-                        }
-                        ImGui::Checkbox("Automatycznie wczytuj ostatni projekt przy starcie", &pref.loadLastProjectOnStartup);
-
-                        ImGui::Spacing();
-                        ImGui::Separator();
-                        ImGui::TextDisabled("Sciezka pliku konfiguracyjnego:");
-                        ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "%s", pref.getDefaultConfigPath().c_str());
-
-                        const bool fileExists = std::filesystem::exists(pref.getDefaultConfigPath());
-                        ImGui::TextDisabled("Status pliku na dysku: %s", fileExists ? "Istnieje (Zapisany)" : "Brak (Zostanie utworzony)");
-                    }
-
-                    ImGui::EndChild();
-
-                    // Bottom Action Bar
-                    ImGui::Separator();
-                    if (ImGui::Button(" 💾 Zapisz preferencje (Save) ")) {
-                        // Sync current UI state into pref
-                        pref.uiScale = m_uiScale;
-                        pref.showPlaceActors = s_showPlaceActors;
-                        pref.showOutliner = s_showOutliner;
-                        pref.showDetails = s_showDetails;
-                        pref.showContentDrawer = s_showContentDrawer;
-                        pref.showOutputLog = s_showOutputLog;
-                        pref.showScriptStudio = s_showScriptStudio;
-                        pref.userLeftPanelW = s_userLeftPanelW;
-                        pref.userRightPanelW = s_userRightPanelW;
-                        pref.userOutlinerH = s_userOutlinerH;
-                        pref.userDrawerH = s_userDrawerH;
-                        pref.camFlySpeed = s_camFlySpeed;
-                        pref.cameraSpeed = s_cameraSpeed;
-                        pref.snapEnabled = s_snapEnabled;
-                        pref.snapStep = s_snapStep;
-                        pref.gizmoSpaceLocal = s_gizmoSpaceLocal;
-                        pref.lastProjectPath = s_currentProjectPath;
-
-                        bool ok = engine->saveUserPreferences();
-                        snprintf(s_engineNotification, sizeof(s_engineNotification),
-                                 ok ? "Zapisano preferencje do: %s" : "Blad zapisu preferencji!",
-                                 pref.getDefaultConfigPath().c_str());
-                        s_engineNotificationTimer = 4.0f;
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button(" ⚡ Zastosuj (Apply) ")) {
-                        engine->applyPreferences();
-                        snprintf(s_engineNotification, sizeof(s_engineNotification), "Zastosowano preferencje");
-                        s_engineNotificationTimer = 3.0f;
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button(" 🔄 Przywroc domyslne (Reset) ")) {
-                        engine->getPreferences() = core::EditorPreferences{};
-                        engine->applyPreferences();
-                        s_userLeftPanelW  = 260.0f * s_uiScale;
-                        s_userRightPanelW = 310.0f * s_uiScale;
-                        s_userOutlinerH   = 240.0f * s_uiScale;
-                        s_userDrawerH     = 220.0f * s_uiScale;
-                        s_showPlaceActors = true;
-                        s_showOutliner    = true;
-                        s_showDetails     = true;
-                        snprintf(s_engineNotification, sizeof(s_engineNotification), "Przywrocono ustawienia domyslne");
-                        s_engineNotificationTimer = 3.0f;
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button(" Zamknij (Close) ")) {
-                        s_showPreferencesWindow = false;
-                    }
-                    ImGui::Columns(1);
-                }
-                ImGui::End();
-            }
+            EditorPreferencesUiState preferencesUiState{
+                s_showPreferencesWindow, s_showScriptStudio,
+                s_showPlaceActors, s_showOutliner, s_showDetails,
+                s_showContentDrawer, s_showOutputLog,
+                s_uiScale, s_userLeftPanelW, s_userRightPanelW,
+                s_userOutlinerH, s_userDrawerH,
+                s_camFlySpeed, s_cameraSpeed, s_snapEnabled, s_snapStep,
+                s_gizmoSpaceLocal, s_currentProjectPath,
+                s_engineNotification, s_engineNotificationTimer
+            };
+            drawEditorPreferencesPanel(engine, preferencesUiState, screenW, screenH);
 
             if (s_engineNotificationTimer > 0.0f) {
                 s_engineNotificationTimer -= ImGui::GetIO().DeltaTime;

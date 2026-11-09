@@ -18,6 +18,12 @@ namespace engine {
 }
 
 namespace engine::renderer {
+
+    struct EditorPreferencesUiState;
+    struct EditorTopBarUiState;
+    struct EditorViewportOverlayState;
+    struct EditorCameraNavigationState;
+    enum class EditorGizmoMode;
     class VulkanRenderer {
     public:
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
@@ -147,6 +153,21 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
+        void drawEditorCameraNavigation(core::Engine* engine, ecs::Registry& registry,
+                                       EditorCameraNavigationState& state);
+        void drawEditorViewportOverlay(EditorViewportOverlayState& state, const glm::vec2& viewportPanelSize);
+        void drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiState& state,
+                                   float screenW, float topTitleBarH, float topLevelTabsH,
+                                   float topToolbarH, entt::entity& selectedEntity);
+        void drawEditorPreferencesPanel(core::Engine* engine, EditorPreferencesUiState& state,
+                                         float screenW, float screenH);
+        void drawEditorPlaceActorsPanel(ecs::Registry& registry, core::Engine* engine,
+                                        bool immersivePlay, bool& showPlaceActors, bool& showDetails,
+                                        float uiScale, float topTotalH, float contentH,
+                                        float leftPanelW, const glm::vec3& cameraPosition,
+                                        const glm::vec3& cameraForward,
+                                        entt::entity& selectedEntity);
+
         void drawEditorDetailsPanel(ecs::Registry& registry, core::Engine* engine,
                                     entt::entity& selectedEntity, bool immersivePlay,
                                     bool showDetails, bool showOutliner, float uiScale,
