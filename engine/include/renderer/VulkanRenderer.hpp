@@ -18,6 +18,8 @@ namespace engine {
 }
 
 namespace engine::renderer {
+
+    struct EditorPreferencesUiState;
     class VulkanRenderer {
     public:
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
@@ -147,6 +149,8 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
+        void drawEditorPreferencesPanel(core::Engine* engine, EditorPreferencesUiState& state,
+                                         float screenW, float screenH);
         void drawEditorPlaceActorsPanel(ecs::Registry& registry, core::Engine* engine,
                                         bool immersivePlay, bool& showPlaceActors, bool& showDetails,
                                         float uiScale, float topTotalH, float contentH,
