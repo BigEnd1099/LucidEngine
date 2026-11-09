@@ -148,7 +148,7 @@ namespace engine::renderer {
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
         void drawEditorPlaceActorsPanel(ecs::Registry& registry, core::Engine* engine,
-                                        bool immersivePlay, bool& showPlaceActors,
+                                        bool immersivePlay, bool& showPlaceActors, bool& showDetails,
                                         float uiScale, float topTotalH, float contentH,
                                         float leftPanelW, const glm::vec3& cameraPosition,
                                         const glm::vec3& cameraForward,

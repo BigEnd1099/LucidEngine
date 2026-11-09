@@ -12,18 +12,18 @@
 namespace engine::renderer {
 
 void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::Engine* engine,
-                                                bool immersivePlay, bool& showPlaceActors,
+                                                bool immersivePlay, bool& showPlaceActors, bool& showDetails,
                                                 float uiScale, float topTotalH, float contentH,
                                                 float leftPanelW, const glm::vec3& cameraPosition,
                                                 const glm::vec3& cameraForward,
                                                 entt::entity& selectedEntity) {
             // 4A. FAR-LEFT TOOL DOCK & 4B. PLACE ACTORS PALETTE
-            const float toolDockW = (!s_immersivePlay && s_showPlaceActors) ? (36.0f * s_uiScale) : 0.0f;
-            if (!s_immersivePlay && s_showPlaceActors) {
+            const float toolDockW = (!immersivePlay && showPlaceActors) ? (36.0f * uiScale) : 0.0f;
+            if (!immersivePlay && showPlaceActors) {
                 ImGui::SetNextWindowPos(ImVec2(0, topTotalH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(toolDockW, contentH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.055f, 0.075f, 1.0f));
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * s_uiScale, 8.0f * s_uiScale));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * uiScale, 8.0f * uiScale));
                 ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
                 static int s_activeToolMode = 1;
@@ -31,7 +31,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                     VectorIconType::Pointer, VectorIconType::Cube, VectorIconType::Mountain,
                     VectorIconType::Leaf, VectorIconType::Brush, VectorIconType::Gear
                 };
-                const float itemSz = 26.0f * s_uiScale;
+                const float itemSz = 26.0f * uiScale;
                 for (int i = 0; i < 6; ++i) {
                     ImGui::PushID(200 + i);
                     const bool active = (s_activeToolMode == i);
@@ -39,10 +39,10 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
                     if (ImGui::Button("##DockBtn", ImVec2(itemSz, itemSz))) {
                         s_activeToolMode = i;
-                        if (i == 5) { m_detailsTab = 1; s_showDetails = true; }
+                        if (i == 5) { m_detailsTab = 1; showDetails = true; }
                     }
                     ImGui::PopStyleColor();
-                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
+                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
                     ImGui::PopID();
                     ImGui::Spacing();
                 }
@@ -57,8 +57,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
-                ImGui::SameLine(placePanelW - 22.0f * s_uiScale);
-                if (ImGui::SmallButton("<")) s_showPlaceActors = false;
+                ImGui::SameLine(placePanelW - 22.0f * uiScale);
+                if (ImGui::SmallButton("<")) showPlaceActors = false;
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin panel Place Actors");
                 static char classSearch[64] = "";
                 ImGui::SetNextItemWidth(-1.0f);
@@ -73,18 +73,18 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                         if (tL.find(sL) == std::string::npos) return;
                     }
                     ImGui::PushID(title);
-                    const float cardH = 38.0f * s_uiScale;
+                    const float cardH = 38.0f * uiScale;
                     ImGui::BeginChild(title, ImVec2(0, cardH), true, ImGuiWindowFlags_NoScrollbar);
                     ImDrawList* cdl = ImGui::GetWindowDrawList();
                     ImVec2 cPos = ImGui::GetWindowPos();
-                    const float tileSz = 26.0f * s_uiScale;
-                    ImVec2 tileMin(cPos.x + 5.0f * s_uiScale, cPos.y + (cardH - tileSz) * 0.5f);
+                    const float tileSz = 26.0f * uiScale;
+                    ImVec2 tileMin(cPos.x + 5.0f * uiScale, cPos.y + (cardH - tileSz) * 0.5f);
                     cdl->AddRectFilled(tileMin, ImVec2(tileMin.x + tileSz, tileMin.y + tileSz), IM_COL32(18, 24, 34, 255), 4.0f);
-                    drawEditorVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
+                    drawEditorVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * uiScale, iconType, iconCol);
 
-                    ImGui::SetCursorPos(ImVec2(36.0f * s_uiScale, 3.5f * s_uiScale));
+                    ImGui::SetCursorPos(ImVec2(36.0f * uiScale, 3.5f * uiScale));
                     ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", title);
-                    ImGui::SetCursorPos(ImVec2(36.0f * s_uiScale, 19.0f * s_uiScale));
+                    ImGui::SetCursorPos(ImVec2(36.0f * uiScale, 19.0f * uiScale));
                     ImGui::TextColored(ImVec4(0.58f, 0.64f, 0.74f, 1.0f), "%s", desc);
                     ImGui::EndChild();
                     const bool clicked = ImGui::IsItemClicked();
@@ -92,7 +92,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
 
                     if (clicked) {
                         auto entity = registry.createEntity();
-                        glm::vec3 spawnPos = camPos + front * 7.0f;
+                        glm::vec3 spawnPos = cameraPosition + cameraForward * 7.0f;
                         if (spawnPos.y < 0.5f) spawnPos.y = 0.5f;
 
                         if (spawnType == 0) {
@@ -130,7 +130,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                             registry.get().emplace<ecs::ParticleEmitterComponent>(entity, ecs::ParticleEmitterComponent{"fire", glm::vec3(1.0f, 0.4f, 0.0f), 200, 3.0f, 0.4f});
                         } else if (spawnType == 9) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"DirectionalLight (Sun)"});
-                            registry.get().emplace<ecs::TransformComponent>(entity, camPos + glm::vec3(0.0f, 12.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));
+                            registry.get().emplace<ecs::TransformComponent>(entity, cameraPosition + glm::vec3(0.0f, 12.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));
                             registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"directional", glm::vec3(1.0f, 0.98f, 0.92f), 3.5f, 0.0f});
                         } else if (spawnType == 10) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"SpotLight"});
@@ -141,8 +141,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                             registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 3.5f, 0.0f), glm::vec3(-45.0f, 0.0f, 0.0f), glm::vec3(1.0f));
                             registry.get().emplace<ecs::LightComponent>(entity, ecs::LightComponent{"area", glm::vec3(1.0f, 0.98f, 0.95f), 6.0f, 20.0f, 25.0f, 40.0f, 3.0f, 2.0f});
                         }
-                        selectedEnt = entity;
-                        if (engine) engine->setSelectedEntity(selectedEnt);
+                        selectedEntity = entity;
+                        if (engine) engine->setSelectedEntity(selectedEntity);
                     }
                 };
 

@@ -643,6 +643,7 @@ namespace engine::renderer {
 
             drawEditorPlaceActorsPanel(registry, engine, s_immersivePlay, s_showPlaceActors,
                                         s_uiScale, topTotalH, contentH, leftPanelW,
+                                        s_showDetails,
                                         camPos, front, selectedEnt);
 
             // 5. CENTER PANEL: BORDERLESS 3D VIEWPORT
