@@ -1346,6 +1346,27 @@ static std::string saveProjectNativeDialog() { return ""; }
                 ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
                 auto view = registry.get().view<ecs::TransformComponent>();
                 for (auto entity : view) {
+                    // Category chips are functional filters, not merely visual tabs.
+                    const auto& entityRegistry = registry.get();
+                    switch (s_outlinerCategory) {
+                    case 1: // Meshes / renderable geometry
+                        if (!entityRegistry.all_of<ecs::MeshComponent>(entity)) continue;
+                        break;
+                    case 2: // Lights
+                        if (!entityRegistry.all_of<ecs::LightComponent>(entity)) continue;
+                        break;
+                    case 3: // Physics / simulation
+                        if (!entityRegistry.any_of<ecs::RigidBodyComponent, ecs::VelocityComponent,
+                                                   ecs::ChemistryComponent, ecs::DestructibleComponent>(entity)) continue;
+                        break;
+                    case 4: // Player / gameplay actors
+                        if (!entityRegistry.any_of<ecs::CharacterMovementComponent, ecs::CameraBoomComponent,
+                                                   ecs::NavAgentComponent, ecs::IKFootPlacementComponent>(entity)) continue;
+                        break;
+                    default:
+                        break;
+                    }
+
                     std::string label = "Entity_" + std::to_string(static_cast<uint32_t>(entity));
                     if (registry.get().all_of<ecs::TagComponent>(entity)) {
                         label = registry.get().get<ecs::TagComponent>(entity).name;
