@@ -20,6 +20,7 @@ namespace engine {
 namespace engine::renderer {
 
     struct EditorPreferencesUiState;
+    struct EditorTopBarUiState;
     class VulkanRenderer {
     public:
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
@@ -149,6 +150,9 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
+        void drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiState& state,
+                                   float screenW, float topTitleBarH, float topLevelTabsH,
+                                   float topToolbarH, entt::entity& selectedEntity);
         void drawEditorPreferencesPanel(core::Engine* engine, EditorPreferencesUiState& state,
                                          float screenW, float screenH);
         void drawEditorPlaceActorsPanel(ecs::Registry& registry, core::Engine* engine,
