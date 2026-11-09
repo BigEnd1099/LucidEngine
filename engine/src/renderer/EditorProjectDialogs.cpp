@@ -17,7 +17,7 @@
 namespace engine::renderer {
 
 #ifdef _WIN32
-static std::string openProjectNativeDialog() {
+std::string openProjectNativeDialog() {
     char filename[MAX_PATH] = "";
     OPENFILENAMEA ofn{};
     ofn.lStructSize = sizeof(ofn);
@@ -33,7 +33,7 @@ static std::string openProjectNativeDialog() {
     return "";
 }
 
-static std::string saveProjectNativeDialog() {
+std::string saveProjectNativeDialog() {
     char filename[MAX_PATH] = "MyProject.uproject";
     OPENFILENAMEA ofn{};
     ofn.lStructSize = sizeof(ofn);
@@ -51,10 +51,6 @@ static std::string saveProjectNativeDialog() {
     }
     return "";
 }
-#else
-static std::string openProjectNativeDialog() { return ""; }
-static std::string saveProjectNativeDialog() { return ""; }
-#endi
 #else
 std::string openProjectNativeDialog() { return {}; }
 std::string saveProjectNativeDialog() { return {}; }
