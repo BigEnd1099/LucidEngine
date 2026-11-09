@@ -301,6 +301,7 @@ static std::string saveProjectNativeDialog() { return ""; }
             static float s_userOutlinerH = 240.0f;
             static float s_userDrawerH = 220.0f;
             static bool s_splittersInit = false;
+            static bool s_splitterWasActive = false;
             static ImGuiID s_activeSplitterId = 0;
             static bool s_anySplitterHovered = false;
             static bool s_wasSplitterHoveredLastFrame = false;
@@ -2420,6 +2421,19 @@ static std::string saveProjectNativeDialog() { return ""; }
                                    220.0f * s_uiScale);
                 }
             }
+
+            // Persist panel dimensions once, when the user finishes a splitter drag.
+            // Saving every frame while dragging would cause unnecessary disk I/O.
+            const bool splitterIsActive = (s_activeSplitterId != 0);
+            if (s_splitterWasActive && !splitterIsActive && engine) {
+                auto& pref = engine->getPreferences();
+                pref.userLeftPanelW = s_userLeftPanelW;
+                pref.userRightPanelW = s_userRightPanelW;
+                pref.userOutlinerH = s_userOutlinerH;
+                pref.userDrawerH = s_userDrawerH;
+                engine->saveUserPreferences();
+            }
+            s_splitterWasActive = splitterIsActive;
 
             s_wasSplitterHoveredLastFrame = s_anySplitterHovered;
         }
