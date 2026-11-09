@@ -14,7 +14,7 @@ float applyCtrlSnap(float value, float snapStep = 0.5f) {
 }
 } // namespace
 
-bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 70.0f) {
+bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValue, float columnWidth) {
         bool changed = false;
         ImGui::PushID(label);
         ImGui::Columns(2);
