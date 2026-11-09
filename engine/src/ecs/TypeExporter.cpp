@@ -90,6 +90,7 @@ namespace engine::ecs {
         out += "  socketOffsetY?: number;\n";
         out += "  cameraLag?: boolean;\n";
         out += "  lagSpeed?: number;\n";
+        out += "  isFirstPerson?: boolean;\n";
         out += "}\n\n";
 
         out += "export interface ParticleEmitterComponent {\n";

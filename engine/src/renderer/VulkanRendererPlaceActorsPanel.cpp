@@ -106,12 +106,41 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                         } else if (spawnType == 1) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"Player"});
                             registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(spawnPos.x, std::max(2.0f, spawnPos.y), spawnPos.z));
-                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{2});
-                            ecs::RigidBodyComponent rb; rb.mass = 1.0f; rb.shapeType = 2; rb.capsuleRadius = 0.6f; rb.capsuleHalfHeight = 0.8f;
+                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{5});
+                            ecs::RigidBodyComponent rb; rb.mass = 75.0f; rb.shapeType = 2; rb.capsuleRadius = 0.5f; rb.capsuleHalfHeight = 0.9f;
                             rb.lockRotationX = true; rb.lockRotationZ = true;
                             registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
-                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.0f, 0.85f, 1.0f, 1.0f); mat.metallic = 0.25f; mat.roughness = 0.25f;
+                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.1f, 0.75f, 1.0f, 1.0f); mat.metallic = 0.25f; mat.roughness = 0.25f;
                             registry.get().emplace<ecs::MaterialComponent>(entity, mat);
+                            ecs::CharacterMovementComponent cm; cm.maxWalkSpeed = 8.0f; cm.jumpZVelocity = 10.0f;
+                            registry.get().emplace<ecs::CharacterMovementComponent>(entity, cm);
+                            ecs::CameraBoomComponent boom; boom.targetArmLength = 8.0f; boom.socketOffsetY = 2.5f; boom.cameraLag = true; boom.isFirstPerson = false;
+                            registry.get().emplace<ecs::CameraBoomComponent>(entity, boom);
+                            if (engine) {
+                                engine->syncEntityTransformPhysics(entity);
+                                if (!engine->isPaused()) {
+                                    engine->setCameraMode("thirdPerson");
+                                }
+                            }
+                        } else if (spawnType == 2) {
+                            registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"Player"});
+                            registry.get().emplace<ecs::TransformComponent>(entity, glm::vec3(spawnPos.x, std::max(2.0f, spawnPos.y), spawnPos.z));
+                            registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{5});
+                            ecs::RigidBodyComponent rb; rb.mass = 75.0f; rb.shapeType = 2; rb.capsuleRadius = 0.5f; rb.capsuleHalfHeight = 0.9f;
+                            rb.lockRotationX = true; rb.lockRotationZ = true;
+                            registry.get().emplace<ecs::RigidBodyComponent>(entity, rb);
+                            ecs::MaterialComponent mat; mat.baseColor = glm::vec4(0.1f, 0.75f, 1.0f, 1.0f); mat.metallic = 0.25f; mat.roughness = 0.25f;
+                            registry.get().emplace<ecs::MaterialComponent>(entity, mat);
+                            ecs::CharacterMovementComponent cm; cm.maxWalkSpeed = 8.0f; cm.jumpZVelocity = 10.0f;
+                            registry.get().emplace<ecs::CharacterMovementComponent>(entity, cm);
+                            ecs::CameraBoomComponent boom; boom.targetArmLength = 0.0f; boom.socketOffsetY = 1.65f; boom.cameraLag = false; boom.isFirstPerson = true;
+                            registry.get().emplace<ecs::CameraBoomComponent>(entity, boom);
+                            if (engine) {
+                                engine->syncEntityTransformPhysics(entity);
+                                if (!engine->isPaused()) {
+                                    engine->setCameraMode("firstPerson");
+                                }
+                            }
                         } else if (spawnType == 3) {
                             registry.get().emplace<ecs::TagComponent>(entity, ecs::TagComponent{"PointLight"});
                             registry.get().emplace<ecs::TransformComponent>(entity, spawnPos + glm::vec3(0.0f, 2.5f, 0.0f));
@@ -149,7 +178,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::BeginChild("PlaceActorListScroll", ImVec2(0, 0), false);
                 spawnCard("Platform Cube",     "Static Jolt Box Actor",            0,  VectorIconType::Cube,      IM_COL32(148, 163, 184, 255));
                 spawnCard("PBR Sphere",        "Metallic GGX / IBL Test Sphere",   7,  VectorIconType::TriggerSphere, IM_COL32(250, 204, 21, 255));
-                spawnCard("Character (WASD)",  "Controllable Capsule Player",      1,  VectorIconType::Character, IM_COL32(52, 211, 153, 255));
+                spawnCard("Player (3rd Person)", "Sterowalna postac z ramieniem kamery (TPP)", 1, VectorIconType::Character, IM_COL32(52, 211, 153, 255));
+                spawnCard("Player (1st Person FPP)", "Sterowalna postac ze spojrzeniem z oczu", 2, VectorIconType::Character, IM_COL32(16, 185, 129, 255));
                 spawnCard("Directional Light", "4-Cascade Vogel PCF Sun",          9,  VectorIconType::Light,     IM_COL32(250, 204, 21, 255));
                 spawnCard("Point Light",       "Omnidirectional Shadow Light",     3,  VectorIconType::Light,     IM_COL32(250, 204, 21, 255));
                 spawnCard("Spot Light",        "Conical Spotlight Emitter",        10, VectorIconType::Light,     IM_COL32(245, 158, 11, 255));

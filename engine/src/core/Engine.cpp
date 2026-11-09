@@ -277,6 +277,14 @@ namespace engine::core {
             }
         }
 
+        // Restore all mesh components visibility in editor mode
+        if (m_registry) {
+            auto meshView = m_registry->get().view<ecs::MeshComponent>();
+            for (auto entity : meshView) {
+                meshView.get<ecs::MeshComponent>(entity).visible = true;
+            }
+        }
+
         m_score.store(0);
         m_health.store(100);
         m_gameStatus = "PLAYING";
@@ -376,50 +384,215 @@ namespace engine::core {
             }
         }
 
+        {
+            LUCID_PROFILE_SCOPE("CharacterMovement");
+            if (!m_paused && m_registry) {
+                auto charView = m_registry->get().view<ecs::TransformComponent, ecs::CharacterMovementComponent>();
+                for (auto entity : charView) {
+                    auto& t = charView.get<ecs::TransformComponent>(entity);
+                    const auto& mc = charView.get<ecs::CharacterMovementComponent>(entity);
+
+                    float inputFwd = 0.0f;
+                    float inputRight = 0.0f;
+                    bool jumpRequested = false;
+                    bool isSprinting = false;
+
+                    if (m_inputState.contains("keys") && m_inputState["keys"].is_object()) {
+                        const auto& keys = m_inputState["keys"];
+                        if (keys.value("KeyW", false) || keys.value("ArrowUp", false)) inputFwd += 1.0f;
+                        if (keys.value("KeyS", false) || keys.value("ArrowDown", false)) inputFwd -= 1.0f;
+                        if (keys.value("KeyD", false) || keys.value("ArrowRight", false)) inputRight += 1.0f;
+                        if (keys.value("KeyA", false) || keys.value("ArrowLeft", false)) inputRight -= 1.0f;
+                        if (keys.value("Space", false)) jumpRequested = true;
+                        if (keys.value("ShiftLeft", false) || keys.value("ShiftRight", false)) isSprinting = true;
+                    }
+
+                    // Compute wish direction relative to camera yaw on horizontal plane
+                    float radYaw = glm::radians(m_camYaw);
+                    glm::vec3 camFwdXZ = glm::normalize(glm::vec3(cos(radYaw), 0.0f, sin(radYaw)));
+                    glm::vec3 camRightXZ = glm::normalize(glm::vec3(-sin(radYaw), 0.0f, cos(radYaw)));
+                    glm::vec3 wishDir = camFwdXZ * inputFwd + camRightXZ * inputRight;
+                    if (glm::length(wishDir) > 0.001f) wishDir = glm::normalize(wishDir);
+
+                    float moveSpeed = mc.maxWalkSpeed * (isSprinting ? 1.75f : 1.0f);
+
+                    if (m_physicsContext && m_registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
+                        auto& rb = m_registry->get().get<ecs::RigidBodyComponent>(entity);
+                        if (rb.bodyId != 0xFFFFFFFF) {
+                            JPH::BodyID bId(rb.bodyId);
+                            JPH::Vec3 curVel = m_physicsContext->getBodyInterface().GetLinearVelocity(bId);
+
+                            const bool isGrounded = std::abs(curVel.GetY()) < 0.25f;
+                            const float accelRate = isGrounded ? 16.0f : (16.0f * mc.airControl);
+
+                            float targetVelX = wishDir.x * moveSpeed;
+                            float targetVelZ = wishDir.z * moveSpeed;
+                            float newVelX = glm::mix(curVel.GetX(), targetVelX, glm::clamp(dt * accelRate, 0.0f, 1.0f));
+                            float newVelZ = glm::mix(curVel.GetZ(), targetVelZ, glm::clamp(dt * accelRate, 0.0f, 1.0f));
+                            float newVelY = curVel.GetY();
+
+                            if (jumpRequested && isGrounded) {
+                                newVelY = mc.jumpZVelocity;
+                            }
+
+                            m_physicsContext->getBodyInterface().SetLinearVelocity(bId, JPH::Vec3(newVelX, newVelY, newVelZ));
+                            m_physicsContext->getBodyInterface().ActivateBody(bId);
+
+                            bool isFpp = (m_cameraMode == "firstPerson");
+                            if (!isFpp && m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                                isFpp = m_registry->get().get<ecs::CameraBoomComponent>(entity).isFirstPerson;
+                            }
+
+                            if (isFpp) {
+                                // In First-Person, character body faces the camera look yaw
+                                t.rotation.y = m_camYaw;
+                                t.orientation = glm::quat(glm::radians(t.rotation));
+                                JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
+                                    0.0f,
+                                    glm::radians(m_camYaw),
+                                    0.0f
+                                ));
+                                m_physicsContext->getBodyInterface().SetRotation(bId, jRot, JPH::EActivation::DontActivate);
+                            } else if (glm::length(wishDir) > 0.1f) {
+                                // Smoothly turn character model to face movement direction
+                                float targetYaw = glm::degrees(std::atan2(-wishDir.x, -wishDir.z));
+                                float diff = std::remainder(targetYaw - t.rotation.y, 360.0f);
+                                t.rotation.y += diff * glm::clamp(dt * 12.0f, 0.0f, 1.0f);
+                                t.orientation = glm::quat(glm::radians(t.rotation));
+                                JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
+                                    glm::radians(t.rotation.x),
+                                    glm::radians(t.rotation.y),
+                                    glm::radians(t.rotation.z)
+                                ));
+                                m_physicsContext->getBodyInterface().SetRotation(bId, jRot, JPH::EActivation::DontActivate);
+                            }
+                        }
+                    } else {
+                        // Kinematic translation if without rigid body
+                        t.position += wishDir * moveSpeed * dt;
+                        bool isFpp = (m_cameraMode == "firstPerson");
+                        if (!isFpp && m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                            isFpp = m_registry->get().get<ecs::CameraBoomComponent>(entity).isFirstPerson;
+                        }
+
+                        if (isFpp) {
+                            t.rotation.y = m_camYaw;
+                            t.orientation = glm::quat(glm::radians(t.rotation));
+                        } else if (glm::length(wishDir) > 0.1f) {
+                            float targetYaw = glm::degrees(std::atan2(-wishDir.x, -wishDir.z));
+                            float diff = std::remainder(targetYaw - t.rotation.y, 360.0f);
+                            t.rotation.y += diff * glm::clamp(dt * 12.0f, 0.0f, 1.0f);
+                            t.orientation = glm::quat(glm::radians(t.rotation));
+                        }
+                    }
+                }
+            }
+        }
+
         // Autonomous Camera Director (Spring Arm / Follow Cam for non-editor modes)
         if (m_cameraMode != "editor" && m_registry) {
             glm::vec3 playerPos(0.0f);
             bool foundPlayer = false;
-            float armLength = 12.0f;
-            float socketY = 3.5f;
+            float armLength = 8.0f;
+            float socketY = 2.5f;
+            bool cameraLag = true;
+            float lagSpeed = 10.0f;
+            bool isFirstPerson = (m_cameraMode == "firstPerson");
+            entt::entity playerEntity = entt::null;
 
-            auto tagView = m_registry->get().view<ecs::TagComponent, ecs::TransformComponent>();
-            for (auto entity : tagView) {
-                const auto& tag = tagView.get<ecs::TagComponent>(entity);
-                if (tag.name == "Player" || tag.name == "Paddle" || tag.name == "PlayerShip" || tag.name == "PlayerCar") {
-                    playerPos = tagView.get<ecs::TransformComponent>(entity).position;
-                    foundPlayer = true;
-                    if (m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
-                        const auto& boom = m_registry->get().get<ecs::CameraBoomComponent>(entity);
-                        armLength = boom.targetArmLength;
-                        socketY = boom.socketOffsetY;
+            // Prioritize CharacterMovementComponent or Player tag
+            auto charView = m_registry->get().view<ecs::TransformComponent, ecs::CharacterMovementComponent>();
+            for (auto entity : charView) {
+                playerEntity = entity;
+                playerPos = charView.get<ecs::TransformComponent>(entity).position;
+                foundPlayer = true;
+                if (m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                    const auto& boom = m_registry->get().get<ecs::CameraBoomComponent>(entity);
+                    armLength = boom.targetArmLength;
+                    socketY = boom.socketOffsetY;
+                    cameraLag = boom.cameraLag;
+                    lagSpeed = boom.lagSpeed;
+                    if (boom.isFirstPerson) isFirstPerson = true;
+                }
+                break;
+            }
+
+            if (!foundPlayer) {
+                auto tagView = m_registry->get().view<ecs::TagComponent, ecs::TransformComponent>();
+                for (auto entity : tagView) {
+                    const auto& tag = tagView.get<ecs::TagComponent>(entity);
+                    if (tag.name == "Player" || tag.name == "Paddle" || tag.name == "PlayerShip" || tag.name == "PlayerCar") {
+                        playerEntity = entity;
+                        playerPos = tagView.get<ecs::TransformComponent>(entity).position;
+                        foundPlayer = true;
+                        if (m_registry->get().all_of<ecs::CameraBoomComponent>(entity)) {
+                            const auto& boom = m_registry->get().get<ecs::CameraBoomComponent>(entity);
+                            armLength = boom.targetArmLength;
+                            socketY = boom.socketOffsetY;
+                            cameraLag = boom.cameraLag;
+                            lagSpeed = boom.lagSpeed;
+                            if (boom.isFirstPerson) isFirstPerson = true;
+                        }
+                        break;
                     }
-                    break;
                 }
             }
 
             if (foundPlayer) {
+                // If FPP, hide the player's mesh so it doesn't obstruct camera view inside the capsule
+                if (playerEntity != entt::null && m_registry->get().valid(playerEntity) && m_registry->get().all_of<ecs::MeshComponent>(playerEntity)) {
+                    auto& mc = m_registry->get().get<ecs::MeshComponent>(playerEntity);
+                    mc.visible = !isFirstPerson;
+                }
+
                 glm::vec3 targetCamPos = m_camPos;
                 float targetYaw = m_camYaw;
                 float targetPitch = m_camPitch;
 
-                if (m_cameraMode == "thirdPerson") {
-                    targetCamPos = playerPos + glm::vec3(0.0f, socketY, armLength);
-                    targetYaw = -90.0f;
-                    targetPitch = -18.0f;
+                if (isFirstPerson || m_cameraMode == "firstPerson") {
+                    float radYaw = glm::radians(m_camYaw);
+                    float radPitch = glm::radians(m_camPitch);
+                    glm::vec3 camFwd(
+                        cos(radYaw) * cos(radPitch),
+                        sin(radPitch),
+                        sin(radYaw) * cos(radPitch)
+                    );
+                    targetCamPos = playerPos + glm::vec3(0.0f, socketY > 0.5f ? socketY : 1.65f, 0.0f) + camFwd * 0.15f;
+                    m_camPos = targetCamPos; // Instant 1:1 attach, 0 lag in FPP
+                } else if (m_cameraMode == "thirdPerson") {
+                    float radYaw = glm::radians(m_camYaw);
+                    float radPitch = glm::radians(m_camPitch);
+                    glm::vec3 camDir(
+                        cos(radYaw) * cos(radPitch),
+                        sin(radPitch),
+                        sin(radYaw) * cos(radPitch)
+                    );
+                    targetCamPos = (playerPos + glm::vec3(0.0f, socketY, 0.0f)) - glm::normalize(camDir) * armLength;
+                    if (cameraLag) {
+                        float lag = glm::clamp(dt * lagSpeed, 0.0f, 1.0f);
+                        m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                    } else {
+                        m_camPos = targetCamPos;
+                    }
                 } else if (m_cameraMode == "topDown") {
-                    targetCamPos = playerPos + glm::vec3(0.0f, 24.0f, 6.0f);
+                    targetCamPos = playerPos + glm::vec3(0.0f, 22.0f, 6.0f);
                     targetYaw = -90.0f;
-                    targetPitch = -72.0f;
+                    targetPitch = -70.0f;
+                    float lag = glm::clamp(dt * 10.0f, 0.0f, 1.0f);
+                    m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                    m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
+                    m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
                 } else if (m_cameraMode == "sideScroller") {
                     targetCamPos = playerPos + glm::vec3(0.0f, 2.0f, 18.0f);
                     targetYaw = -90.0f;
                     targetPitch = 0.0f;
-                } else if (m_cameraMode == "firstPerson") {
-                    targetCamPos = playerPos + glm::vec3(0.0f, 1.7f, 0.0f);
+                    float lag = glm::clamp(dt * 10.0f, 0.0f, 1.0f);
+                    m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                    m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
+                    m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
                 }
 
-                float lag = glm::clamp(dt * 8.0f, 0.0f, 1.0f);
+                float lag = glm::clamp(dt * 10.0f, 0.0f, 1.0f);
                 m_camPos = glm::mix(m_camPos, targetCamPos, lag);
                 m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
                 m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
@@ -611,6 +784,7 @@ namespace engine::core {
                     if (bJson.contains("socketOffsetY")) bc.socketOffsetY = bJson["socketOffsetY"].get<float>();
                     if (bJson.contains("cameraLag")) bc.cameraLag = bJson["cameraLag"].get<bool>();
                     if (bJson.contains("lagSpeed")) bc.lagSpeed = bJson["lagSpeed"].get<float>();
+                    if (bJson.contains("isFirstPerson")) bc.isFirstPerson = bJson["isFirstPerson"].get<bool>();
                 }
 
                 if (entJson.contains("particles") || entJson.contains("particleEmitter")) {
@@ -741,6 +915,9 @@ namespace engine::core {
                             }
                             if (glfwGetKey(win, GLFW_KEY_R) == GLFW_PRESS) {
                                 keys["KeyR"] = true;
+                            }
+                            if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
+                                keys["ShiftLeft"] = true;
                             }
                         }
                         m_inputState["keys"] = keys;
@@ -1569,7 +1746,8 @@ function update(entities, dt, input, contacts) {
                     {"targetArmLength", bc.targetArmLength},
                     {"socketOffsetY", bc.socketOffsetY},
                     {"cameraLag", bc.cameraLag},
-                    {"lagSpeed", bc.lagSpeed}
+                    {"lagSpeed", bc.lagSpeed},
+                    {"isFirstPerson", bc.isFirstPerson}
                 };
             }
             if (m_registry->get().all_of<ecs::ParticleEmitterComponent>(entity)) {

@@ -83,6 +83,7 @@ export interface CameraBoomComponent {
   socketOffsetY?: number;
   cameraLag?: boolean;
   lagSpeed?: number;
+  isFirstPerson?: boolean;
 }
 
 export interface ParticleEmitterComponent {

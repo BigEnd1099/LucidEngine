@@ -2,6 +2,7 @@
 #include "renderer/EditorTopBarPanel.hpp"
 #include "renderer/EditorUiStyle.hpp"
 #include "core/Engine.hpp"
+#include "ecs/Components.hpp"
 #include <cmath>
 #include <cstdio>
 #ifdef USE_GLFW
@@ -238,10 +239,25 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             if (!isPaused) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.55f, 0.25f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                if (ImGui::Button("     PLAYING ", ImVec2(0, btnH)) && engine) engine->playSimulation();
+                if (ImGui::Button("     PLAYING ", ImVec2(0, btnH)) && engine) {
+                    engine->playSimulation();
+                }
                 ImGui::PopStyleColor(2);
             } else {
-                if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) engine->playSimulation();
+                if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) {
+                    engine->playSimulation();
+                    if (engine->getCameraMode() == "editor" && engine->getRegistry()) {
+                        auto view = engine->getRegistry()->get().view<ecs::CharacterMovementComponent>();
+                        if (!view.empty()) {
+                            auto firstEnt = *view.begin();
+                            bool isFpp = false;
+                            if (engine->getRegistry()->get().all_of<ecs::CameraBoomComponent>(firstEnt)) {
+                                isFpp = engine->getRegistry()->get().get<ecs::CameraBoomComponent>(firstEnt).isFirstPerson;
+                            }
+                            engine->setCameraMode(isFpp ? "firstPerson" : "thirdPerson");
+                        }
+                    }
+                }
             }
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * state.uiScale, plPos.y + btnH * 0.5f), 5.0f * state.uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Uruchom symulacje fizyki Jolt i skrypty");
@@ -254,13 +270,48 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             ImGui::SameLine();
 
             ImVec2 stPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) engine->stopSimulation();
+            if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) {
+                engine->stopSimulation();
+                engine->setCameraMode("editor");
+            }
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * state.uiScale, stPos.y + btnH * 0.5f), 4.8f * state.uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
             ImGui::SameLine();
 
             if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wykonaj krok symulacji o 1 klatke fizyki (1/60s)");
+
+            // Wybor trybu kamery (Editor Freecam, 3rd Person TPP, 1st Person FPP, Top-Down, Side-Scroller)
+            ImGui::SameLine(screenW - 365.0f * state.uiScale);
+            if (engine) {
+                const char* camModes[] = { "Freecam", "3rd Person (TPP)", "1st Person (FPP)", "Top-Down", "Side-Scroller" };
+                const char* camModeKeys[] = { "editor", "thirdPerson", "firstPerson", "topDown", "sideScroller" };
+                std::string curMode = engine->getCameraMode();
+                int curModeIdx = 0;
+                for (int i = 0; i < 5; ++i) {
+                    if (curMode == camModeKeys[i]) { curModeIdx = i; break; }
+                }
+                ImGui::SetNextItemWidth(165.0f * state.uiScale);
+                if (ImGui::Combo("##CamModeCombo", &curModeIdx, camModes, IM_ARRAYSIZE(camModes))) {
+                    engine->setCameraMode(camModeKeys[curModeIdx]);
+                    if (engine->getRegistry()) {
+                        auto boomView = engine->getRegistry()->get().view<ecs::CameraBoomComponent>();
+                        for (auto bEnt : boomView) {
+                            auto& b = boomView.get<ecs::CameraBoomComponent>(bEnt);
+                            if (curModeIdx == 2) {
+                                b.isFirstPerson = true;
+                                b.targetArmLength = 0.0f;
+                                b.cameraLag = false;
+                            } else if (curModeIdx == 1) {
+                                b.isFirstPerson = false;
+                                b.targetArmLength = 8.0f;
+                                b.cameraLag = true;
+                            }
+                        }
+                    }
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Tryb kamery: Wolna kamera edytora lub sledzenie gracza (TPP/FPP/TopDown)");
+            }
 
             // Kontrola FOV kamery po prawej stronie paska
             ImGui::SameLine(screenW - 180.0f * state.uiScale);

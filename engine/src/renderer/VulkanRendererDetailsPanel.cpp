@@ -133,6 +133,16 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     registry.get().emplace<ecs::ParticleEmitterComponent>(selectedEntity, ecs::ParticleEmitterComponent{"fire", glm::vec3(1.0f, 0.4f, 0.0f), 200, 3.0f, 0.4f});
                                 }
                             }
+                            if (!registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Ruch Postaci (Character Movement)")) {
+                                    registry.get().emplace<ecs::CharacterMovementComponent>(selectedEntity);
+                                }
+                            }
+                            if (!registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Ramie Kamery (Camera Boom)")) {
+                                    registry.get().emplace<ecs::CameraBoomComponent>(selectedEntity);
+                                }
+                            }
                             ImGui::EndPopup();
                         }
                         ImGui::Separator();
@@ -327,6 +337,49 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 if (ImGui::SliderInt("Particle Count", &pCount, 10, 1000)) pe.count = static_cast<uint32_t>(pCount);
                                 ImGui::SliderFloat("Speed", &pe.speed, 0.1f, 20.0f, "%.1f m/s");
                                 ImGui::SliderFloat("Size", &pe.size, 0.05f, 2.0f, "%.2f m");
+                            }
+                        }
+
+                        if (registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity)) {
+                            auto& cm = registry.get().get<ecs::CharacterMovementComponent>(selectedEntity);
+                            if (ImGui::CollapsingHeader("Character Movement (Sterowanie)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                                ImGui::DragFloat("Max Walk Speed (m/s)", &cm.maxWalkSpeed, 0.2f, 1.0f, 50.0f, "%.1f m/s");
+                                ImGui::DragFloat("Jump Z Velocity (m/s)", &cm.jumpZVelocity, 0.2f, 0.0f, 30.0f, "%.1f m/s");
+                                ImGui::DragFloat("Gravity Scale", &cm.gravityScale, 0.05f, 0.0f, 10.0f, "%.2f");
+                                ImGui::DragFloat("Air Control (0..1)", &cm.airControl, 0.02f, 0.0f, 1.0f, "%.2f");
+                                ImGui::TextDisabled("Sterowanie: WASD = Ruch | Spacja = Skok | Shift = Sprint");
+                            }
+                        }
+
+                        if (registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity)) {
+                            auto& cb = registry.get().get<ecs::CameraBoomComponent>(selectedEntity);
+                            if (ImGui::CollapsingHeader("Camera Boom (Ramie Kamery)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                                if (ImGui::Checkbox("Widok FPP (First Person)", &cb.isFirstPerson)) {
+                                    if (cb.isFirstPerson) {
+                                        cb.targetArmLength = 0.0f;
+                                        cb.socketOffsetY = 1.65f;
+                                        cb.cameraLag = false;
+                                        if (engine && !engine->isPaused()) engine->setCameraMode("firstPerson");
+                                    } else {
+                                        cb.targetArmLength = 8.0f;
+                                        cb.socketOffsetY = 2.5f;
+                                        cb.cameraLag = true;
+                                        if (engine && !engine->isPaused()) engine->setCameraMode("thirdPerson");
+                                    }
+                                }
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Przelacz widok z pierwszej osoby (FPP) lub zza plecow (TPP) [Klawisz V w grze]");
+
+                                if (cb.isFirstPerson) {
+                                    ImGui::DragFloat("Wysokosc oczu Y", &cb.socketOffsetY, 0.05f, 0.5f, 3.0f, "%.2f m");
+                                    ImGui::TextDisabled("Tryb FPP: kamera przywiazana bezposrednio do oczu gracza.");
+                                } else {
+                                    ImGui::DragFloat("Target Arm Length (m)", &cb.targetArmLength, 0.2f, 0.5f, 50.0f, "%.1f m");
+                                    ImGui::DragFloat("Socket Offset Y", &cb.socketOffsetY, 0.1f, -5.0f, 10.0f, "%.1f m");
+                                    ImGui::Checkbox("Camera Lag (Plynne sledzenie)", &cb.cameraLag);
+                                    if (cb.cameraLag) {
+                                        ImGui::SliderFloat("Lag Speed", &cb.lagSpeed, 1.0f, 30.0f, "%.1f");
+                                    }
+                                }
                             }
                         }
                     }

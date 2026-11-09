@@ -89,6 +89,7 @@ namespace engine::ecs {
         float socketOffsetY{3.0f};
         bool cameraLag{true};
         float lagSpeed{10.0f};
+        bool isFirstPerson{false};
     };
 
     struct ParticleEmitterComponent {

@@ -155,6 +155,14 @@ namespace engine::core {
         void setCameraMode(const std::string& mode) { m_cameraMode = mode; }
         std::string getCameraMode() const { return m_cameraMode; }
 
+        // Gameplay Input API (Keyboard & Controller)
+        void setKeyInput(const std::string& key, bool pressed) {
+            if (!m_inputState.contains("keys") || !m_inputState["keys"].is_object()) {
+                m_inputState["keys"] = nlohmann::json::object();
+            }
+            m_inputState["keys"][key] = pressed;
+        }
+
         // Environment & Lighting API
         void setEnvironmentSettings(const EnvironmentSettings& env);
         void setGravity(float g) { m_envSettings.gravity = g; }
