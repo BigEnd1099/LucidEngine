@@ -1191,7 +1191,7 @@ namespace engine::renderer {
                                    s_showDetails, s_showOutliner, s_uiScale,
                                    leftPanelW, centerViewportW, topTotalH, outlinerH,
                                    rightPanelW, detailsH, camPos, front, camYaw, camPitch,
-                                   camFov, viewportPanelSize);
+                                   camFov, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
 
             drawEditorBottomPanels(s_immersivePlay, s_showContentDrawer, s_showOutputLog,

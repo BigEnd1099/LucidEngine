@@ -11,6 +11,8 @@
 
 #ifdef USE_GLFW
 namespace engine::renderer {
+
+extern int g_pendingHdriIndex;
 void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engine* engine,
                                             entt::entity& selectedEntity, bool immersivePlay,
                                             bool showDetails, bool showOutliner, float uiScale,
