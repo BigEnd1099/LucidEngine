@@ -6,6 +6,7 @@
 #include "renderer/EditorOutlinerPanel.hpp"
 #include "renderer/EditorPreferencesPanel.hpp"
 #include "renderer/EditorTopBarPanel.hpp"
+#include "renderer/EditorViewportOverlay.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -105,7 +106,7 @@ namespace engine::renderer {
         }
     }
 
-    enum class NativeGizmoMode { TRANSLATE = 0, ROTATE = 1, SCALE = 2 };
+    enum class EditorGizmoMode { TRANSLATE = 0, ROTATE = 1, SCALE = 2 };
 
     static float distToSegment(const ImVec2& p, const ImVec2& a, const ImVec2& b) {
         const float abx = b.x - a.x;
@@ -306,7 +307,7 @@ namespace engine::renderer {
             };
 
             static entt::entity selectedEnt = entt::null;
-            static NativeGizmoMode s_gizmoMode = NativeGizmoMode::TRANSLATE;
+            static EditorGizmoMode s_gizmoMode = EditorGizmoMode::TRANSLATE;
             static char s_engineNotification[128] = "";
             static float s_engineNotificationTimer = 0.0f;
 
@@ -512,9 +513,9 @@ namespace engine::renderer {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
                 }
                 if (!s_isRmbNavigating) {
-                    if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = NativeGizmoMode::TRANSLATE;
-                    if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = NativeGizmoMode::ROTATE;
-                    if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = NativeGizmoMode::SCALE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = EditorGizmoMode::ROTATE;
+                    if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = EditorGizmoMode::SCALE;
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_F) && selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
                     const auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
@@ -652,7 +653,7 @@ namespace engine::renderer {
 
             if (s_draggingGizmoAxis > 0 && hasSelectedTransform) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                if (s_gizmoMode == NativeGizmoMode::TRANSLATE) {
+                if (s_gizmoMode == EditorGizmoMode::TRANSLATE) {
                     glm::vec3 curRayOrig, curRayDir;
                     getRayFromScreen(mousePos, curRayOrig, curRayDir);
                     const float denom = glm::dot(curRayDir, s_dragPlaneNormal);
@@ -670,7 +671,7 @@ namespace engine::renderer {
                             if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                         }
                     }
-                } else if (s_gizmoMode == NativeGizmoMode::ROTATE) {
+                } else if (s_gizmoMode == EditorGizmoMode::ROTATE) {
                     const float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.14159265f);
                     float dAngle = curAngle - s_lastRotAngle;
                     while (dAngle > 180.0f) dAngle -= 360.0f;
@@ -684,7 +685,7 @@ namespace engine::renderer {
                     else if (s_draggingGizmoAxis == 3) t.rotation.z += finalAngle;
                     t.orientation = glm::quat(glm::radians(t.rotation));
                     if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                } else if (s_gizmoMode == NativeGizmoMode::SCALE) {
+                } else if (s_gizmoMode == EditorGizmoMode::SCALE) {
                     float scaleFactor = hypotf(mousePos.x - s_dragPivotScreen.x, mousePos.y - s_dragPivotScreen.y) / s_dragInitialDist;
                     if (s_snapEnabled) scaleFactor = std::max(0.1f, std::round(scaleFactor / 0.25f) * 0.25f);
                     if (s_draggingGizmoAxis == 1) t.scale.x = std::max(0.01f, s_dragInitialScale.x * scaleFactor);
@@ -764,58 +765,11 @@ namespace engine::renderer {
                 }
             }
 
-            if (!s_immersivePlay) {
-                // Pigułka narzędzi Gizmo (lewy górny róg Viewportu)
-                ImGui::SetCursorPos(ImVec2(10.0f * s_uiScale, 10.0f * s_uiScale));
-                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
-                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                const float leftOverlayW = (s_showPlaceActors ? 270.0f : 345.0f) * s_uiScale;
-                ImGui::BeginChild("VpOverlayTopLeft", ImVec2(leftOverlayW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
-                if (!s_showPlaceActors) {
-                    if (ImGui::Button("> Aktorzy", ImVec2(0, 22.0f * s_uiScale))) s_showPlaceActors = true;
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin panel Place Actors");
-                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-                }
-                auto gizmoToolBtn = [&](const char* id, NativeGizmoMode mode, VectorIconType icon) {
-                    const bool active = (s_gizmoMode == mode);
-                    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.47f, 0.83f, 1.0f) : ImVec4(0.09f, 0.09f, 0.13f, 1.0f));
-                    ImVec2 p = ImGui::GetCursorScreenPos();
-                    const float sz = 22.0f * s_uiScale;
-                    if (ImGui::Button(id, ImVec2(sz, sz))) s_gizmoMode = mode;
-                    ImGui::PopStyleColor();
-                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f), 5.2f * s_uiScale, icon, IM_COL32(255, 255, 255, 245));
-                    ImGui::SameLine(0.0f, 3.0f * s_uiScale);
-                };
-                gizmoToolBtn("##GizT", NativeGizmoMode::TRANSLATE, VectorIconType::Translate);
-                gizmoToolBtn("##GizR", NativeGizmoMode::ROTATE,    VectorIconType::Rotate);
-                gizmoToolBtn("##GizS", NativeGizmoMode::SCALE,     VectorIconType::Scale);
-                if (ImGui::Button(s_snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * s_uiScale))) s_snapEnabled = !s_snapEnabled;
-                ImGui::SameLine();
-                if (ImGui::Button((" Cam " + std::to_string(s_cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * s_uiScale))) s_cameraSpeed = (s_cameraSpeed % 8) + 1;
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
-
-                // Pigułka statusu (prawy górny róg Viewportu)
-                const float trPillW = ((s_showOutliner || s_showDetails) ? 350.0f : 435.0f) * s_uiScale;
-                ImGui::SetCursorPos(ImVec2(std::max(10.0f, viewportPanelSize.x - trPillW - 10.0f * s_uiScale), 10.0f * s_uiScale));
-                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.055f, 0.086f, 0.90f));
-                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-                ImGui::BeginChild("VpOverlayTopRight", ImVec2(trPillW, 30.0f * s_uiScale), true, ImGuiWindowFlags_NoScrollbar);
-                if (!s_showOutliner && !s_showDetails) {
-                    if (ImGui::Button("Inspektor <", ImVec2(0, 22.0f * s_uiScale))) { s_showOutliner = true; s_showDetails = true; }
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin prawy panel inspektora");
-                    ImGui::SameLine(0.0f, 4.0f * s_uiScale);
-                }
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Cubemap IBL + ACES");
-                ImGui::SameLine();
-                ImGui::TextDisabled("|");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.20f, 0.92f, 0.58f, 1.0f), "%ux%u (EV %.2f)", m_width, m_height, m_exposure);
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
-            }
+            EditorViewportOverlayState viewportOverlayState{
+                s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
+                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode
+            };
+            drawEditorViewportOverlay(viewportOverlayState, viewportPanelSize);
 
             ImGui::End();
             ImGui::PopStyleColor();

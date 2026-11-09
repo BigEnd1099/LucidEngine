@@ -21,6 +21,8 @@ namespace engine::renderer {
 
     struct EditorPreferencesUiState;
     struct EditorTopBarUiState;
+    struct EditorViewportOverlayState;
+    enum class EditorGizmoMode;
     class VulkanRenderer {
     public:
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
@@ -150,6 +152,7 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
+        void drawEditorViewportOverlay(EditorViewportOverlayState& state, const ImVec2& viewportPanelSize);
         void drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiState& state,
                                    float screenW, float topTitleBarH, float topLevelTabsH,
                                    float topToolbarH, entt::entity& selectedEntity);
