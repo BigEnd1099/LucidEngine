@@ -3,6 +3,7 @@
 #include "renderer/EditorUiControls.hpp"
 #include "renderer/EditorProjectDialogs.hpp"
 #include "renderer/EditorUiBottomPanels.hpp"
+#include "renderer/EditorOutlinerPanel.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -1182,6 +1183,7 @@ namespace engine::renderer {
 
             drawEditorOutlinerPanel(registry, engine, selectedEnt, s_immersivePlay,
                                      s_showOutliner, s_showDetails, s_uiScale,
+                                     leftPanelW, centerViewportW, topTotalH, outlinerH,
                                      camPos, front, camYaw, camPitch, camFov);
 
 
