@@ -1,4 +1,9 @@
 #include "renderer/VulkanRenderer.hpp"
+#include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorUiControls.hpp"
+#include "renderer/EditorProjectDialogs.hpp"
+#include "renderer/EditorUiBottomPanels.hpp"
+#include "renderer/EditorOutlinerPanel.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -24,361 +29,12 @@
 
 namespace engine::renderer {
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <commdlg.h>
-#pragma comment(lib, "comdlg32.lib")
 
-static std::string openProjectNativeDialog() {
-    char filename[MAX_PATH] = "";
-    OPENFILENAMEA ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = "Lucid / Unreal Project (*.uproject;*.json)\0*.uproject;*.json;project.json;game.json\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) {
-        std::filesystem::path p(filename);
-        return p.string();
-    }
-    return "";
-}
-
-static std::string saveProjectNativeDialog() {
-    char filename[MAX_PATH] = "MyProject.uproject";
-    OPENFILENAMEA ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = "Unreal Project Descriptor (*.uproject)\0*.uproject\0Game Package (*.json)\0*.json\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) {
-        std::filesystem::path p(filename);
-        if (!p.has_extension()) {
-            p += ".uproject";
-        }
-        return p.string();
-    }
-    return "";
-}
-#else
-static std::string openProjectNativeDialog() { return ""; }
-static std::string saveProjectNativeDialog() { return ""; }
-#endif
 
 
     extern uint32_t g_pendingRenderWidth;
     extern uint32_t g_pendingRenderHeight;
     extern int      g_pendingHdriIndex;
-
-    static void applyUnrealWebTheme() {
-        ImGuiStyle& style = ImGui::GetStyle();
-        ImVec4* colors = style.Colors;
-
-        colors[ImGuiCol_WindowBg]             = ImVec4(0.051f, 0.067f, 0.090f, 1.00f);
-        colors[ImGuiCol_ChildBg]              = ImVec4(0.086f, 0.106f, 0.133f, 1.00f);
-        colors[ImGuiCol_PopupBg]              = ImVec4(0.086f, 0.106f, 0.133f, 0.98f);
-        colors[ImGuiCol_Border]               = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
-        colors[ImGuiCol_BorderShadow]         = ImVec4(0.000f, 0.000f, 0.000f, 0.00f);
-
-        colors[ImGuiCol_TitleBg]              = ImVec4(0.043f, 0.055f, 0.075f, 1.00f);
-        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.051f, 0.067f, 0.090f, 1.00f);
-        colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.043f, 0.055f, 0.075f, 0.75f);
-        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.043f, 0.055f, 0.075f, 1.00f);
-
-        colors[ImGuiCol_Text]                 = ImVec4(0.945f, 0.960f, 0.980f, 1.00f);
-        colors[ImGuiCol_TextDisabled]         = ImVec4(0.580f, 0.635f, 0.720f, 1.00f);
-
-        colors[ImGuiCol_FrameBg]              = ImVec4(0.086f, 0.106f, 0.133f, 1.00f);
-        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.129f, 0.149f, 0.176f, 1.00f);
-        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
-
-        colors[ImGuiCol_Button]               = ImVec4(0.129f, 0.149f, 0.176f, 1.00f);
-        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
-        colors[ImGuiCol_ButtonActive]         = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
-
-        colors[ImGuiCol_Header]               = ImVec4(0.000f, 0.440f, 0.950f, 0.50f);
-        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.000f, 0.440f, 0.950f, 0.75f);
-        colors[ImGuiCol_HeaderActive]         = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
-
-        colors[ImGuiCol_Tab]                  = ImVec4(0.051f, 0.067f, 0.090f, 1.00f);
-        colors[ImGuiCol_TabHovered]           = ImVec4(0.129f, 0.149f, 0.176f, 1.00f);
-        colors[ImGuiCol_TabActive]            = ImVec4(0.086f, 0.106f, 0.133f, 1.00f);
-        colors[ImGuiCol_TabUnfocused]         = ImVec4(0.043f, 0.055f, 0.075f, 1.00f);
-        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.065f, 0.080f, 0.105f, 1.00f);
-
-        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.051f, 0.067f, 0.090f, 0.50f);
-        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.250f, 0.280f, 0.320f, 1.00f);
-        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
-        colors[ImGuiCol_CheckMark]            = ImVec4(0.000f, 0.850f, 1.000f, 1.00f);
-        colors[ImGuiCol_SliderGrab]           = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
-        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.200f, 0.650f, 1.000f, 1.00f);
-        colors[ImGuiCol_Separator]            = ImVec4(0.188f, 0.212f, 0.239f, 1.00f);
-        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.000f, 0.440f, 0.950f, 0.78f);
-        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.000f, 0.440f, 0.950f, 1.00f);
-
-        style.WindowRounding    = 0.0f;
-        style.ChildRounding     = 6.0f;
-        style.FrameRounding     = 5.0f;
-        style.PopupRounding     = 6.0f;
-        style.ScrollbarRounding = 4.0f;
-        style.GrabRounding      = 4.0f;
-        style.TabRounding       = 4.0f;
-
-        style.WindowBorderSize  = 1.0f;
-        style.ChildBorderSize   = 1.0f;
-        style.PopupBorderSize   = 1.0f;
-        style.FrameBorderSize   = 1.0f;
-
-        style.WindowPadding     = ImVec2(6.0f, 5.0f);
-        style.FramePadding      = ImVec2(6.0f, 3.5f);
-        style.ItemSpacing       = ImVec2(5.0f, 4.0f);
-        style.ItemInnerSpacing  = ImVec2(4.0f, 3.0f);
-        style.ScrollbarSize     = 10.0f;
-    }
-
-    static void loadUnrealFont(ImGuiIO& io) {
-        const std::vector<std::string> fontCandidates = {
-            "engine/assets/fonts/Inter-Variable.ttf",
-            "assets/fonts/Inter-Variable.ttf",
-            "public/fonts/Inter-Variable.ttf",
-            "public/fonts/Roboto-Medium.ttf",
-            "engine/assets/fonts/Roboto-Medium.ttf",
-            "assets/fonts/Roboto-Medium.ttf",
-            "D:/UE_5.8/Engine/Content/Slate/Fonts/Roboto-Medium.ttf",
-            "public/fonts/Roboto-Regular.ttf",
-            "engine/assets/fonts/Roboto-Regular.ttf",
-            "C:/Windows/Fonts/segoeui.ttf",
-            "C:/Windows/Fonts/arial.ttf"
-        };
-
-        static const ImWchar glyphRanges[] = {
-            0x0020, 0x00FF,
-            0x0100, 0x017F,
-            0x2000, 0x206F,
-            0x2200, 0x22FF,
-            0x25A0, 0x25FF,
-            0,
-        };
-
-        ImFont* loadedFont = nullptr;
-        for (const auto& path : fontCandidates) {
-            if (std::filesystem::exists(path)) {
-                ImFontConfig config;
-                config.OversampleH = 2;
-                config.OversampleV = 2;
-                config.RasterizerMultiply = 1.05f;
-                loadedFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f, &config, glyphRanges);
-                if (loadedFont) {
-                    core::Logger::info("Loaded Slate UI font: " + path);
-                    break;
-                }
-            }
-        }
-        if (!loadedFont) {
-            io.Fonts->AddFontDefault();
-        }
-    }
-
-    enum class VectorIconType {
-        Cube, Character, Pawn, Light, SkyLight, PlayerStart, TriggerBox, TriggerSphere,
-        Star, Clock, Shapes, Sparkles, Folder, WarningTri, Eye, Translate, Rotate, Scale,
-        Globe, Camera, Speaker, Wand, Pointer, Mountain, Leaf, Brush, Gear,
-        Play, Pause, Stop, SaveDisk
-    };
-
-    static void drawVectorIcon(ImDrawList* dl, ImVec2 center, float r, VectorIconType type, ImU32 col) {
-        switch (type) {
-            case VectorIconType::Cube: {
-                ImVec2 t0(center.x, center.y - r);
-                ImVec2 t1(center.x + r * 0.86f, center.y - r * 0.5f);
-                ImVec2 t2(center.x, center.y);
-                ImVec2 t3(center.x - r * 0.86f, center.y - r * 0.5f);
-                ImVec2 b1(center.x + r * 0.86f, center.y + r * 0.5f);
-                ImVec2 b2(center.x, center.y + r);
-                ImVec2 b3(center.x - r * 0.86f, center.y + r * 0.5f);
-                dl->AddLine(t0, t1, col, 1.4f); dl->AddLine(t1, t2, col, 1.4f);
-                dl->AddLine(t2, t3, col, 1.4f); dl->AddLine(t3, t0, col, 1.4f);
-                dl->AddLine(t1, b1, col, 1.4f); dl->AddLine(t2, b2, col, 1.4f); dl->AddLine(t3, b3, col, 1.4f);
-                dl->AddLine(b3, b2, col, 1.4f); dl->AddLine(b2, b1, col, 1.4f);
-                break;
-            }
-            case VectorIconType::Character: {
-                dl->AddCircle(ImVec2(center.x, center.y - r * 0.42f), r * 0.34f, col, 12, 1.5f);
-                dl->PathArcTo(ImVec2(center.x, center.y + r * 0.75f), r * 0.65f, 3.45f, 5.97f, 12);
-                dl->PathStroke(col, 0, 1.5f);
-                break;
-            }
-            case VectorIconType::Pawn: {
-                dl->AddCircle(ImVec2(center.x, center.y - r * 0.48f), r * 0.28f, col, 12, 1.5f);
-                dl->AddRect(ImVec2(center.x - r * 0.40f, center.y - r * 0.10f), ImVec2(center.x + r * 0.40f, center.y + r * 0.78f), col, r * 0.35f, 0, 1.5f);
-                break;
-            }
-            case VectorIconType::Light: {
-                dl->AddCircle(center, r * 0.40f, col, 12, 1.5f);
-                for (int i = 0; i < 8; ++i) {
-                    float a = i * 0.785398f;
-                    dl->AddLine(ImVec2(center.x + cosf(a) * r * 0.60f, center.y + sinf(a) * r * 0.60f),
-                                ImVec2(center.x + cosf(a) * r * 0.95f, center.y + sinf(a) * r * 0.95f), col, 1.3f);
-                }
-                break;
-            }
-            case VectorIconType::PlayerStart: {
-                dl->AddLine(ImVec2(center.x - r * 0.55f, center.y - r * 0.85f), ImVec2(center.x - r * 0.55f, center.y + r * 0.85f), col, 1.6f);
-                dl->AddTriangleFilled(ImVec2(center.x - r * 0.50f, center.y - r * 0.80f),
-                                      ImVec2(center.x + r * 0.75f, center.y - r * 0.30f),
-                                      ImVec2(center.x - r * 0.50f, center.y + r * 0.20f), col);
-                break;
-            }
-            case VectorIconType::TriggerBox: {
-                dl->AddRect(ImVec2(center.x - r * 0.78f, center.y - r * 0.68f), ImVec2(center.x + r * 0.78f, center.y + r * 0.68f), col, 2.0f, 0, 1.5f);
-                dl->AddCircleFilled(center, r * 0.22f, col);
-                break;
-            }
-            case VectorIconType::TriggerSphere: {
-                dl->AddCircle(center, r * 0.80f, col, 16, 1.5f);
-                dl->AddCircle(center, r * 0.32f, col, 12, 1.2f);
-                break;
-            }
-            case VectorIconType::Shapes: {
-                dl->AddTriangle(ImVec2(center.x, center.y - r * 0.85f), ImVec2(center.x + r * 0.75f, center.y + r * 0.45f), ImVec2(center.x - r * 0.75f, center.y + r * 0.45f), col, 1.5f);
-                break;
-            }
-            case VectorIconType::Sparkles: {
-                dl->AddLine(ImVec2(center.x, center.y - r * 0.90f), ImVec2(center.x, center.y + r * 0.90f), col, 1.5f);
-                dl->AddLine(ImVec2(center.x - r * 0.90f, center.y), ImVec2(center.x + r * 0.90f, center.y), col, 1.5f);
-                dl->AddCircleFilled(center, r * 0.25f, col);
-                break;
-            }
-            case VectorIconType::Folder: {
-                dl->AddRectFilled(ImVec2(center.x - r * 0.85f, center.y - r * 0.65f), ImVec2(center.x - r * 0.10f, center.y - r * 0.35f), col, 1.5f);
-                dl->AddRectFilled(ImVec2(center.x - r * 0.85f, center.y - r * 0.42f), ImVec2(center.x + r * 0.85f, center.y + r * 0.65f), col, 2.0f);
-                break;
-            }
-            case VectorIconType::WarningTri: {
-                dl->AddTriangleFilled(ImVec2(center.x, center.y - r * 0.82f), ImVec2(center.x + r * 0.85f, center.y + r * 0.72f), ImVec2(center.x - r * 0.85f, center.y + r * 0.72f), col);
-                break;
-            }
-            case VectorIconType::Eye: {
-                dl->AddCircle(center, r * 0.62f, col, 12, 1.3f);
-                dl->AddCircleFilled(center, r * 0.25f, col);
-                break;
-            }
-            case VectorIconType::Translate: {
-                dl->AddLine(ImVec2(center.x - r * 0.85f, center.y), ImVec2(center.x + r * 0.85f, center.y), col, 1.5f);
-                dl->AddLine(ImVec2(center.x, center.y - r * 0.85f), ImVec2(center.x, center.y + r * 0.85f), col, 1.5f);
-                break;
-            }
-            case VectorIconType::Rotate: {
-                dl->PathArcTo(center, r * 0.72f, 0.4f, 5.3f, 14);
-                dl->PathStroke(col, 0, 1.6f);
-                break;
-            }
-            case VectorIconType::Scale: {
-                dl->AddRect(ImVec2(center.x - r * 0.75f, center.y - r * 0.75f), ImVec2(center.x + r * 0.75f, center.y + r * 0.75f), col, 1.5f, 0, 1.4f);
-                dl->AddLine(ImVec2(center.x - r * 0.45f, center.y + r * 0.45f), ImVec2(center.x + r * 0.45f, center.y - r * 0.45f), col, 1.5f);
-                break;
-            }
-            case VectorIconType::Speaker: {
-                dl->AddRectFilled(ImVec2(center.x - r * 0.75f, center.y - r * 0.32f), ImVec2(center.x - r * 0.30f, center.y + r * 0.32f), col, 1.0f);
-                dl->AddTriangleFilled(ImVec2(center.x - r * 0.35f, center.y), ImVec2(center.x + r * 0.25f, center.y - r * 0.68f), ImVec2(center.x + r * 0.25f, center.y + r * 0.68f), col);
-                dl->PathArcTo(ImVec2(center.x + r * 0.25f, center.y), r * 0.48f, -0.8f, 0.8f, 8);
-                dl->PathStroke(col, 0, 1.4f);
-                break;
-            }
-            case VectorIconType::Wand: {
-                dl->AddLine(ImVec2(center.x - r * 0.75f, center.y + r * 0.75f), ImVec2(center.x + r * 0.55f, center.y - r * 0.55f), col, 1.8f);
-                dl->AddCircleFilled(ImVec2(center.x + r * 0.65f, center.y - r * 0.65f), r * 0.22f, col);
-                break;
-            }
-            case VectorIconType::Pointer: {
-                ImVec2 p0(center.x - r * 0.6f, center.y - r * 0.8f);
-                ImVec2 p1(center.x - r * 0.6f, center.y + r * 0.6f);
-                ImVec2 p2(center.x - r * 0.1f, center.y + r * 0.2f);
-                ImVec2 p3(center.x + r * 0.5f, center.y + r * 0.7f);
-                dl->AddTriangleFilled(p0, p1, p2, col);
-                dl->AddLine(p2, p3, col, 1.6f);
-                break;
-            }
-            case VectorIconType::Mountain: {
-                dl->AddTriangle(ImVec2(center.x - r * 0.8f, center.y + r * 0.6f), ImVec2(center.x - r * 0.2f, center.y - r * 0.5f), ImVec2(center.x + r * 0.4f, center.y + r * 0.6f), col, 1.4f);
-                dl->AddTriangle(ImVec2(center.x + r * 0.1f, center.y + r * 0.6f), ImVec2(center.x + r * 0.5f, center.y - r * 0.2f), ImVec2(center.x + r * 0.9f, center.y + r * 0.6f), col, 1.4f);
-                break;
-            }
-            case VectorIconType::Leaf: {
-                dl->PathArcTo(ImVec2(center.x - r * 0.2f, center.y), r * 0.6f, -1.57f, 1.57f, 8);
-                dl->PathStroke(col, 0, 1.4f);
-                dl->PathArcTo(ImVec2(center.x + r * 0.2f, center.y), r * 0.6f, 1.57f, 4.71f, 8);
-                dl->PathStroke(col, 0, 1.4f);
-                dl->AddLine(ImVec2(center.x, center.y - r * 0.6f), ImVec2(center.x, center.y + r * 0.7f), col, 1.2f);
-                break;
-            }
-            case VectorIconType::Brush: {
-                dl->AddLine(ImVec2(center.x + r * 0.6f, center.y - r * 0.6f), ImVec2(center.x - r * 0.1f, center.y + r * 0.1f), col, 2.0f);
-                dl->AddTriangleFilled(ImVec2(center.x - r * 0.4f, center.y + r * 0.2f), ImVec2(center.x - r * 0.1f, center.y + r * 0.5f), ImVec2(center.x - r * 0.6f, center.y + r * 0.7f), col);
-                break;
-            }
-            case VectorIconType::Gear: {
-                dl->AddCircle(center, r * 0.45f, col, 12, 1.5f);
-                for (int i = 0; i < 6; ++i) {
-                    float a = i * 1.047197f;
-                    dl->AddLine(ImVec2(center.x + cosf(a) * r * 0.45f, center.y + sinf(a) * r * 0.45f),
-                                ImVec2(center.x + cosf(a) * r * 0.85f, center.y + sinf(a) * r * 0.85f), col, 2.0f);
-                }
-                break;
-            }
-            case VectorIconType::Play: {
-                const float ox = r * 0.12f;
-                ImVec2 p0(center.x - r * 0.55f + ox, center.y - r * 0.75f);
-                ImVec2 p1(center.x + r * 0.75f + ox, center.y);
-                ImVec2 p2(center.x - r * 0.55f + ox, center.y + r * 0.75f);
-                dl->AddTriangleFilled(p0, p1, p2, col);
-                break;
-            }
-            case VectorIconType::Pause: {
-                const float barW = r * 0.28f;
-                const float barH = r * 0.70f;
-                const float gap = r * 0.20f;
-                dl->AddRectFilled(ImVec2(center.x - gap - barW, center.y - barH),
-                                  ImVec2(center.x - gap,        center.y + barH), col, 1.0f);
-                dl->AddRectFilled(ImVec2(center.x + gap,        center.y - barH),
-                                  ImVec2(center.x + gap + barW, center.y + barH), col, 1.0f);
-                break;
-            }
-            case VectorIconType::Stop: {
-                const float s = r * 0.62f;
-                dl->AddRectFilled(ImVec2(center.x - s, center.y - s),
-                                  ImVec2(center.x + s, center.y + s), col, 1.2f);
-                break;
-            }
-            case VectorIconType::SaveDisk: {
-                const float s = r * 0.78f;
-                dl->AddRectFilled(ImVec2(center.x - s, center.y - s),
-                                  ImVec2(center.x + s, center.y + s), col, 1.5f);
-                const ImU32 cutCol = IM_COL32(20, 20, 28, 255);
-                dl->AddRectFilled(ImVec2(center.x - s * 0.52f, center.y - s),
-                                  ImVec2(center.x + s * 0.40f, center.y - s * 0.25f), cutCol);
-                dl->AddRectFilled(ImVec2(center.x - s * 0.15f, center.y - s * 0.85f),
-                                  ImVec2(center.x + s * 0.15f, center.y - s * 0.45f), col);
-                dl->AddRectFilled(ImVec2(center.x - s * 0.62f, center.y + s * 0.12f),
-                                  ImVec2(center.x + s * 0.62f, center.y + s * 0.78f), cutCol, 1.0f);
-                break;
-            }
-            default: {
-                dl->AddCircle(center, r * 0.5f, col, 12, 1.5f);
-                break;
-            }
-        }
-    }
 
     void VulkanRenderer::initImGui() {
         IMGUI_CHECKVERSION();
@@ -387,8 +43,8 @@ static std::string saveProjectNativeDialog() { return ""; }
         io.IniFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-        loadUnrealFont(io);
-        applyUnrealWebTheme();
+        loadEditorUiFont(io);
+        applyEditorUiTheme();
 
         ImGui_ImplGlfw_InitForVulkan(m_context->getWindow(), true);
         if (glfwRawMouseMotionSupported()) {
@@ -456,75 +112,6 @@ static std::string saveProjectNativeDialog() { return ""; }
         if (lenSq < 1e-4f) return hypotf(p.x - a.x, p.y - a.y);
         const float t = std::clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq, 0.0f, 1.0f);
         return hypotf(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
-    }
-
-    static float applyCtrlSnap(float val, float snapStep = 0.5f) {
-        if (ImGui::GetIO().KeyCtrl) {
-            return std::round(val / snapStep) * snapStep;
-        }
-        return val;
-    }
-
-    static bool drawVec3Control(const char* label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 70.0f) {
-        bool changed = false;
-        ImGui::PushID(label);
-        ImGui::Columns(2);
-        ImGui::SetColumnWidth(0, columnWidth);
-        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.92f, 1.0f), "%s", label);
-        ImGui::NextColumn();
-
-        const float lineHeight = ImGui::GetFrameHeight();
-        const ImVec2 buttonSize = { lineHeight + 2.0f, lineHeight };
-        const float availW = ImGui::GetContentRegionAvail().x;
-        const float itemWidth = std::max(35.0f, (availW - 3.0f * buttonSize.x - 24.0f) / 3.0f);
-
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 0));
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.18f, 0.20f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.28f, 0.30f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.12f, 0.14f, 1.0f));
-        if (ImGui::Button("X", buttonSize)) { values.x = resetValue; changed = true; }
-        ImGui::PopStyleColor(3);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f")) {
-            values.x = applyCtrlSnap(values.x);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("[Ctrl] Przyciagaj do siatki (0.5m)");
-        ImGui::SameLine();
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.75f, 0.25f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.90f, 0.35f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.60f, 0.18f, 1.0f));
-        if (ImGui::Button("Y", buttonSize)) { values.y = resetValue; changed = true; }
-        ImGui::PopStyleColor(3);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f")) {
-            values.y = applyCtrlSnap(values.y);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("[Ctrl] Przyciagaj do siatki (0.5m)");
-        ImGui::SameLine();
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.90f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.48f, 1.0f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.28f, 0.75f, 1.0f));
-        if (ImGui::Button("Z", buttonSize)) { values.z = resetValue; changed = true; }
-        ImGui::PopStyleColor(3);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(itemWidth);
-        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f")) {
-            values.z = applyCtrlSnap(values.z);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("[Ctrl] Przyciagaj do siatki (0.5m)");
-
-        ImGui::PopStyleVar();
-        ImGui::Columns(1);
-        ImGui::PopID();
-        return changed;
     }
 
     void VulkanRenderer::renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine) {
@@ -601,6 +188,7 @@ static std::string saveProjectNativeDialog() { return ""; }
             static float s_userOutlinerH = 240.0f;
             static float s_userDrawerH = 220.0f;
             static bool s_splittersInit = false;
+            static bool s_splitterWasActive = false;
             static ImGuiID s_activeSplitterId = 0;
             static bool s_anySplitterHovered = false;
             static bool s_wasSplitterHoveredLastFrame = false;
@@ -614,10 +202,13 @@ static std::string saveProjectNativeDialog() { return ""; }
                     s_userOutlinerH   = pref.userOutlinerH;
                     s_userDrawerH     = pref.userDrawerH;
                 } else {
-                    s_userLeftPanelW  = 260.0f * s_uiScale;
-                    s_userRightPanelW = 310.0f * s_uiScale;
-                    s_userOutlinerH   = 240.0f * s_uiScale;
-                    s_userDrawerH     = 220.0f * s_uiScale;
+                    // Start with a balanced layout that scales with the actual editor viewport.
+                    // Keep enough width for the scene viewport while giving Details room for
+                    // longer rendering controls (RT, GI, denoiser and environment settings).
+                    s_userLeftPanelW  = std::clamp(screenW * 0.16f, 210.0f * s_uiScale, 300.0f * s_uiScale);
+                    s_userRightPanelW = std::clamp(screenW * 0.29f, 340.0f * s_uiScale, 540.0f * s_uiScale);
+                    s_userOutlinerH   = std::clamp(screenH * 0.30f, 220.0f * s_uiScale, 360.0f * s_uiScale);
+                    s_userDrawerH     = std::clamp(screenH * 0.24f, 180.0f * s_uiScale, 300.0f * s_uiScale);
                 }
             }
 
@@ -792,7 +383,7 @@ static std::string saveProjectNativeDialog() { return ""; }
             static float s_snapStep = 0.5f;
             static int s_cameraSpeed = 4;
             static int s_placeActorCategory = 2;
-            static int s_detailsTab = 0;
+
 
             static bool s_camPrefsInit = false;
             if (!s_camPrefsInit && engine) {
@@ -872,7 +463,7 @@ static std::string saveProjectNativeDialog() { return ""; }
                             s_showPreferencesWindow = true;
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("World & Graphics Settings")) { s_detailsTab = 1; s_showDetails = true; }
+                        if (ImGui::MenuItem("World & Graphics Settings")) { m_detailsTab = 1; s_showDetails = true; }
                         ImGui::EndMenu();
                     }
                     if (ImGui::BeginMenu("Window")) {
@@ -968,7 +559,7 @@ static std::string saveProjectNativeDialog() { return ""; }
                 ImGui::PopStyleColor();
                 ImVec2 tabEnd = ImGui::GetItemRectMax();
                 ImGui::GetWindowDrawList()->AddLine(tabStart, ImVec2(tabEnd.x, tabStart.y), IM_COL32(0, 130, 240, 255), 2.0f);
-                drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * s_uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
+                drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * s_uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
 
                 ImGui::End();
                 ImGui::PopStyleColor();
@@ -987,7 +578,7 @@ static std::string saveProjectNativeDialog() { return ""; }
             // Zapisz projekt z ikona dysku
             ImVec2 sPos = ImGui::GetCursorScreenPos();
             if (ImGui::Button("     Zapisz ", ImVec2(0, btnH))) saveCurrentGame();
-            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * s_uiScale, sPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
+            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * s_uiScale, sPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zapisz biezacy stan projektu [Ctrl+S]");
             ImGui::SameLine();
 
@@ -1001,8 +592,8 @@ static std::string saveProjectNativeDialog() { return ""; }
             // Szybki dostep do oswietlenia i renderera
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.32f, 1.0f));
             ImVec2 gPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { s_detailsTab = 1; s_showDetails = true; }
-            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * s_uiScale, gPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
+            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { m_detailsTab = 1; s_showDetails = true; }
+            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * s_uiScale, gPos.y + btnH * 0.5f), 5.5f * s_uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
             ImGui::PopStyleColor();
             ImGui::SameLine();
 
@@ -1020,19 +611,19 @@ static std::string saveProjectNativeDialog() { return ""; }
             } else {
                 if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) engine->playSimulation();
             }
-            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * s_uiScale, plPos.y + btnH * 0.5f), 5.0f * s_uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
+            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * s_uiScale, plPos.y + btnH * 0.5f), 5.0f * s_uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Uruchom symulacje fizyki Jolt i skrypty");
             ImGui::SameLine();
 
             ImVec2 paPos = ImGui::GetCursorScreenPos();
             if (ImGui::Button("     Pauza ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
-            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * s_uiScale, paPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
+            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * s_uiScale, paPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wstrzymaj symulacje fizyki");
             ImGui::SameLine();
 
             ImVec2 stPos = ImGui::GetCursorScreenPos();
             if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) engine->stopSimulation();
-            drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * s_uiScale, stPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
+            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * s_uiScale, stPos.y + btnH * 0.5f), 4.8f * s_uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
             ImGui::SameLine();
 
@@ -1072,10 +663,10 @@ static std::string saveProjectNativeDialog() { return ""; }
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.086f, 0.106f, 0.133f, 1.0f));
                     if (ImGui::Button("##DockBtn", ImVec2(itemSz, itemSz))) {
                         s_activeToolMode = i;
-                        if (i == 5) { s_detailsTab = 1; s_showDetails = true; }
+                        if (i == 5) { m_detailsTab = 1; s_showDetails = true; }
                     }
                     ImGui::PopStyleColor();
-                    drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
+                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + itemSz * 0.5f, p.y + itemSz * 0.5f), 7.5f * s_uiScale, dockIcons[i], IM_COL32(235, 242, 255, 240));
                     ImGui::PopID();
                     ImGui::Spacing();
                 }
@@ -1113,7 +704,7 @@ static std::string saveProjectNativeDialog() { return ""; }
                     const float tileSz = 26.0f * s_uiScale;
                     ImVec2 tileMin(cPos.x + 5.0f * s_uiScale, cPos.y + (cardH - tileSz) * 0.5f);
                     cdl->AddRectFilled(tileMin, ImVec2(tileMin.x + tileSz, tileMin.y + tileSz), IM_COL32(18, 24, 34, 255), 4.0f);
-                    drawVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
+                    drawEditorVectorIcon(cdl, ImVec2(tileMin.x + tileSz * 0.5f, tileMin.y + tileSz * 0.5f), 6.5f * s_uiScale, iconType, iconCol);
 
                     ImGui::SetCursorPos(ImVec2(36.0f * s_uiScale, 3.5f * s_uiScale));
                     ImGui::TextColored(ImVec4(0.96f, 0.97f, 1.0f, 1.0f), "%s", title);
@@ -1552,7 +1143,7 @@ static std::string saveProjectNativeDialog() { return ""; }
                     const float sz = 22.0f * s_uiScale;
                     if (ImGui::Button(id, ImVec2(sz, sz))) s_gizmoMode = mode;
                     ImGui::PopStyleColor();
-                    drawVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f), 5.2f * s_uiScale, icon, IM_COL32(255, 255, 255, 245));
+                    drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f), 5.2f * s_uiScale, icon, IM_COL32(255, 255, 255, 245));
                     ImGui::SameLine(0.0f, 3.0f * s_uiScale);
                 };
                 gizmoToolBtn("##GizT", NativeGizmoMode::TRANSLATE, VectorIconType::Translate);
@@ -1590,776 +1181,23 @@ static std::string saveProjectNativeDialog() { return ""; }
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
-            // 6. OUTLINER PANEL
-            if (!s_immersivePlay && s_showOutliner) {
-                ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, topTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(rightPanelW, outlinerH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
-                ImGui::Begin("OutlinerPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+            drawEditorOutlinerPanel(registry, engine, selectedEnt, s_immersivePlay,
+                                     s_showOutliner, s_showDetails, s_uiScale,
+                                     leftPanelW, centerViewportW, rightPanelW, topTotalH, outlinerH,
+                                     camPos, front, camYaw, camPitch, camFov);
 
-                ImDrawList* odl = ImGui::GetWindowDrawList();
-                ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
-                drawVectorIcon(odl, ImVec2(oHdrPos.x + 8.0f * s_uiScale, oHdrPos.y + 9.0f * s_uiScale), 5.5f * s_uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * s_uiScale);
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Hierarchia Sceny");
 
-                auto viewAll = registry.get().view<ecs::TransformComponent>();
-                ImGui::SameLine(ImGui::GetWindowWidth() - 95.0f * s_uiScale);
-                ImGui::TextDisabled("[%zu]", viewAll.size());
-                ImGui::SameLine(ImGui::GetWindowWidth() - 24.0f * s_uiScale);
-                if (ImGui::SmallButton(">")) { s_showOutliner = false; s_showDetails = false; }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin prawy panel inspektora");
+            drawEditorDetailsPanel(registry, engine, selectedEnt, s_immersivePlay,
+                                   s_showDetails, s_showOutliner, s_uiScale,
+                                   leftPanelW, centerViewportW, topTotalH, outlinerH,
+                                   rightPanelW, detailsH, camPos, front, camYaw, camPitch,
+                                   camFov, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
-                static int s_outlinerCategory = 0; // 0: Wszystko, 1: Siatki, 2: Swiatla, 3: Fizyka, 4: Gracz
-                auto drawFilterChip = [&](const char* name, int cIdx) {
-                    const bool active = (s_outlinerCategory == cIdx);
-                    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.44f, 0.95f, 1.0f));
-                    else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.09f, 0.12f, 1.0f));
-                    if (ImGui::SmallButton(name)) s_outlinerCategory = cIdx;
-                    ImGui::PopStyleColor();
-                    ImGui::SameLine(0.0f, 3.0f * s_uiScale);
-                };
-                drawFilterChip("Wszystko", 0);
-                drawFilterChip("Siatki", 1);
-                drawFilterChip("Swiatla", 2);
-                drawFilterChip("Fizyka", 3);
-                drawFilterChip("Gracz", 4);
-                ImGui::NewLine();
 
-                static char outlinerFilter[64] = "";
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 62.0f * s_uiScale);
-                ImGui::InputTextWithHint("##OutlinerSearch", "Filtruj scene...", outlinerFilter, sizeof(outlinerFilter));
-                ImGui::SameLine();
-                if (ImGui::Button("+ Spawn", ImVec2(58.0f * s_uiScale, 0))) {
-                    auto newEnt = registry.createEntity();
-                    glm::vec3 sp = camPos + front * 6.0f;
-                    if (sp.y < 0.5f) sp.y = 0.5f;
-                    registry.get().emplace<ecs::TagComponent>(newEnt, ecs::TagComponent{"NowyAktor_" + std::to_string(static_cast<uint32_t>(newEnt))});
-                    registry.get().emplace<ecs::TransformComponent>(newEnt, sp, glm::vec3(0.0f), glm::vec3(1.0f));
-                    registry.get().emplace<ecs::MeshComponent>(newEnt, ecs::MeshComponent{2});
-                    selectedEnt = newEnt;
-                    if (engine) engine->setSelectedEntity(selectedEnt);
-                }
-                ImGui::Separator();
+            drawEditorBottomPanels(s_immersivePlay, s_showContentDrawer, s_showOutputLog,
+                                   screenW, screenH, bottomTotalH, drawerH, bottomStatusH,
+                                   s_uiScale, ImGui::GetIO().Framerate, m_width, m_height);
 
-                ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
-                auto view = registry.get().view<ecs::TransformComponent>();
-                for (auto entity : view) {
-                    std::string label = "Entity_" + std::to_string(static_cast<uint32_t>(entity));
-                    if (registry.get().all_of<ecs::TagComponent>(entity)) {
-                        label = registry.get().get<ecs::TagComponent>(entity).name;
-                    }
-                    if (outlinerFilter[0] != '\0') {
-                        std::string f = outlinerFilter, l = label;
-                        std::transform(f.begin(), f.end(), f.begin(), ::tolower);
-                        std::transform(l.begin(), l.end(), l.begin(), ::tolower);
-                        if (l.find(f) == std::string::npos) continue;
-                    }
-                    const bool isSelected = (selectedEnt == entity);
-                    ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
-                    if (ImGui::Selectable(label.c_str(), isSelected)) {
-                        selectedEnt = entity;
-                        if (engine) engine->setSelectedEntity(selectedEnt);
-                    }
-
-                    if (ImGui::BeginPopupContextItem("EntityRowCtxMenu")) {
-                        selectedEnt = entity;
-                        if (engine) engine->setSelectedEntity(selectedEnt);
-                        ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Encja #%u: %s", static_cast<uint32_t>(entity), label.c_str());
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Skup kamere [F]")) {
-                            if (registry.get().all_of<ecs::TransformComponent>(entity)) {
-                                const auto& tc = registry.get().get<ecs::TransformComponent>(entity);
-                                if (engine) engine->setCamera(tc.position - front * 8.0f, camYaw, camPitch, camFov);
-                            }
-                        }
-                        if (ImGui::MenuItem("Zresetuj pozycje (0, 0, 0)")) {
-                            if (registry.get().all_of<ecs::TransformComponent>(entity)) {
-                                auto& tc = registry.get().get<ecs::TransformComponent>(entity);
-                                tc.position = glm::vec3(0.0f);
-                                if (engine) engine->syncEntityTransformPhysics(entity);
-                            }
-                        }
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Usun obiekt [Delete]")) {
-                            registry.get().destroy(entity);
-                            if (selectedEnt == entity) selectedEnt = entt::null;
-                            if (engine) engine->setSelectedEntity(entt::null);
-                            ImGui::EndPopup();
-                            ImGui::PopID();
-                            break;
-                        }
-                        ImGui::EndPopup();
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndChild();
-                ImGui::End();
-                ImGui::PopStyleColor();
-            }
-
-            // 7. DETAILS & WORLD / GRAPHICS SETTINGS PANEL
-            if (!s_immersivePlay && s_showDetails) {
-                const float detailsY = topTotalH + (s_showOutliner ? outlinerH : 0.0f);
-
-                ImGui::SetNextWindowPos(ImVec2(leftPanelW + centerViewportW, detailsY), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(rightPanelW, detailsH), ImGuiCond_Always);
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
-                ImGui::Begin("DetailsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-
-                if (ImGui::Button("  Details  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 0;
-                ImGui::SameLine();
-                if (ImGui::Button("  World & Graphics  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 1;
-                ImGui::Separator();
-
-                if (s_detailsTab == 0) {
-                    if (selectedEnt == entt::null || !registry.get().valid(selectedEnt)) {
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), "Wybierz obiekt ze sceny");
-                        ImGui::TextDisabled("Kliknij dowolny obiekt w oknie 3D lub w Outlinerze powyzej,");
-                        ImGui::TextDisabled("aby wyswietlic pelne wlasciwosci (Transform, Siatka, PBR, Fizyka, Chemia, Swiatlo).");
-                        ImGui::Spacing();
-                        ImGui::SeparatorText("Szybkie spawnowanie obiektow");
-                        auto quickSpawnBtn = [&](const char* name, int mId, glm::vec3 col) {
-                            if (ImGui::Button(name)) {
-                                auto ent = registry.createEntity();
-                                glm::vec3 sp = camPos + front * 6.0f;
-                                if (sp.y < 0.5f) sp.y = 0.5f;
-                                registry.get().emplace<ecs::TagComponent>(ent, ecs::TagComponent{name});
-                                registry.get().emplace<ecs::TransformComponent>(ent, sp, glm::vec3(0.0f), glm::vec3(1.0f));
-                                registry.get().emplace<ecs::MeshComponent>(ent, ecs::MeshComponent{static_cast<uint32_t>(mId)});
-                                ecs::RigidBodyComponent rb{}; rb.mass = 1.0f;
-                                registry.get().emplace<ecs::RigidBodyComponent>(ent, rb);
-                                ecs::MaterialComponent mat{}; mat.baseColor = glm::vec4(col, 1.0f); mat.roughness = 0.35f;
-                                registry.get().emplace<ecs::MaterialComponent>(ent, mat);
-                                selectedEnt = ent;
-                                if (engine) engine->setSelectedEntity(selectedEnt);
-                            }
-                        };
-                        quickSpawnBtn("+ Szescian Fizyczny", 2, glm::vec3(0.3f, 0.6f, 0.9f));
-                        quickSpawnBtn("+ Kula Metaliczna", 3, glm::vec3(0.95f, 0.8f, 0.3f));
-                        quickSpawnBtn("+ Kapsula / Postac", 5, glm::vec3(0.2f, 0.9f, 0.4f));
-                        ImGui::Spacing();
-                        ImGui::TextDisabled("Mozesz takze przelaczyc sie na zakladke 'World & Graphics' u gory,");
-                        ImGui::TextDisabled("aby sterowac Niebem HDRI, Sloncem, Mgla i Ray Tracingiem.");
-                    } else {
-                        std::string tagStr = registry.get().all_of<ecs::TagComponent>(selectedEnt)
-                            ? registry.get().get<ecs::TagComponent>(selectedEnt).name
-                            : "Actor";
-                        char nameBuf[64];
-                        strncpy(nameBuf, tagStr.c_str(), sizeof(nameBuf) - 1);
-                        nameBuf[sizeof(nameBuf) - 1] = '\0';
-                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 70.0f * s_uiScale);
-                        if (ImGui::InputText("##EntityName", nameBuf, sizeof(nameBuf))) {
-                            if (registry.get().all_of<ecs::TagComponent>(selectedEnt)) {
-                                registry.get().get<ecs::TagComponent>(selectedEnt).name = nameBuf;
-                            } else {
-                                registry.get().emplace<ecs::TagComponent>(selectedEnt, ecs::TagComponent{nameBuf});
-                            }
-                        }
-                        ImGui::SameLine();
-                        ImGui::TextDisabled("#%u", static_cast<uint32_t>(selectedEnt));
-                        ImGui::Separator();
-
-                        if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                            auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const bool pCh = drawVec3Control("Location", t.position, 0.0f);
-                                const bool rCh = drawVec3Control("Rotation", t.rotation, 0.0f);
-                                const bool sCh = drawVec3Control("Scale", t.scale, 1.0f);
-                                if (rCh) t.orientation = glm::quat(glm::radians(t.rotation));
-                                if ((pCh || rCh || sCh) && engine) engine->syncEntityTransformPhysics(selectedEnt);
-
-                                ImGui::Spacing();
-                                if (ImGui::Button(" Zresetuj pozycje (0, 0, 0) ")) {
-                                    t.position = glm::vec3(0.0f);
-                                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                                }
-                                ImGui::SameLine();
-                                if (ImGui::Button(" Skup kamere [F] ")) {
-                                    if (engine) engine->setCamera(t.position - front * 8.0f, camYaw, camPitch, camFov);
-                                }
-                            }
-                        }
-
-                        if (registry.get().all_of<ecs::LightComponent>(selectedEnt)) {
-                            auto& lc = registry.get().get<ecs::LightComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Light Component (PBR)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const char* lightTypes[] = { "point", "sun", "spot", "area" };
-                                int curType = (lc.type == "directional" || lc.type == "sun") ? 1 : (lc.type == "spot" ? 2 : (lc.type == "area" ? 3 : 0));
-                                if (ImGui::Combo("Light Type", &curType, "Point Light\0Directional (Sun)\0Spot Light\0Area Light (Rect)\0\0")) {
-                                    lc.type = lightTypes[curType];
-                                }
-                                ImGui::ColorEdit3("Color", (float*)&lc.color);
-                                ImGui::DragFloat("Intensity", &lc.intensity, 0.1f, 0.0f, 100.0f, "%.2f");
-
-                                if (curType == 0) { // Point
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                } else if (curType == 1) { // Sun / Directional
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-
-                                        ImGui::Spacing();
-                                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Kierunek padania slonca (Sun Direction):");
-                                        if (ImGui::SliderFloat("Elevation (Pitch)", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Azimuth (Yaw)", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-
-                                        const float pitchRad = glm::radians(lt.rotation.x);
-                                        const float yawRad   = glm::radians(lt.rotation.y);
-                                        const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
-                                        const glm::vec3 currentSunDir = -sunForward;
-                                        ImGui::TextDisabled("Wektor swiatla: (%.2f, %.2f, %.2f)", currentSunDir.x, currentSunDir.y, currentSunDir.z);
-
-                                        ImGui::Text("Pory dnia:");
-                                        if (ImGui::SmallButton("Poludnie (Noon)")) {
-                                            lt.rotation.x = -75.0f; lt.rotation.y = 0.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Poranek")) {
-                                            lt.rotation.x = -20.0f; lt.rotation.y = 80.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Zlota godzina")) {
-                                            lt.rotation.x = -12.0f; lt.rotation.y = 240.0f; changed = true;
-                                        }
-                                        ImGui::SameLine();
-                                        if (ImGui::SmallButton("Zachod")) {
-                                            lt.rotation.x = -3.0f; lt.rotation.y = 265.0f; changed = true;
-                                        }
-
-                                        ImGui::Spacing();
-                                        if (engine) {
-                                            auto env = engine->getEnvironmentSettings();
-                                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)", &env.sunEnabled)) {
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                            if (ImGui::Checkbox("Kierunek z pozycji 3D (Direction From Position)", &env.sunDirectionFromPosition)) {
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                            ImGui::SameLine();
-                                            ImGui::TextDisabled("(?)");
-                                            if (ImGui::IsItemHovered()) {
-                                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
-                                            }
-                                        }
-
-                                        ImGui::Spacing();
-                                        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Pozycja slonca 3D (Sun Position):");
-                                        if (drawVec3Control("Pozycja (XYZ)", lt.position, 0.0f)) changed = true;
-                                        if (ImGui::DragFloat("Wysokosc / Altitude (Y)", &lt.position.y, 0.5f, -200.0f, 2000.0f, "%.1f m")) changed = true;
-
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) {
-                                                engine->syncEntityTransformPhysics(selectedEnt);
-                                                auto env = engine->getEnvironmentSettings();
-                                                env.sunDirection = currentSunDir;
-                                                env.sunColor = lc.color;
-                                                env.sunIntensity = lc.intensity;
-                                                engine->setEnvironmentSettings(env);
-                                            }
-                                        }
-                                    }
-                                } else if (curType == 2) { // Spot
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Inner Cone", &lc.innerConeAngle, 1.0f, 80.0f, "%.1f deg");
-                                    if (lc.outerConeAngle <= lc.innerConeAngle) lc.outerConeAngle = lc.innerConeAngle + 0.5f;
-                                    ImGui::SliderFloat("Outer Cone", &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, "%.1f deg");
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-                                        if (ImGui::SliderFloat("Spot Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Spot Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                                        }
-                                    }
-                                } else if (curType == 3) { // Area
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Area Width X", &lc.areaSizeX, 0.2f, 20.0f, "%.2f m");
-                                    ImGui::SliderFloat("Area Height Y", &lc.areaSizeY, 0.2f, 20.0f, "%.2f m");
-                                    if (registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
-                                        auto& lt = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                                        bool changed = false;
-                                        if (ImGui::SliderFloat("Area Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Area Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-                                        if (changed) {
-                                            lt.orientation = glm::quat(glm::radians(lt.rotation));
-                                            if (engine) engine->syncEntityTransformPhysics(selectedEnt);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
-                            auto& mc = registry.get().get<ecs::MeshComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Static Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const char* meshes[] = { "None", "Plane (Ground)", "Cube (1x1x1)", "Sphere (R=0.5)", "Cylinder", "Capsule" };
-                                int curMesh = std::clamp(static_cast<int>(mc.meshId), 0, 5);
-                                if (ImGui::Combo("Mesh Asset", &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
-                                    mc.meshId = static_cast<uint32_t>(curMesh);
-                                }
-                            }
-                        }
-
-                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL)
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEnt)) {
-                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                if (!registry.get().all_of<ecs::MaterialComponent>(selectedEnt)) {
-                                    if (ImGui::Button("+ Dodaj wlasny Material PBR")) {
-                                        ecs::MaterialComponent m{};
-                                        m.baseColor = glm::vec4(0.85f, 0.85f, 0.90f, 1.0f);
-                                        m.metallic = 0.0f;
-                                        m.roughness = 0.35f;
-                                        m.emissiveIntensity = 0.0f;
-                                        registry.get().emplace<ecs::MaterialComponent>(selectedEnt, m);
-                                    }
-                                } else {
-                                    auto& mat = registry.get().get<ecs::MaterialComponent>(selectedEnt);
-                                    ImGui::ColorEdit3("Base Color (Albedo)", &mat.baseColor.x);
-                                    ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f, "%.2f");
-                                    ImGui::SliderFloat("Roughness", &mat.roughness, 0.045f, 1.0f, "%.3f");
-                                    ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
-                                }
-                            }
-                        }
-
-                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEnt)) {
-                            auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEnt);
-                            if (ImGui::CollapsingHeader("Jolt Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f);
-                                ImGui::SliderFloat("Restitution", &rb.restitution, 0.0f, 1.0f);
-                                ImGui::SliderFloat("Friction", &rb.friction, 0.0f, 1.0f);
-                                ImGui::Checkbox("Is Sensor (Trigger)", &rb.isSensor);
-                            }
-                        }
-                    }
-                } else {
-                    // Hardware ray-query effects are optional; raster shadows remain the fallback.
-                    if (ImGui::CollapsingHeader("Hardware Ray Tracing (Vulkan Ray Query)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const bool rtSupported = m_context && m_context->isRayTracingSupported();
-                        if (!rtSupported) {
-                            ImGui::TextDisabled("Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features.");
-                        }
-                        ImGui::BeginDisabled(!rtSupported);
-                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rtSettings.enabled);
-                        ImGui::BeginDisabled(!m_rtSettings.enabled);
-                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtSettings.shadowsEnabled);
-                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtSettings.aoEnabled);
-                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
-                        ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Infinite Bounce (adaptive, max 8)", &m_rtSettings.reflectionInfiniteBounces);
-                        ImGui::BeginDisabled(m_rtSettings.reflectionInfiniteBounces);
-                        ImGui::SliderInt("RT Reflection Bounces", &m_rtSettings.reflectionBounces, 2, 4, "%d");
-                        ImGui::EndDisabled();
-                        ImGui::SliderFloat("Reflection Continuation Roughness", &m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f, "%.2f");
-                        ImGui::SliderFloat(m_rtSettings.reflectionInfiniteBounces ? "Russian Roulette Energy Threshold" : "Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
-                        if (m_rtSettings.reflectionInfiniteBounces)
-                            ImGui::TextDisabled("Adaptive path termination; hard safety limit: 8 surface hits.");
-                        ImGui::Checkbox("Roughness Checkerboard (Variant 1)", &m_rtSettings.reflectionCheckerboard);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Smooth surfaces (roughness <= 0.25) traced at full 1:1; rough surfaces traced on alternating checkerboard and bilaterally reconstructed.");
-                        ImGui::Checkbox("Stochastic Lights on Bounces (Variant 2)", &m_rtSettings.reflectionStochasticLights);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all 8 lights, cutting shadow rays from 9 to 2.");
-                        ImGui::Checkbox("Bounce Depth Mip LOD Bias (Variant 3)", &m_rtSettings.reflectionLodBias);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Increases texture mip LOD with bounce depth (textureLod float(bounce)) to reduce GPU texture cache thrashing.");
-                        ImGui::Checkbox("Global Half-Res Reflections (Variant 4)", &m_rtSettings.reflectionHalfRes);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Forces all reflections into half-resolution with edge-aware bilateral normal/depth reconstruction.");
-                        ImGui::EndDisabled();
-                        ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.giEnabled);
-                        ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
-                        ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
-                        ImGui::Checkbox("GI Checkerboard (Half-Rate Trace)", &m_rtSettings.giCheckerboard);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Traces GI on alternating checkerboard pixels, cutting ray tracing work by 50% and reconstructing via temporal history & bilateral filter.");
-                        ImGui::TextDisabled("Resolution: Half-Res Diffuse GI (4x compute speedup)");
-                        ImGui::EndDisabled();
-
-                        // GI + AO are traced in compute, then temporally accumulated and denoised.
-                        ImGui::SeparatorText("RT Sampling & Denoising");
-                        ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
-                        ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtSettings.denoiseEnabled);
-                        ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
-                        ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
-                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
-                        ImGui::Checkbox("SVGF (Variance-Guided Filter)", &m_rtSettings.svgfEnabled);
-                        ImGui::EndDisabled();
-
-                        // Debug Visualization Modes
-                        ImGui::SeparatorText("RT Debug & Diagnostics");
-                        const char* debugModes[] = {
-                            "0: Off (Composite Render)",
-                            "1: Raw Indirect Trace (imgS)",
-                            "2: History Length (0..maxHistory)",
-                            "3: Octahedral Geometric Normals",
-                            "4: Linear Depth",
-                            "5: Ambient Occlusion Only",
-                            "6: Specular Reflections Only",
-                            "7: Luminance Variance (SVGF)"
-                        };
-                        int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
-                        if (ImGui::Combo("RT Debug View", &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
-                            m_rtSettings.debugMode = static_cast<RtDebugMode>(currentDebugMode);
-                        }
-
-                        // RT GPU Timers
-                        const auto& timings = m_rtDenoiser.getGpuTimings();
-                        if (ImGui::TreeNode("RT GPU Profiler (Compute Timers)")) {
-                            ImGui::Text("GI Trace Pass:    %.3f ms", timings.traceMs);
-                            ImGui::Text("Refl Trace Pass:  %.3f ms", timings.reflTraceMs);
-                            ImGui::Text("GI Temporal:      %.3f ms", timings.temporalMs);
-                            ImGui::Text("Refl Temporal:    %.3f ms", timings.reflTemporalMs);
-                            ImGui::Text("Atrous Step 1:    %.3f ms", timings.atrous0Ms);
-                            ImGui::Text("Atrous Step 2:    %.3f ms", timings.atrous1Ms);
-                            ImGui::Separator();
-                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Total RT Compute: %.3f ms", timings.totalMs);
-                            ImGui::TreePop();
-                        }
-
-                        ImGui::EndDisabled();
-                        m_rtSettings.giSamples = std::clamp(m_rtSettings.giSamples, 1, 16);
-                        m_rtSettings.reflectionSamples = std::clamp(m_rtSettings.reflectionSamples, 1, 16);
-                        m_rtSettings.reflectionBounces = std::clamp(m_rtSettings.reflectionBounces, 2, 4);
-                        m_rtSettings.reflectionMaxRoughness = std::clamp(m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f);
-                        m_rtSettings.reflectionMinThroughput = std::clamp(m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f);
-                        m_rtSettings.maxHistory = std::clamp(m_rtSettings.maxHistory, 4, 256);
-                        ImGui::EndDisabled();
-                        ImGui::EndDisabled();
-                    }
-
-                    // Zakładka World & Graphics Settings (wszystkie nowe systemy Vulkan 1.3)
-                    if (ImGui::CollapsingHeader("GPU Cubemap IBL & Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const char* hdriItems[] = {
-                            "0: Sunset (Zachod slonca)",
-                            "1: Studio (Neutralne studio)",
-                            "2: City (Panorama miejska)",
-                            "3: Courtyard (Dziedziniec)",
-                            "4: Forest (Otoczenie lesne)",
-                            "5: Interior (Wnetrze)",
-                            "6: Night (Nocne niebo)",
-                            "7: Sunrise (Wschod slonca)"
-                        };
-                        int currentHdri = m_selectedHdriIndex;
-                        if (ImGui::Combo("HDRI Environment", &currentHdri, hdriItems, IM_ARRAYSIZE(hdriItems))) {
-                            g_pendingHdriIndex = currentHdri;
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                switch (currentHdri) {
-                                    case 0: // Sunset
-                                        env.sunColor = glm::vec3(1.0f, 0.65f, 0.30f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.75f, 0.12f, 0.45f));
-                                        env.ambientColor = glm::vec3(0.22f, 0.12f, 0.18f);
-                                        env.sunIntensity = 4.2f;
-                                        break;
-                                    case 1: // Studio
-                                        env.sunColor = glm::vec3(1.0f, 1.0f, 1.0f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.0f, 0.95f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.35f, 0.36f, 0.38f);
-                                        env.sunIntensity = 2.5f;
-                                        break;
-                                    case 2: // City
-                                        env.sunColor = glm::vec3(1.0f, 0.96f, 0.88f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.40f, 0.75f, -0.30f));
-                                        env.ambientColor = glm::vec3(0.18f, 0.22f, 0.28f);
-                                        env.sunIntensity = 3.2f;
-                                        break;
-                                    case 3: // Courtyard
-                                        env.sunColor = glm::vec3(1.0f, 0.98f, 0.92f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.35f, 0.85f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.20f, 0.24f, 0.30f);
-                                        env.sunIntensity = 3.6f;
-                                        break;
-                                    case 4: // Forest
-                                        env.sunColor = glm::vec3(1.0f, 0.94f, 0.82f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.45f, 0.65f, 0.45f));
-                                        env.ambientColor = glm::vec3(0.12f, 0.25f, 0.14f);
-                                        env.sunIntensity = 3.0f;
-                                        break;
-                                    case 5: // Interior
-                                        env.sunColor = glm::vec3(1.0f, 0.92f, 0.78f);
-                                        env.sunDirection = glm::normalize(glm::vec3(0.20f, 0.92f, 0.20f));
-                                        env.ambientColor = glm::vec3(0.30f, 0.26f, 0.22f);
-                                        env.sunIntensity = 2.2f;
-                                        break;
-                                    case 6: // Night
-                                        env.sunColor = glm::vec3(0.65f, 0.80f, 1.0f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.60f, 0.55f, -0.40f));
-                                        env.ambientColor = glm::vec3(0.02f, 0.03f, 0.06f);
-                                        env.sunIntensity = 0.8f;
-                                        break;
-                                    case 7: // Sunrise
-                                    default:
-                                        env.sunColor = glm::vec3(1.0f, 0.82f, 0.60f);
-                                        env.sunDirection = glm::normalize(glm::vec3(-0.80f, 0.10f, 0.35f));
-                                        env.ambientColor = glm::vec3(0.24f, 0.16f, 0.20f);
-                                        env.sunIntensity = 3.8f;
-                                        break;
-                                }
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-
-                        ImGui::InputTextWithHint("##CustomHdri", "Sciezka do pliku .exr / .hdr (np. C:/maps/sky.exr)", m_customHdriPath, sizeof(m_customHdriPath));
-                        ImGui::SameLine();
-                        if (ImGui::Button("Wczytaj HDRI/EXR")) {
-                            if (m_customHdriPath[0] != '\0') {
-                                loadEnvironmentHdriFile(m_customHdriPath);
-                            }
-                        }
-
-                        bool hdriEnvironmentEnabled = m_skyboxEnabled || m_iblEnabled;
-                        if (ImGui::Checkbox("HDRI Environment Enabled (Skybox + IBL)", &hdriEnvironmentEnabled)) {
-                            m_skyboxEnabled = hdriEnvironmentEnabled;
-                            m_iblEnabled = hdriEnvironmentEnabled;
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.skyboxEnabled = hdriEnvironmentEnabled;
-                                env.iblEnabled = hdriEnvironmentEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-                        if (ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled)) {
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.skyboxEnabled = m_skyboxEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-                        if (ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled)) {
-                            if (engine) {
-                                auto env = engine->getEnvironmentSettings();
-                                env.iblEnabled = m_iblEnabled;
-                                engine->setEnvironmentSettings(env);
-                            }
-                        }
-
-                        if (engine) {
-                            auto env = engine->getEnvironmentSettings();
-                            env.skyboxEnabled = m_skyboxEnabled;
-                            env.iblEnabled = m_iblEnabled;
-                            bool changed = false;
-
-                            // Find Directional Light (Sun) entity in the scene
-                            entt::entity sunEntity = entt::null;
-                            auto dirLightView = registry.get().view<ecs::TransformComponent, ecs::LightComponent>();
-                            for (auto dlEntity : dirLightView) {
-                                const auto& lc = dirLightView.get<ecs::LightComponent>(dlEntity);
-                                if (lc.type == "directional" || lc.type == "sun") {
-                                    sunEntity = dlEntity;
-                                    break;
-                                }
-                            }
-
-                            ImGui::Spacing();
-                            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Slonce / Swiatlo kierunkowe (Directional Sun):");
-
-                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)##World", &env.sunEnabled)) changed = true;
-                            if (ImGui::Checkbox("Kierunek z pozycji 3D##World", &env.sunDirectionFromPosition)) changed = true;
-                            ImGui::SameLine();
-                            ImGui::TextDisabled("(?)");
-                            if (ImGui::IsItemHovered()) {
-                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
-                            }
-
-                            if (sunEntity != entt::null) {
-                                auto& sunLt = registry.get().get<ecs::TransformComponent>(sunEntity);
-                                auto& sunLc = registry.get().get<ecs::LightComponent>(sunEntity);
-
-                                if (ImGui::ColorEdit3("Sun Color", (float*)&sunLc.color)) {
-                                    env.sunColor = sunLc.color;
-                                    changed = true;
-                                }
-                                if (ImGui::DragFloat("Sun Intensity", &sunLc.intensity, 0.1f, 0.0f, 50.0f, "%.2f")) {
-                                    env.sunIntensity = sunLc.intensity;
-                                    changed = true;
-                                }
-
-                                ImGui::Spacing();
-                                ImGui::Text("Kierunek padania:");
-                                if (ImGui::SliderFloat("Elevation (Pitch)##World", &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                if (ImGui::SliderFloat("Azimuth (Yaw)##World", &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
-
-                                const float pitchRad = glm::radians(sunLt.rotation.x);
-                                const float yawRad   = glm::radians(sunLt.rotation.y);
-                                const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
-                                const glm::vec3 sunDir = -sunForward;
-                                env.sunDirection = sunDir;
-                                ImGui::TextDisabled("Wektor slonca: (%.2f, %.2f, %.2f)", sunDir.x, sunDir.y, sunDir.z);
-
-                                ImGui::Text("Pory dnia:");
-                                if (ImGui::SmallButton("Poludnie##World")) { sunLt.rotation.x = -75.0f; sunLt.rotation.y = 0.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Poranek##World")) { sunLt.rotation.x = -20.0f; sunLt.rotation.y = 80.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Zlota godzina##World")) { sunLt.rotation.x = -12.0f; sunLt.rotation.y = 240.0f; changed = true; }
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Zachod##World")) { sunLt.rotation.x = -3.0f; sunLt.rotation.y = 265.0f; changed = true; }
-
-                                ImGui::Spacing();
-                                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Pozycja slonca 3D:");
-                                if (drawVec3Control("Sun Pos (XYZ)##World", sunLt.position, 0.0f)) changed = true;
-                                if (ImGui::DragFloat("Sun Height (Y)##World", &sunLt.position.y, 0.5f, -200.0f, 2000.0f, "%.1f m")) changed = true;
-
-                                if (changed) {
-                                    sunLt.orientation = glm::quat(glm::radians(sunLt.rotation));
-                                    engine->syncEntityTransformPhysics(sunEntity);
-                                }
-                            } else {
-                                if (ImGui::ColorEdit3("Sun Color", (float*)&env.sunColor)) changed = true;
-                                if (ImGui::DragFloat("Sun Intensity", &env.sunIntensity, 0.1f, 0.0f, 25.0f, "%.2f")) changed = true;
-                                if (drawVec3Control("Sun Direction##World", env.sunDirection, 0.0f)) {
-                                    env.sunDirection = glm::normalize(env.sunDirection);
-                                    changed = true;
-                                }
-                            }
-
-                            ImGui::Spacing();
-                            if (ImGui::ColorEdit3("Ambient Tint", (float*)&env.ambientColor)) changed = true;
-                            if (ImGui::DragFloat("IBL Intensity", &env.ambientIntensity, 0.05f, 0.0f, 5.0f, "%.2f")) changed = true;
-                            if (changed) engine->setEnvironmentSettings(env);
-                        }
-                    }
-
-                    if (ImGui::CollapsingHeader("ACES Tonemapping & 5-Mip Jimenez Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::SliderFloat("Exposure (EV)", &m_exposure, 0.15f, 4.0f, "%.2f");
-                        ImGui::Checkbox("5-Mip Jimenez Bloom (Karis Average)", &m_bloomEnabled);
-                        if (m_bloomEnabled) {
-                            ImGui::SliderFloat("Bloom Intensity", &m_bloomIntensity, 0.0f, 3.0f, "%.2f");
-                            ImGui::SliderFloat("Bloom Threshold", &m_bloomThreshold, 0.2f, 5.0f, "%.2f");
-                        }
-                    }
-
-                    if (ImGui::CollapsingHeader("Indirect Diffuse GI (SSGI & Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GI & Bounce Active (Globalne oswietlenie)", &m_lightBounceEnabled);
-                        if (m_lightBounceEnabled) {
-                            ImGui::SliderFloat("Bounce Intensity", &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
-                            ImGui::SliderFloat("Ground Albedo", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
-                            ImGui::ColorEdit3("Ground Color (sRGB)", &m_lightBounceGroundColor.x);
-                            ImGui::TextDisabled("SSGI: Color bleed od kazdego elementu i tekstury");
-                            ImGui::TextDisabled("Ground Bounce: Odbicie podloza z cieniem slonca i 1/PI");
-                        }
-                    }
-
-                    if (ImGui::CollapsingHeader("Multi-Bounce GTAO (Depth Prepass)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GTAO Active", &m_gtaoEnabled);
-                        if (m_gtaoEnabled) {
-                            ImGui::SliderFloat("AO World Radius", &m_gtaoRadius, 0.1f, 3.0f, "%.2f m");
-                            ImGui::SliderFloat("AO Power", &m_gtaoIntensity, 0.2f, 4.0f, "%.2f");
-                        }
-                    }
-
-                    if (ImGui::CollapsingHeader("Exponential Height Fog (Mie Phase)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Height Fog Active", &m_fogEnabled);
-                        if (m_fogEnabled) {
-                            ImGui::SliderFloat("Fog Density", &m_fogDensity, 0.001f, 0.10f, "%.4f");
-                            ImGui::SliderFloat("Height Falloff", &m_fogHeightFalloff, 0.01f, 0.50f, "%.3f");
-                            ImGui::ColorEdit3("Fog Inscatter Color", &m_fogColor.x);
-                        }
-                    }
-
-                    if (ImGui::CollapsingHeader("Shadows (4096px 4-Cascade Vogel PCF)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Soft Shadows", &m_softShadows);
-                        ImGui::SliderFloat("CSM Distance", &m_shadowDistance, 25.0f, 200.0f, "%.1f m");
-                    }
-
-                    if (ImGui::CollapsingHeader("FXAA 3.11 & Resolution Scaling", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        const char* aaModes[] = {
-                            "0: Off (Brak AA)",
-                            "1: FXAA 3.11 Fast",
-                            "2: FXAA 3.11 Quality (Subpixel)",
-                            "3: FXAA 3.11 Ultra"
-                        };
-                        ImGui::Combo("AA Preset", &m_antiAliasingMode, aaModes, IM_ARRAYSIZE(aaModes));
-
-                        const char* resPresets[] = {
-                            "0: Auto 1:1 Viewport",
-                            "1: 4K UHD (3840x2160)",
-                            "2: 1440p QHD (2560x1440)",
-                            "3: 1080p FHD (1920x1080)",
-                            "4: 720p HD (1280x720)"
-                        };
-                        if (ImGui::Combo("Resolution Mode", &m_resolutionPresetIndex, resPresets, IM_ARRAYSIZE(resPresets))) {
-                            if (m_resolutionPresetIndex == 0) m_autoViewportResolution = true;
-                            else {
-                                m_autoViewportResolution = false;
-                                if (m_resolutionPresetIndex == 1) requestResolution(3840, 2160);
-                                else if (m_resolutionPresetIndex == 2) requestResolution(2560, 1440);
-                                else if (m_resolutionPresetIndex == 3) requestResolution(1920, 1080);
-                                else if (m_resolutionPresetIndex == 4) requestResolution(1280, 720);
-                            }
-                        }
-
-                        float resSc = m_resolutionScale;
-                        if (ImGui::SliderFloat("Resolution Scale (Skala renderu)", &resSc, 0.25f, 2.00f, "%.2fx")) {
-                            setResolutionScale(resSc);
-                            if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) {
-                                requestResolution(
-                                    (static_cast<uint32_t>(viewportPanelSize.x * m_resolutionScale) + 1u) & ~1u,
-                                    (static_cast<uint32_t>(viewportPanelSize.y * m_resolutionScale) + 1u) & ~1u);
-                            }
-                            if (engine) engine->getPreferences().resolutionScale = m_resolutionScale;
-                        }
-                        if (ImGui::Button("50%##ResSc")) { setResolutionScale(0.50f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.50f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.50f) + 1u) & ~1u); }
-                        ImGui::SameLine();
-                        if (ImGui::Button("67%##ResSc")) { setResolutionScale(0.67f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.67f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.67f) + 1u) & ~1u); }
-                        ImGui::SameLine();
-                        if (ImGui::Button("75%##ResSc")) { setResolutionScale(0.75f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.75f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.75f) + 1u) & ~1u); }
-                        ImGui::SameLine();
-                        if (ImGui::Button("100%##ResSc")) { setResolutionScale(1.00f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 1.00f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 1.00f) + 1u) & ~1u); }
-                        ImGui::SliderFloat("UI Scale", &m_uiScale, 0.75f, 1.65f, "%.2fx");
-                    }
-                }
-
-                ImGui::End();
-                ImGui::PopStyleColor();
-            }
-
-            // 8. BOTTOM DRAWERS & 9. STATUS BAR
-            if (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) {
-                ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, drawerH), ImGuiCond_Always);
-                ImGui::Begin("BottomDrawerWindow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-                if (s_showContentDrawer) {
-                    ImGui::TextColored(ImVec4(0.96f, 0.62f, 0.08f, 1.0f), "Content Drawer");
-                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
-                    if (ImGui::SmallButton("X##CloseDrawer")) { s_showContentDrawer = false; }
-                    ImGui::Separator();
-                    const char* assets[] = { "BP_Player", "BP_Coin", "M_ChromeIBL", "M_SlateFloor", "VFX_Fire", "Lvl_MainLevel" };
-                    for (const char* a : assets) { ImGui::Button(a, ImVec2(115.0f * s_uiScale, 60.0f * s_uiScale)); ImGui::SameLine(); }
-                } else {
-                    ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), ">_ Output Log");
-                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
-                    if (ImGui::SmallButton("X##CloseLog")) { s_showOutputLog = false; }
-                    ImGui::Separator();
-                    ImGui::BeginChild("OutputLogScroll", ImVec2(0, 0), false);
-                    for (const auto& line : core::Logger::getRecentLogs(40)) ImGui::TextUnformatted(line.c_str());
-                    ImGui::EndChild();
-                }
-                ImGui::End();
-            }
-
-            if (!s_immersivePlay) {
-                ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomStatusH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, bottomStatusH), ImGuiCond_Always);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 3));
-                ImGui::Begin("BottomStatusRail", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
-                if (ImGui::Button(" Content Drawer ")) { s_showContentDrawer = !s_showContentDrawer; if (s_showContentDrawer) s_showOutputLog = false; }
-                ImGui::SameLine();
-                if (ImGui::Button(" >_ Output Log ")) { s_showOutputLog = !s_showOutputLog; if (s_showOutputLog) s_showContentDrawer = false; }
-                ImGui::SameLine(screenW - 220.0f * s_uiScale);
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Vulkan 1.3: %.0f FPS (%ux%u)", ImGui::GetIO().Framerate, m_width, m_height);
-                ImGui::End();
-                ImGui::PopStyleVar();
-            }
 
             if (s_showScriptStudio) {
                 ImGui::SetNextWindowSize(ImVec2(750 * s_uiScale, 520 * s_uiScale), ImGuiCond_FirstUseEver);
@@ -2720,6 +1558,19 @@ static std::string saveProjectNativeDialog() { return ""; }
                                    220.0f * s_uiScale);
                 }
             }
+
+            // Persist panel dimensions once, when the user finishes a splitter drag.
+            // Saving every frame while dragging would cause unnecessary disk I/O.
+            const bool splitterIsActive = (s_activeSplitterId != 0);
+            if (s_splitterWasActive && !splitterIsActive && engine) {
+                auto& pref = engine->getPreferences();
+                pref.userLeftPanelW = s_userLeftPanelW;
+                pref.userRightPanelW = s_userRightPanelW;
+                pref.userOutlinerH = s_userOutlinerH;
+                pref.userDrawerH = s_userDrawerH;
+                engine->saveUserPreferences();
+            }
+            s_splitterWasActive = splitterIsActive;
 
             s_wasSplitterHoveredLastFrame = s_anySplitterHovered;
         }
