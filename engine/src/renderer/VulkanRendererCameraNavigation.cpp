@@ -17,7 +17,7 @@ void VulkanRenderer::drawEditorCameraNavigation(core::Engine* engine,
                 state.cameraPitch = glm::clamp(state.cameraPitch - yDelta, -89.0f, 89.0f);
                 const glm::vec3 cf = glm::normalize(glm::vec3(cosf(glm::radians(state.cameraYaw)) * cosf(glm::radians(state.cameraPitch)), sinf(glm::radians(state.cameraPitch)), sinf(glm::radians(state.cameraYaw)) * cosf(glm::radians(state.cameraPitch))));
                 const glm::vec3 cr = glm::normalize(glm::cross(cf, glm::vec3(0.0f, 1.0f, 0.0f)));
-                float speed = s_camFlySpeed * ImGui::GetIO().DeltaTime * (s_cameraSpeed / 4.0f);
+                float speed = state.cameraFlySpeed * ImGui::GetIO().DeltaTime * (state.cameraSpeed / 4.0f);
                 if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) speed *= 3.0f;
                 if (ImGui::IsKeyDown(ImGuiKey_W)) state.cameraPosition += cf * speed;
                 if (ImGui::IsKeyDown(ImGuiKey_S)) state.cameraPosition -= cf * speed;

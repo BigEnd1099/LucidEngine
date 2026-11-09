@@ -7,6 +7,8 @@ struct EditorCameraNavigationState {
     bool& isMmbPanning;
     bool& isAltOrbiting;
     bool isHovered;
+    float& cameraFlySpeed;
+    int& cameraSpeed;
     bool hasSelectedTransform;
     entt::entity selectedEntity;
     glm::vec3& cameraPosition;

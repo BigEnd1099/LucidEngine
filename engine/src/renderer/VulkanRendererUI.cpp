@@ -698,8 +698,8 @@ namespace engine::renderer {
 
             EditorCameraNavigationState cameraNavigationState{
                 s_isRmbNavigating, s_isMmbPanning, s_isAltOrbiting, isHovered,
-                hasSelectedTransform, selectedEnt, camPos, front, right, up,
-                camYaw, camPitch, camFov
+                hasSelectedTransform, s_camFlySpeed, s_cameraSpeed,
+                selectedEnt, camPos, front, right, up, camYaw, camPitch, camFov
             };
             drawEditorCameraNavigation(engine, registry, cameraNavigationState);
 
