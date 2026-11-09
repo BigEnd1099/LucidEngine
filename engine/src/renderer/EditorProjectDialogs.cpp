@@ -1,7 +1,5 @@
 #include "renderer/EditorProjectDialogs.hpp"
-
 #include <filesystem>
-
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -13,9 +11,7 @@
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
 #endif
-
 namespace engine::renderer {
-
 #ifdef _WIN32
 std::string openProjectNativeDialog() {
     char filename[MAX_PATH] = "";
@@ -55,5 +51,4 @@ std::string saveProjectNativeDialog() {
 std::string openProjectNativeDialog() { return {}; }
 std::string saveProjectNativeDialog() { return {}; }
 #endif
-
 } // namespace engine::renderer
