@@ -79,6 +79,18 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::Separator();
                         ImGui::MenuItem("Editor Preferences...", "Ctrl+,", &state.showPreferencesWindow);
                         ImGui::Separator();
+                        if (ImGui::BeginMenu("Motyw Edytora (Theme)")) {
+                            static int s_topBarTheme = 0;
+                            if (ImGui::MenuItem("Unreal Slate (Ciemny grafit)", nullptr, s_topBarTheme == 0)) {
+                                s_topBarTheme = 0;
+                                applyEditorUiTheme(EditorThemePreset::UnrealSlate);
+                            }
+                            if (ImGui::MenuItem("Blender Dark Pro (BUI Palette)", nullptr, s_topBarTheme == 1)) {
+                                s_topBarTheme = 1;
+                                applyEditorUiTheme(EditorThemePreset::BlenderDarkPro);
+                            }
+                            ImGui::EndMenu();
+                        }
                         if (ImGui::BeginMenu("Skala Interfejsu (UI Scale)")) {
                             if (ImGui::MenuItem("85% (Kompaktowe)", nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
                             if (ImGui::MenuItem("100% (Standard)", nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) m_uiScale = 1.0f;
@@ -153,16 +165,33 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::Begin("LevelTabsStrip", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings);
 
                 const std::string curPreset = engine ? engine->getCurrentPreset() : "empty";
+                std::string sceneDisplayName = curPreset;
+                if (sceneDisplayName == "empty") sceneDisplayName = "CzystyPoziom";
+                else if (!sceneDisplayName.empty()) sceneDisplayName[0] = std::toupper(sceneDisplayName[0]);
+                std::string tabBtnLabel = "    " + sceneDisplayName + ".scene  (Poziom glowny) ";
+
                 ImVec2 tabStart = ImGui::GetCursorScreenPos();
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.086f, 0.086f, 0.125f, 1.0f));
-                if (ImGui::Button("    CzystyPoziom.scene  (Persistent)   x ", ImVec2(0, topLevelTabsH - 4.0f)) && engine) {
-                    selectedEntity = entt::null;
-                    engine->resetScene(curPreset);
-                }
-                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.10f, 0.14f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.94f, 0.98f, 1.0f));
+                ImGui::Button(tabBtnLabel.c_str(), ImVec2(0, topLevelTabsH - 4.0f));
+                ImGui::PopStyleColor(2);
+
                 ImVec2 tabEnd = ImGui::GetItemRectMax();
                 ImGui::GetWindowDrawList()->AddLine(tabStart, ImVec2(tabEnd.x, tabStart.y), IM_COL32(0, 130, 240, 255), 2.0f);
                 drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * state.uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * state.uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
+
+                ImGui::SameLine(0.0f, 6.0f * state.uiScale);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.65f, 0.75f, 1.0f));
+                if (ImGui::SmallButton("+ Nowy Poziom")) {
+                    if (engine) {
+                        selectedEntity = entt::null;
+                        engine->setCurrentPreset("empty");
+                        engine->resetScene("empty");
+                    }
+                }
+                ImGui::PopStyleColor(2);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zresetuj do nowego, czystego poziomu");
 
                 ImGui::End();
                 ImGui::PopStyleColor();
@@ -233,20 +262,21 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wykonaj krok symulacji o 1 klatke fizyki (1/60s)");
 
-            // Wybor perspektywy kamery po prawej stronie paska
-            ImGui::SameLine(screenW - 170.0f * state.uiScale);
-            static int s_camMode = 0;
-            const char* camModes[] = { "Perspektywa", "Ortogonalna" };
-            ImGui::SetNextItemWidth(155.0f * state.uiScale);
-            ImGui::Combo("##CameraModeCombo", &s_camMode, camModes, IM_ARRAYSIZE(camModes));
+            // Kontrola FOV kamery po prawej stronie paska
+            ImGui::SameLine(screenW - 180.0f * state.uiScale);
+            if (engine) {
+                float curFov = engine->getCameraFov();
+                ImGui::SetNextItemWidth(165.0f * state.uiScale);
+                if (ImGui::SliderFloat("##CamFov", &curFov, 25.0f, 95.0f, "Kamera FOV: %.0f deg")) {
+                    engine->setCameraFov(curFov);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Kat widzenia kamery edytora (FOV)");
+            }
 
             ImGui::End();
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
-            drawEditorPlaceActorsPanel(registry, engine, state.immersivePlay, state.showPlaceActors,
-                                        state.showDetails, state.uiScale, topTotalH, contentH,
-                                        leftPanelW, camPos, front, selectedEntity);
 }
 }
 #endif

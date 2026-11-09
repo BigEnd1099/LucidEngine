@@ -6,7 +6,7 @@ console.log('========================================================');
 console.log('🧪 TESTING PORTED VULKAN & NATIVE ENGINE FEATURES');
 console.log('========================================================');
 
-const engineProcess = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+const engineProcess = spawn('./engine/build/Release/engine.exe', ['--headless'], {
   stdio: ['ignore', 'inherit', 'inherit']
 });
 

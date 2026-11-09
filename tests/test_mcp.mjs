@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import readline from 'readline';
 
-const engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+const engine = spawn('./engine/build/Release/engine.exe', ['--headless'], {
   stdio: ['pipe', 'pipe', 'inherit']
 });
 

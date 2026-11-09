@@ -140,6 +140,7 @@ namespace engine::core {
         float getCameraYaw() const { return m_camYaw; }
         float getCameraPitch() const { return m_camPitch; }
         float getCameraFov() const { return m_camFov; }
+        void setCameraFov(float fov) { m_camFov = fov; }
         void setCamera(const glm::vec3& pos, float yaw, float pitch, float fov = 45.0f) {
             m_camPos = pos;
             m_camYaw = yaw;

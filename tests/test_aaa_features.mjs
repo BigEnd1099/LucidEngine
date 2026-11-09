@@ -16,7 +16,7 @@ export async function runAaaFeaturesTest(existingEngine = null) {
       }
     } catch (e) { }
 
-    engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+    engine = spawn('./engine/build/Release/engine.exe', ['--headless'], {
       stdio: ['pipe', 'pipe', 'inherit']
     });
     ownEngine = true;

@@ -19,6 +19,7 @@ namespace engine::ecs {
         uint32_t albedoIdx{0};
         uint32_t normalIdx{0};
         uint32_t ormIdx{0};
+        bool visible{true};
     };
 
     struct LODComponent {

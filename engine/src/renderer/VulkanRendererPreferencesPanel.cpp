@@ -1,5 +1,6 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorPreferencesPanel.hpp"
+#include "renderer/EditorUiStyle.hpp"
 #include "core/Engine.hpp"
 #include <algorithm>
 #include <cstring>
@@ -25,6 +26,28 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     if (ImGui::Button(" Zastosuj i Uruchom Skrypt ") && engine) {
                         engine->loadScript(scriptBuf);
                         engine->setCurrentScript(scriptBuf);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" Przeladuj ze sceny ") && engine) {
+                        const std::string code = engine->getCurrentScript();
+                        std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
+                        scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" Wyczysc ")) {
+                        scriptBuf[0] = '\0';
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" Szablon: Rotacja ")) {
+                        std::string tpl = "// QuickJS Live Script: Rotacja i animacja obiektu\nlet angle = 0;\nexport function update(dt) {\n    angle += dt * 45.0;\n    console.log('[QuickJS] Kat rotacji: ' + angle.toFixed(1));\n}\n";
+                        std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
+                        scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(" Szablon: Impuls ")) {
+                        std::string tpl = "// QuickJS Live Script: Impuls fizyczny Jolt\nexport function update(dt) {\n    console.log('[QuickJS] Impuls fizyczny zaaplikowany');\n}\n";
+                        std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
+                        scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                     }
                     ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
                 }
@@ -73,6 +96,11 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         // Category 0: UI & Layout
                         ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "UKLAD I SKALA INTERFEJSU");
                         ImGui::Separator();
+
+                        static int s_themeChoice = 0;
+                        if (ImGui::Combo("Motyw i Styl Edytora (Theme)", &s_themeChoice, "Unreal Slate (Ciemny grafit)\0Blender Dark Pro (BUI Palette)\0\0")) {
+                            applyEditorUiTheme(s_themeChoice == 1 ? EditorThemePreset::BlenderDarkPro : EditorThemePreset::UnrealSlate);
+                        }
 
                         float curUiScale = pref.uiScale;
                         if (ImGui::SliderFloat("Skala Interfejsu (UI Scale)", &curUiScale, 0.70f, 2.0f, "%.2fx")) {

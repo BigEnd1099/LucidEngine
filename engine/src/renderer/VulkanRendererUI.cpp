@@ -107,7 +107,6 @@ namespace engine::renderer {
         }
     }
 
-    enum class EditorGizmoMode { TRANSLATE = 0, ROTATE = 1, SCALE = 2 };
 
     static float distToSegment(const ImVec2& p, const ImVec2& a, const ImVec2& b) {
         const float abx = b.x - a.x;
@@ -425,6 +424,10 @@ namespace engine::renderer {
             drawEditorTopBarPanel(engine, topBarState, screenW, topTitleBarH,
                                   topLevelTabsH, topToolbarH, selectedEnt);
 
+            drawEditorPlaceActorsPanel(registry, engine, s_immersivePlay, s_showPlaceActors,
+                                       s_showDetails, s_uiScale, topTotalH, contentH,
+                                       leftPanelW, camPos, front, selectedEnt);
+
 
 
             // 5. CENTER PANEL: BORDERLESS 3D VIEWPORT
@@ -520,10 +523,12 @@ namespace engine::renderer {
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_F) && selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt)) {
                     const auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
-                    if (engine) engine->setCamera(t.position - front * 8.0f, camYaw, camPitch, camFov);
+                    const float frameDist = std::max(5.0f, glm::length(t.scale) * 3.5f);
+                    if (engine) engine->setCamera(t.position - front * frameDist, camYaw, camPitch, camFov);
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
-                    registry.get().destroy(selectedEnt);
+                    if (engine) engine->destroyEntity(static_cast<uint32_t>(selectedEnt));
+                    else registry.get().destroy(selectedEnt);
                     selectedEnt = entt::null;
                     if (engine) engine->setSelectedEntity(entt::null);
                 }
@@ -693,12 +698,13 @@ namespace engine::renderer {
                     else if (s_draggingGizmoAxis == 2) t.scale.y = std::max(0.01f, s_dragInitialScale.y * scaleFactor);
                     else if (s_draggingGizmoAxis == 3) t.scale.z = std::max(0.01f, s_dragInitialScale.z * scaleFactor);
                     else t.scale = glm::max(glm::vec3(0.01f), s_dragInitialScale * scaleFactor);
+                    if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                 }
             }
 
             EditorCameraNavigationState cameraNavigationState{
                 s_isRmbNavigating, s_isMmbPanning, s_isAltOrbiting, isHovered,
-                hasSelectedTransform, s_camFlySpeed, s_cameraSpeed,
+                s_camFlySpeed, s_cameraSpeed, hasSelectedTransform,
                 selectedEnt, camPos, front, right, up, camYaw, camPitch, camFov
             };
             drawEditorCameraNavigation(engine, registry, cameraNavigationState);

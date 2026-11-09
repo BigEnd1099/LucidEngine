@@ -27,7 +27,7 @@ console.log('  ✅ Tryb czysto lokalny zweryfikowany pomyślnie.\n');
 
 // 1. Start engine instance
 console.log('[1/4] Uruchamianie instancji Lucid Engine (Headless)...');
-const engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+const engine = spawn('./engine/build/Release/engine.exe', ['--headless'], {
   stdio: ['pipe', 'pipe', 'inherit']
 });
 

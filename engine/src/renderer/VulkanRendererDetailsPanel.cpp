@@ -84,7 +84,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         char nameBuf[64];
                         strncpy(nameBuf, tagStr.c_str(), sizeof(nameBuf) - 1);
                         nameBuf[sizeof(nameBuf) - 1] = '\0';
-                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 70.0f * uiScale);
+                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 170.0f * uiScale);
                         if (ImGui::InputText("##EntityName", nameBuf, sizeof(nameBuf))) {
                             if (registry.get().all_of<ecs::TagComponent>(selectedEntity)) {
                                 registry.get().get<ecs::TagComponent>(selectedEntity).name = nameBuf;
@@ -94,6 +94,47 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
                         ImGui::SameLine();
                         ImGui::TextDisabled("#%u", static_cast<uint32_t>(selectedEntity));
+                        ImGui::SameLine();
+                        if (ImGui::Button("+ Komponent", ImVec2(0, 0))) {
+                            ImGui::OpenPopup("AddComponentPopup");
+                        }
+                        if (ImGui::BeginPopup("AddComponentPopup")) {
+                            ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Dodaj komponent:");
+                            ImGui::Separator();
+                            if (!registry.get().all_of<ecs::LightComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Swiatlo (Light)")) {
+                                    registry.get().emplace<ecs::LightComponent>(selectedEntity, ecs::LightComponent{"point", glm::vec3(1.0f, 0.95f, 0.8f), 3.0f, 15.0f});
+                                }
+                            }
+                            if (!registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Siatka 3D (Mesh)")) {
+                                    registry.get().emplace<ecs::MeshComponent>(selectedEntity, ecs::MeshComponent{2});
+                                }
+                            }
+                            if (!registry.get().all_of<ecs::MaterialComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Material PBR")) {
+                                    ecs::MaterialComponent m{};
+                                    m.baseColor = glm::vec4(0.85f, 0.85f, 0.90f, 1.0f);
+                                    m.metallic = 0.0f;
+                                    m.roughness = 0.35f;
+                                    registry.get().emplace<ecs::MaterialComponent>(selectedEntity, m);
+                                }
+                            }
+                            if (!registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Fizyka Jolt (RigidBody)")) {
+                                    ecs::RigidBodyComponent rb{};
+                                    rb.mass = 1.0f;
+                                    registry.get().emplace<ecs::RigidBodyComponent>(selectedEntity, rb);
+                                    if (engine) engine->syncEntityTransformPhysics(selectedEntity);
+                                }
+                            }
+                            if (!registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity)) {
+                                if (ImGui::MenuItem("+ Czasteczki (Particle VFX)")) {
+                                    registry.get().emplace<ecs::ParticleEmitterComponent>(selectedEntity, ecs::ParticleEmitterComponent{"fire", glm::vec3(1.0f, 0.4f, 0.0f), 200, 3.0f, 0.4f});
+                                }
+                            }
+                            ImGui::EndPopup();
+                        }
                         ImGui::Separator();
 
                         if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
@@ -269,6 +310,23 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 ImGui::SliderFloat("Restitution", &rb.restitution, 0.0f, 1.0f);
                                 ImGui::SliderFloat("Friction", &rb.friction, 0.0f, 1.0f);
                                 ImGui::Checkbox("Is Sensor (Trigger)", &rb.isSensor);
+                            }
+                        }
+
+                        if (registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity)) {
+                            auto& pe = registry.get().get<ecs::ParticleEmitterComponent>(selectedEntity);
+                            if (ImGui::CollapsingHeader("Particle Emitter (HDR VFX)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                                const char* pTypes[] = { "fire", "sparks", "smoke", "portal", "explosion" };
+                                int curP = 0;
+                                for (int i = 0; i < 5; ++i) { if (pe.type == pTypes[i]) { curP = i; break; } }
+                                if (ImGui::Combo("Particle Type", &curP, "Fire\0Sparks\0Smoke\0Portal\0Explosion\0\0")) {
+                                    pe.type = pTypes[curP];
+                                }
+                                ImGui::ColorEdit3("Particle Color", &pe.color.x);
+                                int pCount = static_cast<int>(pe.count);
+                                if (ImGui::SliderInt("Particle Count", &pCount, 10, 1000)) pe.count = static_cast<uint32_t>(pCount);
+                                ImGui::SliderFloat("Speed", &pe.speed, 0.1f, 20.0f, "%.1f m/s");
+                                ImGui::SliderFloat("Size", &pe.size, 0.05f, 2.0f, "%.2f m");
                             }
                         }
                     }

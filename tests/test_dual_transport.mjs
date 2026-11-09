@@ -34,7 +34,7 @@ try {
 
 // 1. Launch engine in headless mode
 console.log('[1/5] Uruchamianie instancji Lucid Engine (--headless)...');
-const engineProcess = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+const engineProcess = spawn('./engine/build/Release/engine.exe', ['--headless'], {
   stdio: 'inherit'
 });
 

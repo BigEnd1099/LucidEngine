@@ -376,6 +376,7 @@ namespace engine::renderer {
                 const bool isLight = registry.get().all_of<ecs::LightComponent>(entity) ||
                                      (tag.find("Light") != std::string::npos) || (tag.find("light") != std::string::npos);
                 if (isLight) continue;
+                if (!meshComp.visible) continue;
 
                 core::MeshAsset* meshAsset = assetManager->getMesh(meshComp.meshId);
                 if (!meshAsset || !meshAsset->vertexBuffer || !meshAsset->indexBuffer) continue;
@@ -603,6 +604,7 @@ namespace engine::renderer {
                         const auto& mc = shadowView.get<ecs::MeshComponent>(entity);
                         const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
                         if (mc.meshId == 1 || tag == "GroundPlane" || tag == "Ground") continue;
+                        if (!mc.visible) continue;
                         if (registry.get().all_of<ecs::LightComponent>(entity) || tag.find("Light") != std::string::npos) continue;
                         if (registry.get().all_of<ecs::RigidBodyComponent>(entity) && registry.get().get<ecs::RigidBodyComponent>(entity).isSensor) continue;
 
@@ -678,6 +680,7 @@ namespace engine::renderer {
                         const auto& tc = view.get<ecs::TransformComponent>(entity);
                         const auto& mc = view.get<ecs::MeshComponent>(entity);
                         if (mc.meshId == 1) continue;
+                        if (!mc.visible) continue;
                         const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
                         if (tag.find("Light") != std::string::npos || tag.find("light") != std::string::npos) continue;
 

@@ -14,7 +14,7 @@ try {
   }
 } catch (e) {}
 
-const engine = spawn('.\\engine\\build\\Release\\engine.exe', ['--headless'], {
+const engine = spawn('./engine/build/Release/engine.exe', ['--headless'], {
   stdio: ['ignore', 'inherit', 'inherit']
 });
 
