@@ -42,7 +42,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         }
                         ImGui::Separator();
                         if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) {
-                            saveCurrentGame(false);
+                            state.saveProject(false);
                         }
                         if (ImGui::MenuItem("Save Project As... (Zapisz jako...)", "Ctrl+Shift+S")) {
                             state.saveProject(true);
@@ -55,7 +55,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         if (ImGui::MenuItem("Kompiluj pelna gre (.exe)", "Ctrl+Shift+P")) {
                             state.saveProject(false);
                             if (engine && engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame")) {
-                                snprintf(state.engineNotification, sizeof(state.engineNotification), "Gra skompilowana do Build/Windows/MyLucidGame/!");
+                                std::snprintf(state.engineNotification, 128, "Gra skompilowana do Build/Windows/MyLucidGame/!");
                                 state.engineNotificationTimer = 5.0f;
                             }
                         }

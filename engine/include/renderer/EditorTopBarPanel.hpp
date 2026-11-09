@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <string>
 namespace engine::renderer {
 struct EditorTopBarUiState {
     bool& immersivePlay;
@@ -17,7 +18,7 @@ struct EditorTopBarUiState {
     float& userRightPanelW;
     float& userOutlinerH;
     float& userDrawerH;
-    char*& engineNotification;
+    char* engineNotification;
     float& engineNotificationTimer;
     std::function<void(bool)> saveProject;
     std::function<void(const std::string&)> loadProject;
