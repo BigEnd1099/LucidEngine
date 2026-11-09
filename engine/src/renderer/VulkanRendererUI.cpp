@@ -2,6 +2,7 @@
 #include "renderer/EditorUiStyle.hpp"
 #include "renderer/EditorUiControls.hpp"
 #include "renderer/EditorProjectDialogs.hpp"
+#include "renderer/EditorUiBottomPanels.hpp"
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
@@ -1946,43 +1947,10 @@ namespace engine::renderer {
                 ImGui::PopStyleColor();
             }
 
-            // 8. BOTTOM DRAWERS & 9. STATUS BAR
-            if (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) {
-                ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomTotalH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, drawerH), ImGuiCond_Always);
-                ImGui::Begin("BottomDrawerWindow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-                if (s_showContentDrawer) {
-                    ImGui::TextColored(ImVec4(0.96f, 0.62f, 0.08f, 1.0f), "Content Drawer");
-                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
-                    if (ImGui::SmallButton("X##CloseDrawer")) { s_showContentDrawer = false; }
-                    ImGui::Separator();
-                    const char* assets[] = { "BP_Player", "BP_Coin", "M_ChromeIBL", "M_SlateFloor", "VFX_Fire", "Lvl_MainLevel" };
-                    for (const char* a : assets) { ImGui::Button(a, ImVec2(115.0f * s_uiScale, 60.0f * s_uiScale)); ImGui::SameLine(); }
-                } else {
-                    ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), ">_ Output Log");
-                    ImGui::SameLine(screenW - 28.0f * s_uiScale);
-                    if (ImGui::SmallButton("X##CloseLog")) { s_showOutputLog = false; }
-                    ImGui::Separator();
-                    ImGui::BeginChild("OutputLogScroll", ImVec2(0, 0), false);
-                    for (const auto& line : core::Logger::getRecentLogs(40)) ImGui::TextUnformatted(line.c_str());
-                    ImGui::EndChild();
-                }
-                ImGui::End();
-            }
+            drawEditorBottomPanels(s_immersivePlay, s_showContentDrawer, s_showOutputLog,
+                                   screenW, screenH, bottomTotalH, drawerH, bottomStatusH,
+                                   s_uiScale, ImGui::GetIO().Framerate, m_width, m_height);
 
-            if (!s_immersivePlay) {
-                ImGui::SetNextWindowPos(ImVec2(0, screenH - bottomStatusH), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(screenW, bottomStatusH), ImGuiCond_Always);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 3));
-                ImGui::Begin("BottomStatusRail", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
-                if (ImGui::Button(" Content Drawer ")) { s_showContentDrawer = !s_showContentDrawer; if (s_showContentDrawer) s_showOutputLog = false; }
-                ImGui::SameLine();
-                if (ImGui::Button(" >_ Output Log ")) { s_showOutputLog = !s_showOutputLog; if (s_showOutputLog) s_showContentDrawer = false; }
-                ImGui::SameLine(screenW - 220.0f * s_uiScale);
-                ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Vulkan 1.3: %.0f FPS (%ux%u)", ImGui::GetIO().Framerate, m_width, m_height);
-                ImGui::End();
-                ImGui::PopStyleVar();
-            }
 
             if (s_showScriptStudio) {
                 ImGui::SetNextWindowSize(ImVec2(750 * s_uiScale, 520 * s_uiScale), ImGuiCond_FirstUseEver);
