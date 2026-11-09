@@ -315,10 +315,13 @@ static std::string saveProjectNativeDialog() { return ""; }
                     s_userOutlinerH   = pref.userOutlinerH;
                     s_userDrawerH     = pref.userDrawerH;
                 } else {
-                    s_userLeftPanelW  = 260.0f * s_uiScale;
-                    s_userRightPanelW = 310.0f * s_uiScale;
-                    s_userOutlinerH   = 240.0f * s_uiScale;
-                    s_userDrawerH     = 220.0f * s_uiScale;
+                    // Start with a balanced layout that scales with the actual editor viewport.
+                    // Keep enough width for the scene viewport while giving Details room for
+                    // longer rendering controls (RT, GI, denoiser and environment settings).
+                    s_userLeftPanelW  = std::clamp(screenW * 0.16f, 210.0f * s_uiScale, 300.0f * s_uiScale);
+                    s_userRightPanelW = std::clamp(screenW * 0.29f, 340.0f * s_uiScale, 540.0f * s_uiScale);
+                    s_userOutlinerH   = std::clamp(screenH * 0.30f, 220.0f * s_uiScale, 360.0f * s_uiScale);
+                    s_userDrawerH     = std::clamp(screenH * 0.24f, 180.0f * s_uiScale, 300.0f * s_uiScale);
                 }
             }
 
