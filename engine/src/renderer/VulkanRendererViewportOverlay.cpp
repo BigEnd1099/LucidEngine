@@ -5,7 +5,7 @@
 #include "imgui.h"
 namespace engine::renderer {
 void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state,
-                                               const ImVec2& viewportPanelSize) {
+                                               const glm::vec2& viewportPanelSize) {
             if (!state.immersivePlay) {
                 // Pigułka narzędzi Gizmo (lewy górny róg Viewportu)
                 ImGui::SetCursorPos(ImVec2(10.0f * state.uiScale, 10.0f * state.uiScale));

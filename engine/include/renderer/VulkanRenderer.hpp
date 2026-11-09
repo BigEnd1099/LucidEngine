@@ -152,7 +152,7 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         void initImGui();
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
-        void drawEditorViewportOverlay(EditorViewportOverlayState& state, const ImVec2& viewportPanelSize);
+        void drawEditorViewportOverlay(EditorViewportOverlayState& state, const glm::vec2& viewportPanelSize);
         void drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiState& state,
                                    float screenW, float topTitleBarH, float topLevelTabsH,
                                    float topToolbarH, entt::entity& selectedEntity);

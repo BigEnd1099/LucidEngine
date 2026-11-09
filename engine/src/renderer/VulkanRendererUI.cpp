@@ -769,7 +769,7 @@ namespace engine::renderer {
                 s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
                 s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode
             };
-            drawEditorViewportOverlay(viewportOverlayState, viewportPanelSize);
+            drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
             ImGui::End();
             ImGui::PopStyleColor();
