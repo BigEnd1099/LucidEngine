@@ -1432,9 +1432,22 @@ static std::string saveProjectNativeDialog() { return ""; }
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("DetailsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
-                if (ImGui::Button("  Details  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 0;
-                ImGui::SameLine();
-                if (ImGui::Button("  World & Graphics  ", ImVec2(0, 24.0f * s_uiScale))) s_detailsTab = 1;
+                // Equal-width inspector tabs with a persistent active state.
+                const float inspectorTabGap = 4.0f * s_uiScale;
+                const float inspectorTabWidth = (ImGui::GetContentRegionAvail().x - inspectorTabGap) * 0.5f;
+                const ImVec4 tabActive = ImVec4(0.10f, 0.34f, 0.58f, 1.0f);
+                const ImVec4 tabInactive = ImVec4(0.085f, 0.095f, 0.125f, 1.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button, s_detailsTab == 0 ? tabActive : tabInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.40f, 0.68f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.30f, 0.52f, 1.0f));
+                if (ImGui::Button("Details", ImVec2(inspectorTabWidth, 26.0f * s_uiScale))) s_detailsTab = 0;
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, inspectorTabGap);
+                ImGui::PushStyleColor(ImGuiCol_Button, s_detailsTab == 1 ? tabActive : tabInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.40f, 0.68f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.30f, 0.52f, 1.0f));
+                if (ImGui::Button("World & Graphics", ImVec2(inspectorTabWidth, 26.0f * s_uiScale))) s_detailsTab = 1;
+                ImGui::PopStyleColor(3);
                 ImGui::Separator();
 
                 if (s_detailsTab == 0) {
