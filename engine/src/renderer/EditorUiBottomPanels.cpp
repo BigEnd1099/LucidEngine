@@ -1,5 +1,6 @@
 #include "renderer/EditorUiBottomPanels.hpp"
 #include "core/Logger.hpp"
+#include "imgui.h"
 
 #ifdef USE_GLFW
 namespace engine::renderer {
