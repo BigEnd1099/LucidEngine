@@ -1183,7 +1183,7 @@ namespace engine::renderer {
 
             drawEditorOutlinerPanel(registry, engine, selectedEnt, s_immersivePlay,
                                      s_showOutliner, s_showDetails, s_uiScale,
-                                     leftPanelW, centerViewportW, topTotalH, outlinerH,
+                                     leftPanelW, centerViewportW, rightPanelW, topTotalH, outlinerH,
                                      camPos, front, camYaw, camPitch, camFov);
 
 
