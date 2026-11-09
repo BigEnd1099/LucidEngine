@@ -273,7 +273,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         pref.lastProjectPath = state.currentProjectPath;
 
                         bool ok = engine->saveUserPreferences();
-                        snprintf(state.engineNotification, sizeof(state.engineNotification),
+                        std::snprintf(state.engineNotification, 128,
                                  ok ? "Zapisano preferencje do: %s" : "Blad zapisu preferencji!",
                                  pref.getDefaultConfigPath().c_str());
                         state.engineNotificationTimer = 4.0f;
@@ -281,7 +281,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     ImGui::SameLine();
                     if (ImGui::Button(" ⚡ Zastosuj (Apply) ")) {
                         engine->applyPreferences();
-                        snprintf(state.engineNotification, sizeof(state.engineNotification), "Zastosowano preferencje");
+                        std::snprintf(state.engineNotification, 128, "Zastosowano preferencje");
                         state.engineNotificationTimer = 3.0f;
                     }
                     ImGui::SameLine();
@@ -295,7 +295,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         state.showPlaceActors = true;
                         state.showOutliner    = true;
                         state.showDetails     = true;
-                        snprintf(state.engineNotification, sizeof(state.engineNotification), "Przywrocono ustawienia domyslne");
+                        std::snprintf(state.engineNotification, 128, "Przywrocono ustawienia domyslne");
                         state.engineNotificationTimer = 3.0f;
                     }
                     ImGui::SameLine();
