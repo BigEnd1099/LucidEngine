@@ -292,6 +292,11 @@
     "details.aa_preset": "AA Preset",
     "details.resolution_mode": "Resolution Mode",
     "details.resolution_scale": "Resolution Scale",
-    "details.ui_scale": "UI Scale"
+    "details.ui_scale": "UI Scale",
+    "ui.search_assets": "Search assets...",
+    "ui.asset_read_error": "Cannot read directory",
+    "ui.asset_no_results": "No assets match this search.",
+    "script.modified": "Modified",
+    "script.synced": "Synced"
   }
 }
