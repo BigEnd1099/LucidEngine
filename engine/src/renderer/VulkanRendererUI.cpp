@@ -138,8 +138,8 @@ namespace engine::renderer {
         double animationCpuMs = 0.0;
         if (stats.contains("samples") && stats["samples"].is_object()) {
             const auto& samples = stats["samples"];
-            if (samples.contains("Vulkan Render CPU"))
-                renderCpuMs = samples["Vulkan Render CPU"].value("lastMs", 0.0);
+            if (samples.contains("Vulkan Render Thread"))
+                renderCpuMs = samples["Vulkan Render Thread"].value("lastMs", 0.0);
             if (samples.contains("Simulation Update"))
                 updateCpuMs = samples["Simulation Update"].value("lastMs", 0.0);
             if (samples.contains("Animation & Skinning"))
@@ -168,10 +168,11 @@ namespace engine::renderer {
             lastHistoryFrame = frameCounter;
         }
 
+        const std::string windowTitle = std::string(editorText("ui.performance_profiler", "Performance Profiler")) + "###PerformanceProfiler";
         ImGui::SetNextWindowSize(ImVec2(700.0f, 560.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(80.0f, 80.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Performance Profiler", &m_showPerformanceProfiler, ImGuiWindowFlags_NoCollapse)) {
-            ImGui::TextDisabled("LIVE RENDER DIAGNOSTICS");
+        if (ImGui::Begin(windowTitle.c_str(), &m_showPerformanceProfiler, ImGuiWindowFlags_NoCollapse)) {
+            ImGui::TextDisabled("%s", editorText("ui.profiler_live_diagnostics", "LIVE RENDER DIAGNOSTICS"));
             ImGui::SameLine();
             ImGui::TextDisabled("|  Vulkan 1.3");
 
@@ -184,16 +185,16 @@ namespace engine::renderer {
                     if (available) ImGui::Text("%.*f %s", 2, value, unit);
                     else ImGui::TextDisabled("N/A");
                 };
-                metric("FRAME RATE", fps, "FPS");
-                metric("LOOP FRAME", loopFrameMs, "ms");
-                metric("RENDER CPU", renderCpuMs, "ms", renderCpuMs > 0.0);
-                metric("RENDER GPU", gpuFrameMs, "ms", m_timestampQueryPool != VK_NULL_HANDLE && gpuFrameMs > 0.0);
+                metric(editorText("ui.profiler_frame_rate", "FRAME RATE"), fps, "FPS");
+                metric(editorText("ui.profiler_loop_frame", "LOOP FRAME"), loopFrameMs, "ms");
+                metric(editorText("ui.profiler_render_thread", "RENDER THREAD"), renderCpuMs, "ms", renderCpuMs > 0.0);
+                metric(editorText("ui.profiler_render_gpu", "RENDER GPU"), gpuFrameMs, "ms", m_timestampQueryPool != VK_NULL_HANDLE && gpuFrameMs > 0.0);
                 ImGui::EndTable();
             }
 
             ImGui::Spacing();
-            ImGui::SeparatorText("FRAME TIME HISTORY");
-            ImGui::TextDisabled("Last %zu samples | CPU: Vulkan render submission | GPU: full render command buffer", historyCount);
+            ImGui::SeparatorText(editorText("ui.profiler_frame_time_history", "FRAME TIME HISTORY"));
+            ImGui::TextDisabled("%s: %zu | CPU: render thread incl. sync | GPU: full command buffer", editorText("ui.profiler_history_samples", "Samples"), historyCount);
             if (historyCount > 1) {
                 float cpuPlotMax = 0.10f;
                 float gpuPlotMax = 0.10f;
@@ -209,20 +210,20 @@ namespace engine::renderer {
                     ImGui::PlotLines("GPU##RenderGpuHistory", gpuHistory.data(), static_cast<int>(historyCount),
                         0, nullptr, 0.0f, gpuPlotMax, ImVec2(-1.0f, 72.0f));
                 } else {
-                    ImGui::TextDisabled("GPU timestamp queries are unavailable on this queue.");
+                    ImGui::TextDisabled("%s", editorText("ui.profiler_gpu_not_supported", "GPU timestamp queries are unavailable on this queue."));
                 }
             } else {
-                ImGui::TextDisabled("Collecting samples...");
+                ImGui::TextDisabled("%s", editorText("ui.profiler_collecting_samples", "Collecting samples..."));
             }
 
             ImGui::Spacing();
-            ImGui::SeparatorText("CPU STAGES");
+            ImGui::SeparatorText(editorText("ui.profiler_cpu_stages", "CPU STAGES"));
             if (ImGui::BeginTable("##CpuStageTable", 3,
                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
-                ImGui::TableSetupColumn("Stage", ImGuiTableColumnFlags_WidthStretch, 0.55f);
-                ImGui::TableSetupColumn("Last", ImGuiTableColumnFlags_WidthFixed, 0.20f);
-                ImGui::TableSetupColumn("Average", ImGuiTableColumnFlags_WidthFixed, 0.25f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_stage", "Stage"), ImGuiTableColumnFlags_WidthStretch, 0.55f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_last", "Last"), ImGuiTableColumnFlags_WidthFixed, 0.20f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_average", "Average"), ImGuiTableColumnFlags_WidthFixed, 0.25f);
                 ImGui::TableHeadersRow();
 
                 struct StageSample { std::string name; double lastMs; double avgMs; };
@@ -243,7 +244,7 @@ namespace engine::renderer {
                 if (stageSamples.empty()) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
-                    ImGui::TextDisabled("No CPU scopes recorded yet.");
+                    ImGui::TextDisabled("%s", editorText("ui.profiler_no_cpu_scopes", "No CPU scopes recorded yet."));
                 } else {
                     for (const auto& sample : stageSamples) {
                         ImGui::TableNextRow();
@@ -259,22 +260,26 @@ namespace engine::renderer {
             }
 
             ImGui::Spacing();
-            ImGui::SeparatorText("SCENE / TIMER STATUS");
-            ImGui::Text("Render resolution: %u x %u", m_width, m_height);
-            ImGui::Text("GPU timestamp queries: %s",
-                m_timestampQueryPool ? "Supported and active" : "Unavailable on selected graphics queue");
-            ImGui::Text("Scene entities: %llu   |   Draw items: %.0f   |   RT instances: %.0f",
+            ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
+            ImGui::Text("%s: %u x %u", editorText("ui.profiler_render_resolution", "Render resolution"), m_width, m_height);
+            ImGui::Text("%s: %s", editorText("ui.profiler_gpu_queries", "GPU timestamp queries"),
+                editorText(m_timestampQueryPool ? "ui.profiler_gpu_active" : "ui.profiler_gpu_not_supported",
+                    m_timestampQueryPool ? "Supported and active" : "Unavailable on selected graphics queue"));
+            ImGui::Text("%s: %llu   |   %s: %.0f   |   %s: %.0f",
+                editorText("ui.profiler_entities", "Scene entities"),
                 static_cast<unsigned long long>(engineStats.value("activeEntities", uint64_t{0})),
-                metrics.value("drawItems", 0.0),
-                metrics.value("rtInstances", 0.0));
+                editorText("ui.profiler_draw_items", "Draw items"), metrics.value("drawItems", 0.0),
+                editorText("ui.profiler_rt_instances", "RT instances"), metrics.value("rtInstances", 0.0));
             if (engineStats.contains("loadedCells")) {
-                ImGui::Text("World cells: %llu / %llu",
+                ImGui::Text("%s: %llu / %llu", editorText("ui.profiler_world_cells", "World cells"),
                     static_cast<unsigned long long>(engineStats.value("loadedCells", uint64_t{0})),
                     static_cast<unsigned long long>(engineStats.value("totalCells", uint64_t{0})));
             }
-            ImGui::Text("Update CPU: %.3f ms   |   Animation / Skinning CPU: %.3f ms",
-                updateCpuMs, animationCpuMs);
-            ImGui::TextDisabled("GPU time is the previous completed frame; CPU scopes are also one frame behind.");
+            ImGui::Text("%s: %.3f ms   |   %s: %.3f ms",
+                editorText("ui.profiler_update_cpu", "Update CPU"),
+                updateCpuMs, editorText("ui.profiler_animation_cpu", "Animation / Skinning CPU"), animationCpuMs);
+            ImGui::TextDisabled("%s", editorText("ui.profiler_timing_note", "GPU time is the previous completed frame; CPU scopes are also one frame behind."));
+            ImGui::TextDisabled("%s", editorText("ui.profiler_loop_frame_note", "Loop frame includes frame pacing / sleep; it is not pure CPU execution time."));
         }
         ImGui::End();
     }
