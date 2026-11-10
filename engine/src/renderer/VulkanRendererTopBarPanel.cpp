@@ -50,12 +50,12 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         if (ImGui::MenuItem(editorText("Save Project As...", "Zapisz projekt jako..."), "Ctrl+Shift+S")) {
                             state.saveProject(true);
                         }
-                        if (ImGui::BeginMenu("Szybki wybor")) {
-                            if (ImGui::MenuItem("Wczytaj 'projects/MyGame'")) state.loadProject("projects/MyGame");
+                        if (ImGui::BeginMenu(editorText("Quick Select", "Szybki wybór"))) {
+                            if (ImGui::MenuItem(editorText("Load 'projects/MyGame'", "Wczytaj 'projects/MyGame'"))) state.loadProject("projects/MyGame");
                             ImGui::EndMenu();
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("Kompiluj pelna gre (.exe)", "Ctrl+Shift+P")) {
+                        if (ImGui::MenuItem(editorText("Package Game (.exe)", "Zbuduj grę (.exe)"), "Ctrl+Shift+P")) {
                             state.saveProject(false);
                             if (engine && engine->packageStandaloneGame("Build/Windows/MyLucidGame", "MyLucidGame")) {
                                 std::snprintf(state.engineNotification, 128, "Gra skompilowana do Build/Windows/MyLucidGame/!");
@@ -83,9 +83,9 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::Separator();
                         ImGui::MenuItem("Editor Preferences...", "Ctrl+,", &state.showPreferencesWindow);
                         ImGui::Separator();
-                        if (ImGui::BeginMenu("Motyw Edytora (Theme)")) {
+                        if (ImGui::BeginMenu(editorText("Editor Theme", "Motyw edytora"))) {
                             static int s_topBarTheme = 0;
-                            if (ImGui::MenuItem("Unreal Slate (Ciemny grafit)", nullptr, s_topBarTheme == 0)) {
+                            if (ImGui::MenuItem(editorText("Unreal Slate (Dark Graphite)", "Unreal Slate (ciemny grafit)"), nullptr, s_topBarTheme == 0)) {
                                 s_topBarTheme = 0;
                                 applyEditorUiTheme(EditorThemePreset::UnrealSlate);
                             }
@@ -95,14 +95,14 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                             }
                             ImGui::EndMenu();
                         }
-                        if (ImGui::BeginMenu("Skala Interfejsu (UI Scale)")) {
+                        if (ImGui::BeginMenu(editorText("Interface Scale", "Skala interfejsu"))) {
                             if (ImGui::MenuItem("85% (Kompaktowe)", nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
                             if (ImGui::MenuItem("100% (Standard)", nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) m_uiScale = 1.0f;
                             if (ImGui::MenuItem("125% (Duze)", nullptr, std::abs(m_uiScale - 1.25f) < 0.05f)) m_uiScale = 1.25f;
                             if (ImGui::MenuItem("150% (Bardzo duze / 4K)", nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) m_uiScale = 1.50f;
                             ImGui::EndMenu();
                         }
-                        if (ImGui::BeginMenu("Skala Renderowania (Resolution Scale)")) {
+                        if (ImGui::BeginMenu(editorText("Render Scale", "Skala renderowania"))) {
                             if (ImGui::MenuItem("50% (Wydajnosc / Performance)", nullptr, std::abs(state.resolutionScale - 0.50f) < 0.04f)) setResolutionScale(0.50f);
                             if (ImGui::MenuItem("67% (Jakosc / Quality)", nullptr, std::abs(state.resolutionScale - 0.67f) < 0.04f)) setResolutionScale(0.67f);
                             if (ImGui::MenuItem("75% (Zrownowazona / Balanced)", nullptr, std::abs(state.resolutionScale - 0.75f) < 0.04f)) setResolutionScale(0.75f);
@@ -111,7 +111,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                             if (ImGui::MenuItem("150% (Ultra DSR)", nullptr, std::abs(state.resolutionScale - 1.50f) < 0.04f)) setResolutionScale(1.50f);
                             ImGui::EndMenu();
                         }
-                        if (ImGui::MenuItem("Zresetuj uklad okien do domyslnego")) {
+                        if (ImGui::MenuItem(editorText("Reset Window Layout", "Przywróć domyślny układ okien"))) {
                             state.userLeftPanelW  = 260.0f * state.uiScale;
                             state.userRightPanelW = 310.0f * state.uiScale;
                             state.userOutlinerH   = 240.0f * state.uiScale;
@@ -127,7 +127,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                             if (ImGui::MenuItem("60 FPS", nullptr, curFps == 60)) { if (engine) engine->setTargetFps(60); }
                             if (ImGui::MenuItem("120 FPS", nullptr, curFps == 120)) { if (engine) engine->setTargetFps(120); }
                             if (ImGui::MenuItem("240 FPS", nullptr, curFps == 240)) { if (engine) engine->setTargetFps(240); }
-                            if (ImGui::MenuItem("Unlimited (Brak limitu)", nullptr, curFps == 0)) { if (engine) engine->setTargetFps(0); }
+                            if (ImGui::MenuItem(editorText("Unlimited", "Bez limitu"), nullptr, curFps == 0)) { if (engine) engine->setTargetFps(0); }
                             ImGui::Separator();
                             bool vsync = engine ? engine->isVsyncEnabled() : true;
                             if (ImGui::MenuItem("V-Sync", nullptr, vsync)) {
@@ -136,7 +136,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                             ImGui::EndMenu();
                         }
                         if (ImGui::BeginMenu("Anti-Aliasing (FXAA 3.11)")) {
-                            if (ImGui::MenuItem("Off (Brak AA)", nullptr, state.antiAliasingMode == 0)) state.antiAliasingMode = 0;
+                            if (ImGui::MenuItem(editorText("Off", "Wyłączone"), nullptr, state.antiAliasingMode == 0)) state.antiAliasingMode = 0;
                             if (ImGui::MenuItem("FXAA Fast", nullptr, state.antiAliasingMode == 1)) state.antiAliasingMode = 1;
                             if (ImGui::MenuItem("FXAA Quality (Subpixel)", nullptr, state.antiAliasingMode == 2)) state.antiAliasingMode = 2;
                             if (ImGui::MenuItem("FXAA Ultra", nullptr, state.antiAliasingMode == 3)) state.antiAliasingMode = 3;
@@ -188,7 +188,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::BeginDisabled(state.simulationSessionActive);
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.65f, 0.75f, 1.0f));
-                if (ImGui::SmallButton("+ Nowy Poziom")) {
+                if (ImGui::SmallButton(editorText("+ New Level", "+ Nowy poziom"))) {
                     if (engine) {
                         selectedEntity = entt::null;
                         engine->setCurrentPreset("empty");
@@ -196,7 +196,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                     }
                 }
                 ImGui::PopStyleColor(2);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zresetuj do nowego, czystego poziomu");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Create a new empty level", "Utwórz nowy, pusty poziom"));
                 ImGui::EndDisabled();
 
                 ImGui::End();
@@ -216,23 +216,23 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             // Zapisz projekt z ikona dysku
             ImVec2 sPos = ImGui::GetCursorScreenPos();
             ImGui::BeginDisabled(state.simulationSessionActive);
-            if (ImGui::Button("     Zapisz ", ImVec2(0, btnH))) state.saveProject(false);
+            if (ImGui::Button(editorText("     Save ", "     Zapisz "), ImVec2(0, btnH))) state.saveProject(false);
             ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * state.uiScale, sPos.y + btnH * 0.5f), 5.5f * state.uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zapisz biezacy stan projektu [Ctrl+S]");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Save current project [Ctrl+S]", "Zapisz bieżący projekt [Ctrl+S]"));
             ImGui::SameLine();
 
             // Studio Skryptow
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.72f, 1.0f, 1.0f));
-            if (ImGui::Button(" </> Skrypty ", ImVec2(0, btnH))) state.showScriptStudio = !state.showScriptStudio;
+            if (ImGui::Button(editorText(" </> Scripts ", " </> Skrypty "), ImVec2(0, btnH))) state.showScriptStudio = !state.showScriptStudio;
             ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Otworz QuickJS ESM Live Coding & Skrypty (F4)");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Open QuickJS ESM Live Coding & Scripts (F4)", "Otwórz QuickJS ESM Live Coding i skrypty (F4)"));
             ImGui::SameLine();
 
             // Szybki dostep do oswietlenia i renderera
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.32f, 1.0f));
             ImVec2 gPos = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("     Swiatlo & Grafika ", ImVec2(0, btnH))) { m_detailsTab = 1; state.showDetails = true; }
+            if (ImGui::Button(editorText("     Lighting & Graphics ", "     Światło i grafika "), ImVec2(0, btnH))) { m_detailsTab = 1; state.showDetails = true; }
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(gPos.x + 11.0f * state.uiScale, gPos.y + btnH * 0.5f), 5.5f * state.uiScale, VectorIconType::Gear, IM_COL32(251, 191, 36, 255));
             ImGui::PopStyleColor();
             ImGui::SameLine();
@@ -268,33 +268,33 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 }
             }
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(plPos.x + 11.0f * state.uiScale, plPos.y + btnH * 0.5f), 5.0f * state.uiScale, VectorIconType::Play, isPaused ? IM_COL32(34, 197, 94, 255) : IM_COL32(255, 255, 255, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Uruchom symulacje fizyki Jolt i skrypty");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Start Jolt physics simulation and scripts", "Uruchom symulację fizyki Jolt i skrypty"));
             ImGui::SameLine();
 
             ImVec2 paPos = ImGui::GetCursorScreenPos();
             ImGui::BeginDisabled(!simulationActive || isPaused);
-            if (ImGui::Button("     Pauza ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
+            if (ImGui::Button(editorText("     Pause ", "     Pauza "), ImVec2(0, btnH)) && engine) engine->setPaused(true);
             ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * state.uiScale, paPos.y + btnH * 0.5f), 4.8f * state.uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wstrzymaj symulacje fizyki");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Pause physics simulation", "Wstrzymaj symulację fizyki"));
             ImGui::SameLine();
 
             ImVec2 stPos = ImGui::GetCursorScreenPos();
             ImGui::BeginDisabled(!simulationActive);
-            if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) {
+            if (ImGui::Button(editorText("     Stop ", "     Stop "), ImVec2(0, btnH)) && engine) {
                 engine->stopSimulation();
                 engine->setCameraMode("editor");
             }
             ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * state.uiScale, stPos.y + btnH * 0.5f), 4.8f * state.uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Stop and restore editor transforms", "Zatrzymaj i przywróć pozycje edycyjne obiektów"));
             ImGui::SameLine();
 
             const bool canStepSimulation = engine && engine->isSimulationSessionActive() && engine->isPaused();
             ImGui::BeginDisabled(!canStepSimulation);
-            if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
+            if (ImGui::Button(editorText(" Step ", " Krok "), ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
             ImGui::EndDisabled();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip(canStepSimulation ? "Wykonaj jeden krok symulacji (1/60s)" : "Krok dostepny tylko podczas pauzy aktywnej symulacji");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(canStepSimulation ? editorText("Advance simulation by one step (1/60s)", "Wykonaj jeden krok symulacji (1/60 s)") : editorText("Step is available only while the simulation is paused", "Krok jest dostępny tylko podczas pauzy"));
 
             // Wybor trybu kamery (Editor Freecam, 3rd Person TPP, 1st Person FPP, Top-Down, Side-Scroller)
             ImGui::SameLine(screenW - 365.0f * state.uiScale);
