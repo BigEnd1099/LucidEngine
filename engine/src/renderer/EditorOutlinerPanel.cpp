@@ -246,6 +246,23 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     if (engine) engine->setSelectedEntity(entity);
                 }
 
+                if (ImGui::BeginDragDropSource()) {
+                    ImGui::SetDragDropPayload("LUCID_ENTITY_HIERARCHY", &entity, sizeof(entity));
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LUCID_ENTITY_HIERARCHY")) {
+                        if (payload->Data && payload->DataSize == sizeof(entt::entity) &&
+                            !(engine && engine->isSimulationSessionActive())) {
+                            const entt::entity draggedEntity = *static_cast<const entt::entity*>(payload->Data);
+                            if (registry.reparentEntity(draggedEntity, entity))
+                                registry.updateWorldTransforms();
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
                 if (ImGui::BeginPopupContextItem("EntityRowCtxMenu")) {
                     selectedEntity = entity;
                     if (engine) engine->setSelectedEntity(entity);
