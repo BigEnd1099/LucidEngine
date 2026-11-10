@@ -971,6 +971,43 @@ namespace engine::core {
                     if (parentIt != restoredEntityMap.end() && parentIt->second != child)
                         m_registry->setParent(child, parentIt->second);
                 }
+
+                if (entJson.contains("morphWeights") && entJson["morphWeights"].is_array()) {
+                    auto& morph = m_registry->get().get_or_emplace<ecs::MorphWeightsComponent>(child);
+                    morph.weights = entJson["morphWeights"].get<std::vector<float>>();
+                }
+                if (entJson.contains("skin") && entJson["skin"].is_object()) {
+                    const auto& skinJson = entJson["skin"];
+                    auto& skin = m_registry->get().get_or_emplace<ecs::SkinComponent>(child);
+                    skin.skinAssetId = skinJson.value("skinAssetId", 0u);
+                    const uint32_t skeletonSavedId = skinJson.value("skeleton", 0u);
+                    if (skeletonSavedId != 0u) {
+                        const auto skeletonIt = restoredEntityMap.find(skeletonSavedId);
+                        skin.skeleton = skeletonIt != restoredEntityMap.end()
+                            ? skeletonIt->second : static_cast<entt::entity>(entt::null);
+                    }
+                    skin.joints.clear();
+                    if (skinJson.contains("joints") && skinJson["joints"].is_array()) {
+                        for (const auto& jointJson : skinJson["joints"]) {
+                            const uint32_t jointSavedId = jointJson.get<uint32_t>();
+                            const auto jointIt = restoredEntityMap.find(jointSavedId);
+                            skin.joints.push_back(jointIt != restoredEntityMap.end()
+                                ? jointIt->second : static_cast<entt::entity>(entt::null));
+                        }
+                    }
+                    skin.inverseBindMatrices.clear();
+                    if (skinJson.contains("inverseBindMatrices") && skinJson["inverseBindMatrices"].is_array()) {
+                        for (const auto& matrixJson : skinJson["inverseBindMatrices"]) {
+                            if (!matrixJson.is_array() || matrixJson.size() != 16) continue;
+                            glm::mat4 matrix(1.0f);
+                            size_t valueIndex = 0;
+                            for (int column = 0; column < 4; ++column)
+                                for (int row = 0; row < 4; ++row)
+                                    matrix[column][row] = matrixJson[valueIndex++].get<float>();
+                            skin.inverseBindMatrices.push_back(matrix);
+                        }
+                    }
+                }
             }
             m_registry->updateWorldTransforms();
 
@@ -1895,6 +1932,29 @@ function update(entities, dt, input, contacts) {
                 entJson["mesh"] = {
                     {"meshId", m.meshId},
                     {"materialId", m.materialId}
+                };
+            }
+            if (m_registry->get().all_of<ecs::MorphWeightsComponent>(entity)) {
+                entJson["morphWeights"] = m_registry->get().get<ecs::MorphWeightsComponent>(entity).weights;
+            }
+            if (m_registry->get().all_of<ecs::SkinComponent>(entity)) {
+                const auto& skin = m_registry->get().get<ecs::SkinComponent>(entity);
+                nlohmann::json joints = nlohmann::json::array();
+                for (entt::entity joint : skin.joints)
+                    joints.push_back(static_cast<uint32_t>(joint));
+                nlohmann::json inverseBindMatrices = nlohmann::json::array();
+                for (const glm::mat4& matrix : skin.inverseBindMatrices) {
+                    nlohmann::json values = nlohmann::json::array();
+                    for (int column = 0; column < 4; ++column)
+                        for (int row = 0; row < 4; ++row)
+                            values.push_back(matrix[column][row]);
+                    inverseBindMatrices.push_back(std::move(values));
+                }
+                entJson["skin"] = {
+                    {"skinAssetId", skin.skinAssetId},
+                    {"skeleton", skin.skeleton == entt::null ? 0u : static_cast<uint32_t>(skin.skeleton)},
+                    {"joints", std::move(joints)},
+                    {"inverseBindMatrices", std::move(inverseBindMatrices)}
                 };
             }
             if (m_registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
