@@ -59,6 +59,7 @@ namespace engine::renderer {
             float temporalSyncMs{0.0f};
             float atrous0ExecMs{0.0f};
             float atrous0SyncMs{0.0f};
+            float reflStartSyncMs{0.0f};
             float reflTraceExecMs{0.0f};
             float reflTraceSyncMs{0.0f};
             float reflTemporalExecMs{0.0f};
