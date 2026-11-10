@@ -37,6 +37,17 @@ namespace engine::ecs {
         bool visible{true};
     };
 
+    struct MorphWeightsComponent {
+        std::vector<float> weights;
+    };
+
+    struct SkinComponent {
+        uint32_t skinAssetId{0};
+        entt::entity skeleton{entt::null};
+        std::vector<entt::entity> joints;
+        std::vector<glm::mat4> inverseBindMatrices;
+    };
+
     struct LODComponent {
         std::vector<uint32_t> lodMeshIds{0}; // Mesh IDs for LOD0, LOD1, LOD2...
         std::vector<float> lodDistances{15.0f, 40.0f}; // Distance thresholds
