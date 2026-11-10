@@ -14,7 +14,7 @@ namespace engine::renderer {
     class AccelerationStructure {
     public:
         struct Instance {
-            uint32_t meshId{0};
+            uint64_t blasId{0};
             uint32_t customIndex{0};
             glm::mat4 transform{1.0f};
         };
@@ -24,7 +24,7 @@ namespace engine::renderer {
         bool isReady() const { return m_ready; }
         VkAccelerationStructureKHR getTLAS() const { return m_tlas.handle; }
 
-        bool ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh);
+        bool ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, const core::MeshAsset& mesh, VkBuffer vertexBuffer, bool dynamicGeometry, bool geometryChanged);
         bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances, bool* outHandleChanged = nullptr);
         void releaseCompletedScratch();
 
@@ -36,7 +36,7 @@ namespace engine::renderer {
             VkDeviceAddress address{0};
             VkDeviceSize size{0};
         };
-        struct BlasRecord { AccelResource resource; };
+        struct BlasRecord { AccelResource resource; bool dynamicGeometry{false}; };
 
         bool createAccelerationBuffer(VkDeviceSize size, VkBuffer& buffer, VmaAllocation& allocation);
         VkDeviceAddress getBufferAddress(VkBuffer buffer) const;
@@ -49,7 +49,7 @@ namespace engine::renderer {
         PFN_vkGetAccelerationStructureBuildSizesKHR m_getBuildSizes{nullptr};
         PFN_vkCmdBuildAccelerationStructuresKHR m_cmdBuildAS{nullptr};
         PFN_vkGetAccelerationStructureDeviceAddressKHR m_getASAddress{nullptr};
-        std::unordered_map<uint32_t, BlasRecord> m_blas;
+        std::unordered_map<uint64_t, BlasRecord> m_blas;
         AccelResource m_tlas;
 
         VkBuffer m_instanceBuffer{VK_NULL_HANDLE};
@@ -66,6 +66,7 @@ namespace engine::renderer {
         uint64_t m_lastInstanceHash{0};
         VkDeviceAddress m_minScratchAlignment{64};
         bool m_tlasBuiltOnce{false};
+        bool m_blasChangedSinceTlas{false};
 
         std::vector<std::pair<VkBuffer, VmaAllocation>> m_retainedScratch;
     };

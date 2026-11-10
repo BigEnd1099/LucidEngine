@@ -60,19 +60,25 @@ void AccelerationStructure::destroyResource(AccelResource& resource) {
     resource = {};
 }
 
-bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, const core::MeshAsset& mesh) {
-    if (!m_ready || meshId == 0 || !mesh.vertexBuffer || !mesh.indexBuffer ||
+bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, const core::MeshAsset& mesh,
+                                               VkBuffer vertexBuffer, bool dynamicGeometry, bool geometryChanged) {
+    if (!m_ready || blasId == 0 || !vertexBuffer || !mesh.indexBuffer ||
         mesh.vertexCount == 0 || mesh.indexCount < 3) return false;
-    if (m_blas.find(meshId) != m_blas.end()) return true;
+
+    auto existing = m_blas.find(blasId);
+    if (existing != m_blas.end() &&
+        (!dynamicGeometry || !existing->second.dynamicGeometry || !geometryChanged))
+        return true;
 
     VkDevice dev = m_context->getDevice();
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR };
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = getBufferAddress(mesh.vertexBuffer);
+    triangles.vertexData.deviceAddress = getBufferAddress(vertexBuffer);
     triangles.vertexStride = sizeof(Vertex);
     triangles.maxVertex = mesh.vertexCount - 1;
     triangles.indexType = VK_INDEX_TYPE_UINT32;
     triangles.indexData.deviceAddress = getBufferAddress(mesh.indexBuffer);
+    if (triangles.vertexData.deviceAddress == 0 || triangles.indexData.deviceAddress == 0) return false;
 
     VkAccelerationStructureGeometryKHR geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
@@ -81,8 +87,8 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
 
     VkAccelerationStructureBuildGeometryInfoKHR build{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
     build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                  VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
     build.geometryCount = 1;
     build.pGeometries = &geometry;
 
@@ -90,36 +96,62 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
     VkAccelerationStructureBuildSizesInfoKHR sizes{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
     m_getBuildSizes(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &primitiveCount, &sizes);
 
+    const bool update = existing != m_blas.end();
     BlasRecord record{};
-    if (!createAccelerationBuffer(sizes.accelerationStructureSize, record.resource.buffer, record.resource.allocation)) return false;
-    VkAccelerationStructureCreateInfoKHR create{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
-    create.buffer = record.resource.buffer;
-    create.size = sizes.accelerationStructureSize;
-    create.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    if (m_createAS(dev, &create, nullptr, &record.resource.handle) != VK_SUCCESS) {
-        destroyResource(record.resource); return false;
+    if (update) {
+        record = existing->second;
+    } else {
+        if (!createAccelerationBuffer(sizes.accelerationStructureSize, record.resource.buffer, record.resource.allocation))
+            return false;
+        VkAccelerationStructureCreateInfoKHR create{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+        create.buffer = record.resource.buffer;
+        create.size = sizes.accelerationStructureSize;
+        create.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        if (m_createAS(dev, &create, nullptr, &record.resource.handle) != VK_SUCCESS) {
+            destroyResource(record.resource);
+            return false;
+        }
     }
 
-    VkBuffer scratch = VK_NULL_HANDLE; VmaAllocation scratchAlloc = VK_NULL_HANDLE;
+    const VkDeviceSize scratchRequired = update ? sizes.updateScratchSize : sizes.buildScratchSize;
+    VkBuffer scratch = VK_NULL_HANDLE;
+    VmaAllocation scratchAlloc = VK_NULL_HANDLE;
     VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    scratchInfo.size = sizes.buildScratchSize + m_minScratchAlignment + 4096;
+    scratchInfo.size = scratchRequired + m_minScratchAlignment + 4096;
     scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    VmaAllocationCreateInfo scratchMem{}; scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    VmaAllocationCreateInfo scratchMem{};
+    scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &scratch, &scratchAlloc, nullptr) != VK_SUCCESS) {
-        destroyResource(record.resource); return false;
+        if (!update) destroyResource(record.resource);
+        return false;
     }
     m_retainedScratch.emplace_back(scratch, scratchAlloc);
+
+    build.mode = update ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.srcAccelerationStructure = update ? record.resource.handle : VK_NULL_HANDLE;
     build.dstAccelerationStructure = record.resource.handle;
-    {
-        const VkDeviceAddress raw = getBufferAddress(scratch);
-        const VkDeviceAddress align = m_minScratchAlignment;
-        build.scratchData.deviceAddress = (raw + align - 1) & ~(align - 1);
+    const VkDeviceAddress rawScratch = getBufferAddress(scratch);
+    const VkDeviceAddress align = m_minScratchAlignment;
+    build.scratchData.deviceAddress = (rawScratch + align - 1) & ~(align - 1);
+
+    // Make CPU-written, flushed deformation data visible to the acceleration-structure build.
+    if (dynamicGeometry) {
+        VkMemoryBarrier2 hostBarrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        hostBarrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+        hostBarrier.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+        hostBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+        hostBarrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                                    VK_ACCESS_2_SHADER_READ_BIT;
+        VkDependencyInfo hostDep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        hostDep.memoryBarrierCount = 1;
+        hostDep.pMemoryBarriers = &hostBarrier;
+        vkCmdPipelineBarrier2(cmd, &hostDep);
     }
+
     VkAccelerationStructureBuildRangeInfoKHR range{ primitiveCount, 0, 0, 0 };
     const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &range };
     m_cmdBuildAS(cmd, 1, &build, ranges);
 
-    // Build writes must be visible to later TLAS builds and ray queries.
     VkMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
     barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -127,10 +159,14 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint32_t meshId, con
                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-    dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &barrier;
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(cmd, &dep);
 
-    m_blas.emplace(meshId, std::move(record));
+    record.dynamicGeometry = dynamicGeometry;
+    if (!update) m_blas.emplace(blasId, std::move(record));
+    else existing->second = std::move(record);
+    if (dynamicGeometry) m_blasChangedSinceTlas = true;
     return true;
 }
 
@@ -142,7 +178,7 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     std::vector<VkAccelerationStructureInstanceKHR> vkInstances;
     vkInstances.reserve(instances.size());
     for (const auto& source : instances) {
-        auto it = m_blas.find(source.meshId);
+        auto it = m_blas.find(source.blasId);
         if (it == m_blas.end()) continue;
         VkAccelerationStructureInstanceKHR inst{};
         for (int row = 0; row < 3; ++row)
@@ -177,7 +213,8 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
 
     // Jeśli instancje i ich transformacje nie uległy zmianie i TLAS został już wybudowany,
     // całkowicie pomijamy pracę na GPU i aktualizację deskryptorów.
-    if (m_tlasBuiltOnce && m_tlas.handle != VK_NULL_HANDLE && currentHash == m_lastInstanceHash) {
+    if (m_tlasBuiltOnce && m_tlas.handle != VK_NULL_HANDLE &&
+        currentHash == m_lastInstanceHash && !m_blasChangedSinceTlas) {
         return true;
     }
 
@@ -314,6 +351,7 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     m_lastInstanceHash = currentHash;
     m_lastInstanceCount = count;
     m_tlasBuiltOnce = true;
+    m_blasChangedSinceTlas = false;
 
     if (outHandleChanged) *outHandleChanged = handleChanged;
     return true;
@@ -345,6 +383,11 @@ void AccelerationStructure::cleanup() {
         m_scratchAlloc = VK_NULL_HANDLE;
     }
     releaseCompletedScratch();
+    m_tlasBuiltOnce = false;
+    m_blasChangedSinceTlas = false;
+    m_lastInstanceCount = 0;
+    m_lastInstanceHash = 0;
+    m_maxInstanceCapacity = 0;
     m_ready = false;
 }
 }

@@ -221,8 +221,16 @@ namespace engine::renderer {
         bool m_standaloneGameMode{false};
         uint32_t m_frameCounter{0};
 
-        struct TransientVertexBuffer { VkBuffer buffer{VK_NULL_HANDLE}; VmaAllocation allocation{VK_NULL_HANDLE}; };
-        std::vector<TransientVertexBuffer> m_transientVertexBuffers;
+        struct DeformedVertexCache {
+            VkBuffer buffer{VK_NULL_HANDLE};
+            VmaAllocation allocation{VK_NULL_HANDLE};
+            VkDeviceSize size{0};
+            uint64_t contentHash{0};
+            uint64_t lastSeenFrame{0};
+            bool rayTracingCapable{false};
+        };
+        std::unordered_map<entt::entity, DeformedVertexCache> m_deformedVertexCache;
+        uint64_t m_deformationFrameCounter{0};
 
         // Main PBR, Depth Prepass & G-Buffer Pipelines
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
