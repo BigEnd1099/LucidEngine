@@ -35,7 +35,7 @@ namespace engine::renderer {
         constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
-    // Set 1 bindings: 0 depth sampler, 1 imgS, 2 imgA, 3 geomCur, 4 geomPrev, 5 histCur, 6 histPrev.
+    // Set 1 bindings: image resources 0-14, binding 15 = RT diagnostic counters (SSBO).
     bool RtDenoiser::init(VulkanContext* context, VkDescriptorSetLayout sceneSetLayout,
                           uint32_t width, uint32_t height,
                           VkImageView depthView, VkSampler depthSampler,
@@ -56,7 +56,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[15]{};
+        VkDescriptorSetLayoutBinding b[16]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -67,19 +67,24 @@ namespace engine::renderer {
                 b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             }
         }
+        b[15].binding = 15;
+        b[15].descriptorCount = 1;
+        b[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[15].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 15;
+        li.bindingCount = 16;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
 
-        const VkDescriptorPoolSize sizes[2] = {
+        const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 32 }
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 32 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pi.maxSets = 2;
-        pi.poolSizeCount = 2;
+        pi.poolSizeCount = 3;
         pi.pPoolSizes = sizes;
         if (vkCreateDescriptorPool(dev, &pi, nullptr, &m_pool) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create descriptor pool");
@@ -120,6 +125,21 @@ namespace engine::renderer {
         vkDestroyShaderModule(dev, atrous, nullptr);
 
         createImages();
+        VkBufferCreateInfo diagnosticsInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        diagnosticsInfo.size = sizeof(uint32_t) * 16u;
+        diagnosticsInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        diagnosticsInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo diagnosticsAlloc{};
+        diagnosticsAlloc.usage = VMA_MEMORY_USAGE_AUTO;
+        diagnosticsAlloc.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        diagnosticsAlloc.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        VmaAllocationInfo diagnosticsAllocationInfo{};
+        if (vmaCreateBuffer(m_context->getAllocator(), &diagnosticsInfo, &diagnosticsAlloc,
+                            &m_diagnosticsBuffer, &m_diagnosticsAllocation, &diagnosticsAllocationInfo) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to create diagnostics buffer");
+        m_diagnosticsMapped = static_cast<uint32_t*>(diagnosticsAllocationInfo.pMappedData);
+        m_diagnosticsCoherent = (diagnosticsAllocationInfo.memoryType >= 0) &&
+            ((m_context->getPhysicalDeviceMemoryProperties().memoryTypes[diagnosticsAllocationInfo.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0);
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
 
         const auto& props = m_context->getPhysicalDeviceProperties();
@@ -162,6 +182,10 @@ namespace engine::renderer {
         if (!m_context || !m_context->getDevice()) return;
         VkDevice dev = m_context->getDevice();
         destroyImages();
+        if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
+        m_diagnosticsBuffer = VK_NULL_HANDLE;
+        m_diagnosticsAllocation = VK_NULL_HANDLE;
+        m_diagnosticsMapped = nullptr;
         for (auto& p : m_atrousPipelines) { if (p) vkDestroyPipeline(dev, p, nullptr); p = VK_NULL_HANDLE; }
         if (m_temporalPipeline) vkDestroyPipeline(dev, m_temporalPipeline, nullptr);
         if (m_tracePipelineHandle) vkDestroyPipeline(dev, m_tracePipelineHandle, nullptr);
@@ -271,7 +295,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[15]{};
+            VkWriteDescriptorSet writes[16]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -351,7 +375,14 @@ namespace engine::renderer {
             writes[14].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[14].pImageInfo = &momentsPrevInfo;
 
-            vkUpdateDescriptorSets(m_context->getDevice(), 15, writes, 0, nullptr);
+            const VkDescriptorBufferInfo diagnosticsBufferInfo{ m_diagnosticsBuffer, 0, sizeof(uint32_t) * 16u };
+            writes[15] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[15].dstSet = m_sets[p];
+            writes[15].dstBinding = 15;
+            writes[15].descriptorCount = 1;
+            writes[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[15].pBufferInfo = &diagnosticsBufferInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 16, writes, 0, nullptr);
         }
     }
 
@@ -384,6 +415,21 @@ namespace engine::renderer {
             m_needsLayoutInit = false;
             m_historyValid = false;
             m_giHistoryValid = false;
+        }
+
+        // The renderer waits for the previous submission fence before record(); counters are
+        // therefore safe to invalidate/read here without stalling the GPU or using queue-idle.
+        if (m_diagnosticsMapped) {
+            if (!m_diagnosticsCoherent)
+                vmaInvalidateAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * 16u);
+            static const char* names[16] = {
+                "rtGiPixels", "rtGiHistoryAccepted", "rtGiHistoryRejected", "rtGiOutOfBounds",
+                "rtGiDepthRejected", "rtGiNormalRejected", "rtGiCheckerboardReuse", "rtGiSpatialFallback",
+                "rtReflectionPixels", "rtReflectionHistoryAccepted", "rtReflectionHistoryRejected", "rtReflectionOutOfBounds",
+                "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback"
+            };
+            for (uint32_t i = 0; i < 16; ++i) core::Profiler::get().recordMetric(names[i], m_diagnosticsMapped[i]);
+        }
         }
 
         // Retrieve previous frame's GPU timestamps if available
@@ -481,6 +527,22 @@ namespace engine::renderer {
         if (m_timestampsSupported && m_queryPool) {
             vkCmdResetQueryPool(cmd, m_queryPool, 0, 13);
         }
+
+        // Reset per-frame RT rejection counters. Transfer writes become visible to compute atomics.
+        vkCmdFillBuffer(cmd, m_diagnosticsBuffer, 0, sizeof(uint32_t) * 16u, 0u);
+        VkBufferMemoryBarrier2 diagnosticsResetBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        diagnosticsResetBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        diagnosticsResetBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        diagnosticsResetBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        diagnosticsResetBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        diagnosticsResetBarrier.srcQueueFamilyIndex = diagnosticsResetBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        diagnosticsResetBarrier.buffer = m_diagnosticsBuffer;
+        diagnosticsResetBarrier.offset = 0;
+        diagnosticsResetBarrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo diagnosticsResetDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        diagnosticsResetDependency.bufferMemoryBarrierCount = 1;
+        diagnosticsResetDependency.pBufferMemoryBarriers = &diagnosticsResetBarrier;
+        vkCmdPipelineBarrier2(cmd, &diagnosticsResetDependency);
 
         // Depth (prepass) + everything the previous frame left behind -> this frame's compute.
         memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
@@ -645,6 +707,19 @@ namespace engine::renderer {
 
         memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        VkBufferMemoryBarrier2 diagnosticsReadBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        diagnosticsReadBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        diagnosticsReadBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        diagnosticsReadBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+        diagnosticsReadBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+        diagnosticsReadBarrier.srcQueueFamilyIndex = diagnosticsReadBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        diagnosticsReadBarrier.buffer = m_diagnosticsBuffer;
+        diagnosticsReadBarrier.offset = 0;
+        diagnosticsReadBarrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo diagnosticsReadDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        diagnosticsReadDependency.bufferMemoryBarrierCount = 1;
+        diagnosticsReadDependency.pBufferMemoryBarriers = &diagnosticsReadBarrier;
+        vkCmdPipelineBarrier2(cmd, &diagnosticsReadDependency);
 
         m_prevViewProj = params.viewProj;
         m_historyValid = true;
