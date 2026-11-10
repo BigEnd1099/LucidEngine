@@ -61,6 +61,7 @@ namespace engine::ecs {
         uint32_t activeClip{0};
         float time{0.0f};
         float speed{1.0f};
+        glm::vec3 rootTranslationOffset{0.0f};
         bool playing{true};
         bool loop{true};
     };
