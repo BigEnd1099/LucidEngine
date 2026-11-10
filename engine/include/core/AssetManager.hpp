@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <vulkan/vulkan.h>
+#include <glm/gtc/quaternion.hpp>
 #include <vk_mem_alloc.h>
 #include <fastgltf/core.hpp>
 #include "renderer/Vertex.hpp"

@@ -1,5 +1,6 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "renderer/EditorUiControls.hpp"
 #include "renderer/EditorProjectDialogs.hpp"
 #include "renderer/EditorUiBottomPanels.hpp"
