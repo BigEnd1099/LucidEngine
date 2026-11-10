@@ -150,7 +150,6 @@ namespace engine::renderer {
         static std::array<float, kHistorySize> cpuHistory{};
         static std::array<float, kHistorySize> gpuHistory{};
         static size_t historyCount = 0;
-        static uint64_t lastHistoryFrame = UINT64_MAX;
 
         struct ProfilerWindowSample {
             double timeSeconds{0.0};
@@ -202,7 +201,6 @@ namespace engine::renderer {
                 cpuHistory.back() = static_cast<float>(renderCpuMs);
                 gpuHistory.back() = static_cast<float>(gpuFrameMs);
             }
-            lastHistoryFrame = frameCounter;
         }
 
         while (!oneSecondSamples.empty() &&
@@ -237,10 +235,6 @@ namespace engine::renderer {
             return count > 0 ? sum / static_cast<double>(count) : 0.0;
         };
 
-        const char* gpuMetricNames[] = {
-            "gpuScenePrepMs", "gpuShadowMs", "gpuDepthMs", "gpuGBufferMs",
-            "gpuAoRtMs", "gpuHdrMs", "gpuPostMs", "gpuUiMs"
-        };
         std::array<double, 8> avgGpuStages{};
         for (size_t i = 0; i < avgGpuStages.size(); ++i) {
             avgGpuStages[i] = average([i](const ProfilerWindowSample& s) { return s.gpuStages[i]; });
@@ -303,6 +297,8 @@ namespace engine::renderer {
                 report << "Average editor FPS: " << avgFps << "\n";
                 report << "Average loop frame: " << avgLoopFrameMs << " ms\n";
                 report << "Average render-thread CPU: " << avgRenderCpuMs << " ms\n";
+                report << "Average simulation update CPU: " << avgUpdateCpuMs << " ms\n";
+                report << "Average animation / skinning CPU: " << avgAnimationCpuMs << " ms\n";
                 report << "Average GPU command buffer: " << avgGpuFrameMs << " ms\n";
                 report << "\n[CPU STAGES - 1s AVERAGE]\n";
                 for (const auto& [name, value] : cpuStats.items()) {
