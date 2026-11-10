@@ -39,7 +39,7 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                     ImGui::TextDisabled(editorText("ui.gizmo_locked_until_stop", "Gizmo locked until Stop"));
                     ImGui::SameLine(0.0f, 6.0f * state.uiScale);
                 }
-                if (ImGui::Button((" Cam " + std::to_string(state.cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * state.uiScale))) state.cameraSpeed = (state.cameraSpeed % 8) + 1;
+                if (ImGui::Button((std::string(editorText("ui.camera_speed_prefix", " Cam ")) + std::to_string(state.cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * state.uiScale))) state.cameraSpeed = (state.cameraSpeed % 8) + 1;
                 ImGui::EndChild();
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
