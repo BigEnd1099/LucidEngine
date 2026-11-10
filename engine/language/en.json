@@ -357,6 +357,15 @@
     "ui.profiler_animation_cpu": "Animation / Skinning CPU",
     "ui.profiler_timing_note": "GPU time is the previous completed frame; CPU scopes are also one frame behind.",
     "ui.profiler_loop_frame_note": "Loop frame includes frame pacing / sleep; it is not pure CPU execution time.",
-    "ui.profiler_collecting_samples": "Collecting samples..."
+    "ui.profiler_collecting_samples": "Collecting samples...",
+    "ui.profiler_gpu_passes": "GPU PASS BREAKDOWN",
+    "ui.profiler_gpu_pass": "GPU stage",
+    "ui.profiler_gpu_time": "Time",
+    "ui.profiler_gpu_scene_prep": "Scene preparation / RT build",
+    "ui.profiler_gpu_shadows": "Shadow maps",
+    "ui.profiler_gpu_geometry": "Geometry / AO / RT",
+    "ui.profiler_gpu_hdr": "HDR lighting",
+    "ui.profiler_gpu_post": "Post-processing",
+    "ui.profiler_gpu_ui": "UI + swapchain"
   }
 }
