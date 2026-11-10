@@ -183,34 +183,6 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                 return false;
             };
 
-        auto duplicateEntity = [&](entt::entity src) -> entt::entity {
-            if (src == entt::null || !registry.get().valid(src)) return entt::null;
-            auto dst = registry.createEntity();
-            const std::string srcTag = registry.get().all_of<ecs::TagComponent>(src)
-                ? registry.get().get<ecs::TagComponent>(src).name : std::string("Actor");
-            registry.get().emplace<ecs::TagComponent>(dst, ecs::TagComponent{srcTag + "_Kopia"});
-            if (registry.get().all_of<ecs::TransformComponent>(src))
-                registry.get().emplace<ecs::TransformComponent>(dst, registry.get().get<ecs::TransformComponent>(src));
-            if (registry.get().all_of<ecs::MeshComponent>(src))
-                registry.get().emplace<ecs::MeshComponent>(dst, registry.get().get<ecs::MeshComponent>(src));
-            if (registry.get().all_of<ecs::MaterialComponent>(src))
-                registry.get().emplace<ecs::MaterialComponent>(dst, registry.get().get<ecs::MaterialComponent>(src));
-            if (registry.get().all_of<ecs::LightComponent>(src))
-                registry.get().emplace<ecs::LightComponent>(dst, registry.get().get<ecs::LightComponent>(src));
-            if (registry.get().all_of<ecs::ParticleEmitterComponent>(src))
-                registry.get().emplace<ecs::ParticleEmitterComponent>(dst, registry.get().get<ecs::ParticleEmitterComponent>(src));
-            return dst;
-        };
-
-        if (!(engine && engine->isSimulationSessionActive()) &&
-            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-            !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() &&
-            ImGui::IsKeyPressed(ImGuiKey_D) && ImGui::GetIO().KeyCtrl &&
-            selectedEntity != entt::null && registry.get().valid(selectedEntity)) {
-            selectedEntity = duplicateEntity(selectedEntity);
-            if (engine) engine->setSelectedEntity(selectedEntity);
-        }
-
         std::function<void(entt::entity, int)> drawEntityNode =
             [&](entt::entity entity, int depth) {
                 if (depth > 256 || !registry.get().valid(entity) ||
