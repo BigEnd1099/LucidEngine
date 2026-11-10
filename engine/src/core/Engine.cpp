@@ -750,6 +750,7 @@ namespace engine::core {
             if (!ents.is_array()) return;
 
             std::unordered_set<uint32_t> validRestoredIds;
+            std::unordered_map<uint32_t, entt::entity> restoredEntityMap;
 
             for (const auto& entJson : ents) {
                 if (!entJson.is_object()) continue;
@@ -762,9 +763,11 @@ namespace engine::core {
                 if (!m_registry->get().valid(entity)) {
                     uint32_t newId = spawnEntityFromJson(entJson);
                     validRestoredIds.insert(newId);
+                    restoredEntityMap[entJson["id"].get<uint32_t>()] = static_cast<entt::entity>(newId);
                     continue;
                 }
                 validRestoredIds.insert(static_cast<uint32_t>(entity));
+                restoredEntityMap[static_cast<uint32_t>(entity)] = entity;
 
                 if (entJson.contains("tag") && entJson["tag"].is_string()) {
                     m_registry->get().get_or_emplace<ecs::TagComponent>(entity).name = entJson["tag"].get<std::string>();
@@ -925,6 +928,37 @@ namespace engine::core {
                     if (pJson.contains("size")) pc.size = pJson["size"].get<float>();
                 }
             }
+
+            // Rebuild parent links only after every saved entity has been recreated.
+            // This keeps references valid even when EnTT assigns different runtime IDs.
+            for (const auto& entJson : ents) {
+                if (!entJson.is_object() || !entJson.contains("id")) continue;
+                const uint32_t savedId = entJson["id"].get<uint32_t>();
+                auto childIt = restoredEntityMap.find(savedId);
+                if (childIt == restoredEntityMap.end() || !m_registry->get().valid(childIt->second)) continue;
+                const entt::entity child = childIt->second;
+
+                if (entJson.contains("localTransform") && entJson["localTransform"].is_object()) {
+                    const auto& localJson = entJson["localTransform"];
+                    auto& local = m_registry->get().get_or_emplace<ecs::LocalTransformComponent>(child);
+                    local.position = glm::vec3(localJson.value("x", 0.0f), localJson.value("y", 0.0f), localJson.value("z", 0.0f));
+                    local.rotation = glm::vec3(localJson.value("rx", 0.0f), localJson.value("ry", 0.0f), localJson.value("rz", 0.0f));
+                    local.scale = glm::vec3(localJson.value("sx", 1.0f), localJson.value("sy", 1.0f), localJson.value("sz", 1.0f));
+                    local.orientation = localJson.contains("qw") && localJson.contains("qx") &&
+                        localJson.contains("qy") && localJson.contains("qz")
+                        ? glm::quat(localJson.value("qw", 1.0f), localJson.value("qx", 0.0f),
+                                    localJson.value("qy", 0.0f), localJson.value("qz", 0.0f))
+                        : glm::quat(glm::radians(local.rotation));
+                }
+
+                if (entJson.contains("hierarchyParent")) {
+                    const uint32_t parentSavedId = entJson["hierarchyParent"].get<uint32_t>();
+                    auto parentIt = restoredEntityMap.find(parentSavedId);
+                    if (parentIt != restoredEntityMap.end() && parentIt->second != child)
+                        m_registry->setParent(child, parentIt->second);
+                }
+            }
+            m_registry->updateWorldTransforms();
 
             // Clean up any dynamic entities spawned during simulation that weren't in the snapshot
             auto allEntsView = m_registry->get().view<ecs::TransformComponent>();
@@ -1816,6 +1850,21 @@ function update(entities, dt, input, contacts) {
                     {"sz", transform.scale.z}
                 }}
             };
+            if (m_registry->get().all_of<ecs::LocalTransformComponent>(entity)) {
+                const auto& local = m_registry->get().get<ecs::LocalTransformComponent>(entity);
+                entJson["localTransform"] = {
+                    {"x", local.position.x}, {"y", local.position.y}, {"z", local.position.z},
+                    {"rx", local.rotation.x}, {"ry", local.rotation.y}, {"rz", local.rotation.z},
+                    {"qx", local.orientation.x}, {"qy", local.orientation.y},
+                    {"qz", local.orientation.z}, {"qw", local.orientation.w},
+                    {"sx", local.scale.x}, {"sy", local.scale.y}, {"sz", local.scale.z}
+                };
+            }
+            if (m_registry->get().all_of<ecs::HierarchyComponent>(entity)) {
+                const entt::entity parent = m_registry->get().get<ecs::HierarchyComponent>(entity).parent;
+                if (parent != entt::null && m_registry->get().valid(parent))
+                    entJson["hierarchyParent"] = static_cast<uint32_t>(parent);
+            }
             if (m_registry->get().all_of<ecs::TagComponent>(entity)) {
                 entJson["tag"] = m_registry->get().get<ecs::TagComponent>(entity).name;
             }
@@ -2734,16 +2783,10 @@ function update(entities, dt, input, contacts) {
             }
 
             // 4. Restore entities
-            if (proj.contains("entities") && proj["entities"].is_array()) {
-                for (auto& e : proj["entities"]) if (e.is_object()) e.erase("id");
-            }
             if (proj.contains("entities")) {
                 applySnapshotJson(proj["entities"].dump());
             } else if (proj.contains("scenes") && proj["scenes"].is_array() && !proj["scenes"].empty()) {
                 auto& sc = proj["scenes"][0];
-                if (sc.contains("entities") && sc["entities"].is_array()) {
-                    for (auto& e : sc["entities"]) if (e.is_object()) e.erase("id");
-                }
                 if (sc.contains("entities")) {
                     applySnapshotJson(sc["entities"].dump());
                 }
