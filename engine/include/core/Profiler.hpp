@@ -45,7 +45,6 @@ namespace engine::core {
             ScopedSample& operator=(ScopedSample&&) = delete;
 
         private:
-            using Clock = std::chrono::steady_clock;
             std::string m_name;
             std::chrono::steady_clock::time_point m_start;
         };
