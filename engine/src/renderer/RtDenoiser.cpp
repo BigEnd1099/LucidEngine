@@ -524,8 +524,9 @@ namespace engine::renderer {
             VkImageMemoryBarrier2 afterClear{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
             afterClear.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             afterClear.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            afterClear.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-            afterClear.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            afterClear.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            afterClear.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
             afterClear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
             afterClear.newLayout = VK_IMAGE_LAYOUT_GENERAL;
             afterClear.srcQueueFamilyIndex = afterClear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
