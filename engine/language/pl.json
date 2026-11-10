@@ -292,6 +292,11 @@
     "details.aa_preset": "Preset antyaliasingu",
     "details.resolution_mode": "Tryb rozdzielczości",
     "details.resolution_scale": "Skala rozdzielczości",
-    "details.ui_scale": "Skala interfejsu"
+    "details.ui_scale": "Skala interfejsu",
+    "ui.search_assets": "Szukaj zasobów...",
+    "ui.asset_read_error": "Nie można odczytać katalogu",
+    "ui.asset_no_results": "Brak zasobów pasujących do wyszukiwania.",
+    "script.modified": "Zmieniono",
+    "script.synced": "Zsynchronizowano"
   }
 }
