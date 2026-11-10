@@ -284,8 +284,11 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
             ImGui::SameLine();
 
+            const bool canStepSimulation = engine && engine->isSimulationSessionActive() && engine->isPaused();
+            ImGui::BeginDisabled(!canStepSimulation);
             if (ImGui::Button(" Krok ", ImVec2(0, btnH)) && engine) engine->stepSimulation(1, 1.0f / 60.0f);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wykonaj krok symulacji o 1 klatke fizyki (1/60s)");
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(canStepSimulation ? "Wykonaj jeden krok symulacji (1/60s)" : "Krok dostepny tylko podczas pauzy aktywnej symulacji");
 
             // Wybor trybu kamery (Editor Freecam, 3rd Person TPP, 1st Person FPP, Top-Down, Side-Scroller)
             ImGui::SameLine(screenW - 365.0f * state.uiScale);
