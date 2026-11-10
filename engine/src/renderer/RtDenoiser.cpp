@@ -33,6 +33,7 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &dep);
         }
 
+        constexpr uint32_t kRtDiagnosticCounterCount = 48u;
         constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
@@ -127,7 +128,7 @@ namespace engine::renderer {
 
         createImages();
         VkBufferCreateInfo diagnosticsInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        diagnosticsInfo.size = sizeof(uint32_t) * 16u;
+        diagnosticsInfo.size = sizeof(uint32_t) * kRtDiagnosticCounterCount;
         diagnosticsInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         diagnosticsInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         VmaAllocationCreateInfo diagnosticsAlloc{};
@@ -145,9 +146,9 @@ namespace engine::renderer {
             ((diagnosticsMemoryProperties.memoryTypes[diagnosticsAllocationInfo.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0);
         if (!m_diagnosticsMapped)
             throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
-        std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * 16u);
+        std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
         if (!m_diagnosticsCoherent)
-            vmaFlushAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * 16u);
+            vmaFlushAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
 
         const auto& props = m_context->getPhysicalDeviceProperties();
@@ -383,7 +384,7 @@ namespace engine::renderer {
             writes[14].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[14].pImageInfo = &momentsPrevInfo;
 
-            const VkDescriptorBufferInfo diagnosticsBufferInfo{ m_diagnosticsBuffer, 0, sizeof(uint32_t) * 16u };
+            const VkDescriptorBufferInfo diagnosticsBufferInfo{ m_diagnosticsBuffer, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount };
             writes[15] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[15].dstSet = m_sets[p];
             writes[15].dstBinding = 15;
@@ -429,15 +430,23 @@ namespace engine::renderer {
         // therefore safe to invalidate/read here without stalling the GPU or using queue-idle.
         if (m_diagnosticsMapped) {
             if (!m_diagnosticsCoherent)
-                vmaInvalidateAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * 16u);
-            static const char* names[16] = {
+                vmaInvalidateAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
+            static const char* names[kRtDiagnosticCounterCount] = {
                 "rtGiPixels", "rtGiHistoryAccepted", "rtGiHistoryRejected", "rtGiOutOfBounds",
                 "rtGiDepthRejected", "rtGiNormalRejected", "rtGiCheckerboardReuse", "rtGiSpatialFallback",
                 "rtReflectionPixels", "rtReflectionHistoryAccepted", "rtReflectionHistoryRejected", "rtReflectionOutOfBounds",
-                "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback"
+                "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback",
+                "rtGiHistoryAgeBin00", "rtGiHistoryAgeBin01", "rtGiHistoryAgeBin02", "rtGiHistoryAgeBin03",
+                "rtGiHistoryAgeBin04", "rtGiHistoryAgeBin05", "rtGiHistoryAgeBin06", "rtGiHistoryAgeBin07",
+                "rtGiHistoryAgeBin08", "rtGiHistoryAgeBin09", "rtGiHistoryAgeBin10", "rtGiHistoryAgeBin11",
+                "rtGiHistoryAgeBin12", "rtGiHistoryAgeBin13", "rtGiHistoryAgeBin14", "rtGiHistoryAgeBin15",
+                "rtReflectionHistoryAgeBin00", "rtReflectionHistoryAgeBin01", "rtReflectionHistoryAgeBin02", "rtReflectionHistoryAgeBin03",
+                "rtReflectionHistoryAgeBin04", "rtReflectionHistoryAgeBin05", "rtReflectionHistoryAgeBin06", "rtReflectionHistoryAgeBin07",
+                "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11",
+                "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15"
             };
             auto& diagnosticsProfiler = core::Profiler::get();
-            for (uint32_t i = 0; i < 16; ++i)
+            for (uint32_t i = 0; i < kRtDiagnosticCounterCount; ++i)
                 diagnosticsProfiler.recordMetric(names[i], m_diagnosticsMapped[i]);
         }
 
@@ -538,7 +547,7 @@ namespace engine::renderer {
         }
 
         // Reset per-frame RT rejection counters. Transfer writes become visible to compute atomics.
-        vkCmdFillBuffer(cmd, m_diagnosticsBuffer, 0, sizeof(uint32_t) * 16u, 0u);
+        vkCmdFillBuffer(cmd, m_diagnosticsBuffer, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount, 0u);
         VkBufferMemoryBarrier2 diagnosticsResetBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
         diagnosticsResetBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         diagnosticsResetBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;

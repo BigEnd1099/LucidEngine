@@ -46,7 +46,7 @@ layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: m
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
 
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[16]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
 
 
 
@@ -83,6 +83,7 @@ void main() {
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
         imageStore(imgMomentsCur, px, vec4(0.0));
+        atomicAdd(rtDiag.counters[16], 1u); // zero-age / sky
 
         return;
 
@@ -311,6 +312,8 @@ void main() {
     imageStore(imgMomentsCur, px, outMoments);
 
     geom.w = newLen;
+    uint ageBin = min(uint(clamp(newLen / maxHist, 0.0, 0.999999) * 16.0), 15u);
+    atomicAdd(rtDiag.counters[16u + ageBin], 1u);
 
     imageStore(imgGeomCur, px, geom);
 
