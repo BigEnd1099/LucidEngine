@@ -13,6 +13,11 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                                            float screenW, float topTitleBarH,
                                            float topLevelTabsH, float topToolbarH,
                                            entt::entity& selectedEntity) {
+            static bool s_showShortcutsWindow = false;
+            if (!ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_F1)) {
+                s_showShortcutsWindow = !s_showShortcutsWindow;
+            }
+
             // 1. TOP WINDOW BAR
             if (!state.immersivePlay) {
                 ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
@@ -149,6 +154,10 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         if (ImGui::MenuItem(editorText("ui.export_typescript", "Export TypeScript (.d.ts)")) && engine) engine->exportTypeDefinitions();
                         ImGui::EndMenu();
                     }
+                    if (ImGui::BeginMenu(editorText("ui.help", "Help"))) {
+                        if (ImGui::MenuItem(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts"), "F1")) s_showShortcutsWindow = true;
+                        ImGui::EndMenu();
+                    }
 
                     const float projOffset = screenW * 0.52f;
                     if (ImGui::GetCursorPosX() < projOffset) ImGui::SameLine(projOffset);
@@ -160,8 +169,38 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::End();
                 ImGui::PopStyleColor(2);
                 ImGui::PopStyleVar();
+            }
 
-                // 2. LEVEL TABS STRIP
+            if (s_showShortcutsWindow) {
+                ImGui::SetNextWindowSize(ImVec2(520.0f * state.uiScale, 440.0f * state.uiScale), ImGuiCond_FirstUseEver);
+                if (ImGui::Begin(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts"), &s_showShortcutsWindow, ImGuiWindowFlags_NoCollapse)) {
+                    auto shortcutRow = [&](const char* keys, const char* description) {
+                        ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", keys);
+                        ImGui::SameLine(150.0f * state.uiScale);
+                        ImGui::TextUnformatted(description);
+                    };
+                    ImGui::SeparatorText(editorText("ui.shortcuts_project_windows", "Project & Windows"));
+                    shortcutRow("Ctrl + S", editorText("ui.shortcut_save", "Save project"));
+                    shortcutRow("Ctrl + Shift + S", editorText("ui.shortcut_save_as", "Save project as"));
+                    shortcutRow("Ctrl + O", editorText("ui.shortcut_open", "Open project"));
+                    shortcutRow("Ctrl + ,", editorText("ui.shortcut_preferences", "Open editor preferences"));
+                    shortcutRow("Ctrl + Space", editorText("ui.shortcut_content_drawer", "Toggle Content Drawer"));
+                    shortcutRow("F4", editorText("ui.shortcut_script_studio", "Toggle QuickJS Script Studio"));
+                    shortcutRow("F11", editorText("ui.shortcut_immersive", "Toggle immersive viewport"));
+                    ImGui::SeparatorText(editorText("ui.shortcuts_viewport", "Viewport & Selection"));
+                    shortcutRow("W / G", editorText("ui.shortcut_translate", "Move gizmo"));
+                    shortcutRow("E / R", editorText("ui.shortcut_rotate", "Rotate gizmo"));
+                    shortcutRow("S", editorText("ui.shortcut_scale", "Scale gizmo"));
+                    shortcutRow("F", editorText("ui.shortcut_focus", "Focus selected object"));
+                    shortcutRow("Delete", editorText("ui.shortcut_delete", "Delete selected object"));
+                    shortcutRow("Ctrl + D", editorText("ui.shortcut_duplicate", "Duplicate selected object"));
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("%s", editorText("ui.shortcuts_note", "Viewport shortcuts are disabled while editing text or during simulation where applicable."));
+                }
+                ImGui::End();
+            }
+
+            // 2. LEVEL TABS STRIP
                 ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
