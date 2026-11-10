@@ -167,7 +167,8 @@ namespace engine::renderer {
             }
         }
 
-        if (!hasDirLight && engine && !m_standaloneGameMode) {
+        // Benchmark lighting is controlled by the harness; do not inject the editor fallback sun.
+        if (!hasDirLight && engine && !m_standaloneGameMode && !m_benchmarkMode) {
             auto sunEntity = registry.createEntity();
             registry.get().emplace<ecs::TagComponent>(sunEntity, ecs::TagComponent{"DirectionalLight (Sun)"});
             registry.get().emplace<ecs::TransformComponent>(sunEntity, glm::vec3(0.0f, 18.0f, 0.0f), glm::vec3(-45.0f, -40.0f, 0.0f), glm::vec3(1.0f));

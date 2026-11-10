@@ -28,7 +28,8 @@ Atrium Benchmark is generated from native ECS entities and built-in meshes. It c
 
 ## Test matrix
 
-- Empty scene: all effects off / all effect flags on
+- True-empty scene (no demo geometry, fallback sun, HDRI or ambient fill): all effects off / all effect flags on
+- Environment-only scene: HDRI/IBL and sun enabled, with no geometry
 - Atrium: all effects off
 - GTAO only / SSGI only / GTAO + SSGI
 - RT GI only / RT AO only / RT GI + AO

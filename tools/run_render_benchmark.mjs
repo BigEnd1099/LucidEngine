@@ -136,9 +136,23 @@ async function spawnEntity(data) {
   return result.entityId;
 }
 
+async function setBenchmarkEnvironment(enabled) {
+  await callRpc('engine.setEnvironment', {
+    hdriEnabled: enabled,
+    skyboxEnabled: enabled,
+    iblEnabled: enabled,
+    ambientColor: enabled ? '#263449' : '#000000',
+    ambientIntensity: enabled ? 0.7 : 0.0,
+    sunEnabled: enabled,
+    sunIntensity: enabled ? 2.2 : 0.0,
+    fogEnabled: false
+  });
+}
+
 async function createAtriumBenchmarkScene() {
   console.log('[SCENE] Building Atrium Benchmark scene...');
-  await callRpc('engine.resetScene', { preset: 'empty' });
+  // Use a truly empty registry. The engine's 'empty' preset intentionally creates a ground plane and sun.
+  await callRpc('engine.resetScene', { preset: 'clean' });
 
   const spawnJobs = [];
   const add = data => spawnJobs.push(data);
@@ -231,16 +245,15 @@ async function createAtriumBenchmarkScene() {
     if ((i + 1) % 25 === 0) console.log('[SCENE] Spawned ' + (i + 1) + '/' + spawnJobs.length + ' entities...');
   }
 
-  await callRpc('engine.setEnvironment', {
-    hdriEnabled: true, skyboxEnabled: true, iblEnabled: true,
-    ambientIntensity: 0.7, sunEnabled: true, sunIntensity: 2.2, fogEnabled: false
-  });
+  await setBenchmarkEnvironment(true);
   await callRpc('engine.setCamera', {
     x: 0, y: 8.0, z: 34, yaw: -90, pitch: -11, fov: 62
   });
 
-  console.log('[SCENE] Created ' + ids.length + ' benchmark entities.');
-  return { entityCount: ids.length };
+  const meshEntityCount = spawnJobs.filter(item => item.mesh).length;
+  const lightEntityCount = spawnJobs.filter(item => item.light).length;
+  console.log('[SCENE] Created ' + ids.length + ' benchmark entities (' + meshEntityCount + ' meshes, ' + lightEntityCount + ' lights).');
+  return { entityCount: ids.length, meshEntityCount, lightEntityCount };
 }
 
 async function setFeatures(features) {
@@ -279,8 +292,8 @@ async function captureScenario(name, features, meta = {}) {
     const metrics = stats?.metrics || {};
     samples.push({
       timestamp: new Date().toISOString(),
-      fps: Number(stats?.fps || 0),
       frameTimeMs: Number(stats?.frameTimeMs || 0),
+      profilerSmoothedFps: Number(stats?.fps || 0),
       gpuTimeMs: Number(stats?.gpuTimeMs || 0),
       registryEntities: Number(stats?.registryEntities || 0),
       meshEntities: Number(stats?.meshEntities || 0),
@@ -317,6 +330,10 @@ async function captureScenario(name, features, meta = {}) {
     p95[key] = round(percentile(values, 0.95));
   }
 
+  // Profiler::fps is an exponential moving average and can lag scenario transitions.
+  // Report throughput from the same measured frame-time window; retain the smoothed value separately.
+  averages.fps = averages.frameTimeMs > 0 ? round(1000.0 / averages.frameTimeMs) : 0;
+
   const result = {
     name, features: actual, sampleCount: samples.length,
     captureMs: CAPTURE_MS, warmupMs: WARMUP_MS,
@@ -341,7 +358,7 @@ async function saveSceneCapture() {
 
 function writeSummary(results, sceneMeta) {
   const fields = [
-    'fps', 'frameTimeMs', 'gpuTimeMs', 'drawItems', 'rtInstances',
+    'fps', 'profilerSmoothedFps', 'frameTimeMs', 'gpuTimeMs', 'drawItems', 'rtInstances',
     'gpuAoRtMs', 'gpuScreenSpaceAoGiMs', 'gpuScreenSpaceBlurMs',
     'rtGiTraceMs', 'rtGiTemporalMs', 'rtGiAtrous0Ms', 'rtGiAtrous1Ms',
     'rtReflectionTraceMs', 'rtReflectionTemporalMs', 'rtComputeTotalMs'
@@ -391,15 +408,47 @@ async function main() {
   if (!initialStats || Number(initialStats.gpuTimeMs || 0) <= 0) {
     throw new Error('GPU timestamps are not active after starting the windowed renderer. Refusing to produce an invalid benchmark.');
   }
-  await callRpc('engine.resetScene', { preset: 'empty' });
+  await callRpc('engine.resetScene', { preset: 'clean' });
+  // True-empty baseline: no demo scene, fallback sun, HDRI/IBL or ambient fill.
+  await setBenchmarkEnvironment(false);
 
   const results = [];
-  results.push(await captureScenario('empty_all_off',
-    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false }));
-  results.push(await captureScenario('empty_all_flags_on',
-    { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true }));
+  const emptyOff = await captureScenario('empty_all_off',
+    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
+  if (emptyOff.averages.drawItems !== 0 || emptyOff.averages.rtInstances !== 0) {
+    throw new Error('Empty-scene baseline is contaminated: expected 0 draw items and 0 RT instances, got ' +
+      emptyOff.averages.drawItems + ' draw items / ' + emptyOff.averages.rtInstances + ' RT instances.');
+  }
+  results.push(emptyOff);
+
+  const emptyFlagsOn = await captureScenario('empty_all_flags_on',
+    { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true });
+  if (emptyFlagsOn.averages.drawItems !== 0 || emptyFlagsOn.averages.rtInstances !== 0) {
+    throw new Error('Empty-scene all-flags-on baseline is contaminated: expected 0 geometry instances.');
+  }
+  results.push(emptyFlagsOn);
+
+  // Environment-only isolates HDRI/IBL and sun cost without any scene geometry.
+  await setBenchmarkEnvironment(true);
+  const environmentOnly = await captureScenario('empty_environment_only',
+    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
+  if (environmentOnly.averages.drawItems !== 0 || environmentOnly.averages.rtInstances !== 0) {
+    throw new Error('Environment-only baseline is contaminated: expected 0 draw items and 0 RT instances.');
+  }
+  results.push(environmentOnly);
 
   const sceneMeta = await createAtriumBenchmarkScene();
+  await setFeatures({ gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
+  await sleep(500);
+  const atriumValidation = await callRpc('engine.getProfilerStats');
+  const atriumMetrics = atriumValidation?.metrics || {};
+  const actualDrawItems = Number(atriumMetrics.drawItems || 0);
+  const actualRtInstances = Number(atriumMetrics.rtInstances || 0);
+  if (actualDrawItems !== sceneMeta.meshEntityCount || actualRtInstances !== sceneMeta.meshEntityCount) {
+    throw new Error('Atrium scene validation failed: expected ' + sceneMeta.meshEntityCount +
+      ' mesh draw items / RT instances, got ' + actualDrawItems + ' / ' + actualRtInstances +
+      '. Check for unintended preset geometry or missing RT instances.');
+  }
   const savedProjectPath = path.join(outputDir, 'AtriumBenchmark');
   const savedProject = await callRpc('engine.saveCurrentProject', { path: savedProjectPath }, 20000);
   if (!savedProject?.success) throw new Error('Could not save the generated Atrium Benchmark project.');

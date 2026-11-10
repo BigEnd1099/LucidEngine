@@ -330,7 +330,8 @@ namespace engine::core {
         m_replicationGraph = std::make_unique<network::ReplicationGraph>();
         m_audioEngine = std::make_unique<audio::SpatialAudioEngine>();
 
-        initTestScene();
+        // Benchmark runs must start without the editor demonstration scene (ground, lights and dynamic props).
+        if (!benchmarkMode) initTestScene();
 
         m_vulkanContext = std::make_unique<renderer::VulkanContext>(headless, benchmarkMode);
         m_vulkanContext->init();

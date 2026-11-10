@@ -36,6 +36,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImGui::SetNextWindowSize(ImVec2(rightPanelW, outlinerH), ImGuiCond_Always);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
         ImGui::Begin("OutlinerPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+        const bool outlinerHasKeyboardFocus = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
         ImDrawList* odl = ImGui::GetWindowDrawList();
         ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
@@ -325,6 +326,22 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             }
         }
         ImGui::EndChild();
+
+        // Delete follows the Outliner selection, not the scene viewport hover state.
+        if (outlinerHasKeyboardFocus &&
+            !ImGui::GetIO().WantTextInput &&
+            !ImGui::IsAnyItemActive() &&
+            ImGui::IsKeyPressed(ImGuiKey_Delete) &&
+            !(engine && engine->isSimulationSessionActive()) &&
+            selectedEntity != entt::null &&
+            registry.get().valid(selectedEntity)) {
+            const entt::entity entityToDelete = selectedEntity;
+            if (engine) engine->destroyEntity(static_cast<uint32_t>(entityToDelete));
+            else registry.destroyEntity(entityToDelete);
+            selectedEntity = entt::null;
+            if (engine) engine->setSelectedEntity(entt::null);
+        }
+
         ImGui::End();
         ImGui::PopStyleColor();
     }
