@@ -1,23 +1,75 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <string>
 #include <string_view>
 
 namespace engine::renderer {
 
-// English is the canonical language and the safe fallback for unknown locale IDs.
-enum class EditorLanguage { English, Polish };
-
-inline EditorLanguage& activeEditorLanguage() {
-    static EditorLanguage language = EditorLanguage::English;
-    return language;
+// Runtime-loaded editor translations. English is the canonical fallback.
+inline std::string& activeEditorLocale() {
+    static std::string locale = "en";
+    return locale;
 }
 
-inline void setEditorLanguage(std::string_view languageId) {
-    activeEditorLanguage() = (languageId == "pl") ? EditorLanguage::Polish : EditorLanguage::English;
+inline std::map<std::string, std::string>& activeEditorTranslations() {
+    static std::map<std::string, std::string> translations;
+    return translations;
 }
 
-inline const char* editorText(const char* english, const char* polish) {
-    return activeEditorLanguage() == EditorLanguage::Polish ? polish : english;
+inline bool loadEditorLanguage(std::string_view locale) {
+    namespace fs = std::filesystem;
+    const std::string localeId(locale);
+    const fs::path candidates[] = {
+        fs::path("language") / (localeId + ".json"),
+        fs::path("engine") / "language" / (localeId + ".json"),
+        fs::path("../language") / (localeId + ".json"),
+        fs::path("../engine") / "language" / (localeId + ".json")
+    };
+
+    for (const auto& path : candidates) {
+        try {
+            if (!fs::exists(path)) continue;
+            std::ifstream file(path);
+            if (!file.is_open()) continue;
+
+            const auto document = nlohmann::json::parse(file);
+            if (!document.is_object() || !document.contains("translations") ||
+                !document["translations"].is_object()) continue;
+
+            std::map<std::string, std::string> loaded;
+            for (auto it = document["translations"].begin(); it != document["translations"].end(); ++it) {
+                if (it.value().is_string()) loaded.emplace(it.key(), it.value().get<std::string>());
+            }
+
+            activeEditorTranslations() = std::move(loaded);
+            activeEditorLocale() = localeId;
+            return true;
+        } catch (...) {
+            // Try the next known location; callers retain the previous locale on failure.
+        }
+    }
+    return false;
+}
+
+inline bool setEditorLanguage(std::string_view locale) {
+    if (loadEditorLanguage(locale)) return true;
+    if (locale != "en" && loadEditorLanguage("en")) return false;
+    return false;
+}
+
+// The English source text doubles as a stable migration key for existing UI calls.
+// New UI should use explicit translation keys as the localization system expands.
+inline const char* editorText(const char* english, const char* legacyPolish = nullptr) {
+    const auto& translations = activeEditorTranslations();
+    const auto it = translations.find(english ? english : "");
+    if (it != translations.end()) return it->second.c_str();
+
+    if (activeEditorLocale() == "pl" && legacyPolish) return legacyPolish;
+    return english ? english : "";
 }
 
 } // namespace engine::renderer
