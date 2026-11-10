@@ -566,16 +566,31 @@ namespace engine::core {
                 [&](size_t nodeIndex, const glm::mat4& parentTransform) {
                     if (nodeIndex >= asset.nodes.size()) return;
                     const auto& node = asset.nodes[nodeIndex];
-                    glm::vec3 translation(0.0f), scale(1.0f);
-                    glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+                    glm::mat4 local(1.0f);
                     if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
-                        translation = glm::vec3(static_cast<float>(trs->translation[0]), static_cast<float>(trs->translation[1]), static_cast<float>(trs->translation[2]));
-                        scale = glm::vec3(static_cast<float>(trs->scale[0]), static_cast<float>(trs->scale[1]), static_cast<float>(trs->scale[2]));
-                        rotation = glm::quat(static_cast<float>(trs->rotation[3]), static_cast<float>(trs->rotation[0]), static_cast<float>(trs->rotation[1]), static_cast<float>(trs->rotation[2]));
+                        const glm::vec3 translation(
+                            static_cast<float>(trs->translation[0]),
+                            static_cast<float>(trs->translation[1]),
+                            static_cast<float>(trs->translation[2]));
+                        const glm::vec3 scale(
+                            static_cast<float>(trs->scale[0]),
+                            static_cast<float>(trs->scale[1]),
+                            static_cast<float>(trs->scale[2]));
+                        const glm::quat rotation(
+                            static_cast<float>(trs->rotation[3]),
+                            static_cast<float>(trs->rotation[0]),
+                            static_cast<float>(trs->rotation[1]),
+                            static_cast<float>(trs->rotation[2]));
+                        local = glm::translate(glm::mat4(1.0f), translation) *
+                                glm::mat4_cast(rotation) *
+                                glm::scale(glm::mat4(1.0f), scale);
+                    } else if (const auto* matrix = std::get_if<fastgltf::math::fmat4x4>(&node.transform)) {
+                        for (int column = 0; column < 4; ++column) {
+                            for (int row = 0; row < 4; ++row) {
+                                local[column][row] = static_cast<float>((*matrix)[column][row]);
+                            }
+                        }
                     }
-                    glm::mat4 local = glm::translate(glm::mat4(1.0f), translation) *
-                                      glm::mat4_cast(rotation) *
-                                      glm::scale(glm::mat4(1.0f), scale);
                     const glm::mat4 world = parentTransform * local;
                     appendNodeInstances(node, world);
                     for (size_t childIndex : node.children) visitNode(childIndex, world);
