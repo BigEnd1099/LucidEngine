@@ -809,7 +809,7 @@ namespace engine::network {
                     if (options.contains("gtao") && options["gtao"].is_boolean())
                         renderer->setGtaoEnabled(options["gtao"].get<bool>());
                     if (options.contains("ssgi") && options["ssgi"].is_boolean())
-                        renderer->setLightBounceEnabled(options["ssgi"].get<bool>());
+                        renderer->setSsgiEnabled(options["ssgi"].get<bool>());
 
                     auto& rt = renderer->getRtSettings();
                     if (options.contains("rtEnabled") && options["rtEnabled"].is_boolean())
@@ -826,7 +826,7 @@ namespace engine::network {
 
                     nlohmann::json result = {
                         {"gtao", renderer->isGtaoEnabled()},
-                        {"ssgi", renderer->isLightBounceEnabled()},
+                        {"ssgi", renderer->isSsgiEnabled()},
                         {"rtEnabled", rt.enabled},
                         {"rtGi", rt.giEnabled},
                         {"rtAo", rt.aoEnabled},
