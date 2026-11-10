@@ -45,7 +45,7 @@ async function assertPortFree() {
 
 function startEngine() {
   console.log('[BENCH] Starting windowed Vulkan engine on port ' + PORT + '...');
-  engineProcess = spawn(EXE, ['--port', String(PORT)], {
+  engineProcess = spawn(EXE, ['--benchmark', '--port', String(PORT)], {
     cwd: ROOT,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
