@@ -374,15 +374,21 @@ namespace engine::renderer {
         if (m_motionBufferMapped) {
             static_cast<glm::mat4*>(m_motionBufferMapped)[0] = m_prevViewProj;
         }
-        std::vector<DrawItem> drawItems;
-        std::unordered_map<entt::entity, VkBuffer> deformedVertexBuffers;
-        std::vector<AccelerationStructure::Instance> rtInstances;
-        std::vector<RtInstanceGpuData> rtGpuInstances;
+        // Reuse per-thread scratch storage: the render path is single-threaded,
+        // and clearing these containers retains their capacity between frames.
+        static thread_local std::vector<DrawItem> drawItems;
+        static thread_local std::unordered_map<entt::entity, VkBuffer> deformedVertexBuffers;
+        static thread_local std::vector<AccelerationStructure::Instance> rtInstances;
+        static thread_local std::vector<RtInstanceGpuData> rtGpuInstances;
+        drawItems.clear();
+        deformedVertexBuffers.clear();
+        rtInstances.clear();
+        rtGpuInstances.clear();
+        if (drawItems.capacity() < 64) drawItems.reserve(64);
+        if (rtInstances.capacity() < 64) rtInstances.reserve(64);
+        if (rtGpuInstances.capacity() < 64) rtGpuInstances.reserve(64);
         if (assetManager) {
             auto meshEntities = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
-            drawItems.reserve(64);
-            rtInstances.reserve(64);
-            rtGpuInstances.reserve(64);
             for (auto entity : meshEntities) {
                 const auto& transform = meshEntities.get<ecs::TransformComponent>(entity);
                 const auto& meshComp  = meshEntities.get<ecs::MeshComponent>(entity);
@@ -757,7 +763,11 @@ namespace engine::renderer {
         // =========================================================================
         // PASS 1A: DIRECTIONAL 4-CASCADE SHADOW MAPS (4096x4096)
         // =========================================================================
-        if (m_shadowPipeline && m_shadowImage && !dirShadowCached) {
+        // An empty scene has no shadow casters. Mark its state cached without
+        // recording four empty 4096x4096 cascade render passes every frame.
+        if (drawItems.empty()) {
+            m_shadowCacheHash = dirShadowHash;
+        } else if (m_shadowPipeline && m_shadowImage && !dirShadowCached) {
             m_shadowCacheHash = dirShadowHash;
             transitionImage(m_commandBuffer, m_shadowImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
@@ -828,7 +838,7 @@ namespace engine::renderer {
         // =========================================================================
         // PASS 1B: OMNIDIRECTIONAL POINT LIGHT SHADOW CUBEMAP (1024x1024 x 6)
         // =========================================================================
-        if (m_pointShadowImage && m_shadowPipeline && !pointShadowCached) {
+        if (m_pointShadowImage && m_shadowPipeline && shadowedPointLightIdx >= 0 && !pointShadowCached) {
             m_pointShadowCacheHash = pointShadowHash;
             transitionImage(m_commandBuffer, m_pointShadowImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
