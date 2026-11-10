@@ -916,6 +916,11 @@ namespace engine::renderer {
         const VkViewport fullVp{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
         const VkRect2D fullSc{ {0, 0}, {m_width, m_height} };
 
+        // With no geometry and no screen-space/RT consumers, the depth and
+        // G-buffer prepasses are redundant. The HDR pass clears depth itself.
+        const bool skipEmptySceneGeometryPasses = drawItems.empty() &&
+            !m_gtaoEnabled && !m_lightBounceEnabled && !isRayTracingEnabled();
+
         // =========================================================================
         // PASS 2A: DEPTH PREPASS (WypeĹ‚nienie Z-Bufora dla GTAO oraz Early-Z)
         // =========================================================================
@@ -926,7 +931,7 @@ namespace engine::renderer {
                         VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
-        {
+        if (!skipEmptySceneGeometryPasses) {
             VkRenderingAttachmentInfo depthPreAtt{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             depthPreAtt.imageView = m_depthImageView;
             depthPreAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -960,7 +965,8 @@ namespace engine::renderer {
         // PASS 2A.5: THIN G-BUFFER (Smooth Shading Normals + Roughness + Albedo + Metallic + Motion)
         // Rendered with depthCompareOp = EQUAL against Depth Prepass Z-buffer.
         // =========================================================================
-        if (m_gBufferPipeline && m_gBufferNormalRoughnessImage && m_gBufferAlbedoMetallicImage && m_gBufferMotionImage) {
+        if (!skipEmptySceneGeometryPasses && m_gBufferPipeline && m_gBufferNormalRoughnessImage &&
+            m_gBufferAlbedoMetallicImage && m_gBufferMotionImage) {
             transitionImage(m_commandBuffer, m_gBufferNormalRoughnessImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1061,11 +1067,13 @@ namespace engine::renderer {
         // =========================================================================
         // PASS 2B: MULTI-BOUNCE GTAO + BILATERAL BLUR (przed cieniowaniem IBL PBR!)
         // =========================================================================
-        transitionImage(m_commandBuffer, m_depthImage,
-                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                        VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
-                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        if (!skipEmptySceneGeometryPasses) {
+            transitionImage(m_commandBuffer, m_depthImage,
+                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                            VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
+                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        }
 
         if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline) {
             transitionImage(m_commandBuffer, m_aoImage,
@@ -1239,12 +1247,14 @@ namespace engine::renderer {
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
-        transitionImage(m_commandBuffer, m_depthImage,
-                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
+        if (!skipEmptySceneGeometryPasses) {
+            transitionImage(m_commandBuffer, m_depthImage,
+                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                            VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
+                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
+        }
 
         {
             VkRenderingAttachmentInfo hdrColorAtt{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -1257,7 +1267,10 @@ namespace engine::renderer {
             VkRenderingAttachmentInfo hdrDepthAtt{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             hdrDepthAtt.imageView = m_depthImageView;
             hdrDepthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            hdrDepthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Zachowujemy Z-bufor z Depth Prepass!
+            hdrDepthAtt.loadOp = skipEmptySceneGeometryPasses
+                ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                : VK_ATTACHMENT_LOAD_OP_LOAD; // Reuse the prepass depth when geometry exists.
+            hdrDepthAtt.clearValue.depthStencil = { 1.0f, 0 };
             hdrDepthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
             VkRenderingInfo hdrRi{ VK_STRUCTURE_TYPE_RENDERING_INFO };
