@@ -1,5 +1,6 @@
 #include "renderer/EditorUiBottomPanels.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "core/Logger.hpp"
 #include "imgui.h"
 
@@ -34,7 +35,7 @@ void drawEditorBottomPanels(bool immersivePlay,
 
         const bool isDrawer = showContentDrawer;
         ImGui::PushStyleColor(ImGuiCol_Button, isDrawer ? ImVec4(0.10f, 0.34f, 0.58f, 1.0f) : ImVec4(0.08f, 0.09f, 0.12f, 1.0f));
-        if (ImGui::Button("  Content Drawer  ", ImVec2(0, 22.0f * uiScale))) {
+        if (ImGui::Button(editorText("ui.content_drawer", "  Content Drawer  "), ImVec2(0, 22.0f * uiScale))) {
             showContentDrawer = true;
             showOutputLog = false;
         }
@@ -42,7 +43,7 @@ void drawEditorBottomPanels(bool immersivePlay,
         ImGui::SameLine();
 
         ImGui::PushStyleColor(ImGuiCol_Button, !isDrawer ? ImVec4(0.10f, 0.34f, 0.58f, 1.0f) : ImVec4(0.08f, 0.09f, 0.12f, 1.0f));
-        if (ImGui::Button("  >_ Output Log  ", ImVec2(0, 22.0f * uiScale))) {
+        if (ImGui::Button(editorText("ui.output_log_terminal", "  >_ Output Log  "), ImVec2(0, 22.0f * uiScale))) {
             showContentDrawer = false;
             showOutputLog = true;
         }
@@ -64,21 +65,21 @@ void drawEditorBottomPanels(bool immersivePlay,
             }
 
             // Top breadcrumbs & navigation strip
-            if (ImGui::Button(" .. [Do gory] ") && s_currentBrowsePath.has_parent_path()) {
+            if (ImGui::Button(editorText("ui.navigate_parent", " .. [Up] ")) && s_currentBrowsePath.has_parent_path()) {
                 fs::path parent = s_currentBrowsePath.parent_path();
                 if (!parent.empty() && fs::exists(parent)) {
                     s_currentBrowsePath = parent;
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Button(" engine/assets ")) s_currentBrowsePath = "engine/assets";
+            if (ImGui::Button(editorText("ui.engine_assets", " engine/assets "))) s_currentBrowsePath = "engine/assets";
             ImGui::SameLine();
             if (fs::exists("assets")) {
-                if (ImGui::Button(" assets/ ")) s_currentBrowsePath = "assets";
+                if (ImGui::Button(editorText("ui.assets_folder", " assets/ "))) s_currentBrowsePath = "assets";
                 ImGui::SameLine();
             }
             if (fs::exists("scripts")) {
-                if (ImGui::Button(" scripts/ ")) s_currentBrowsePath = "scripts";
+                if (ImGui::Button(editorText("ui.scripts_folder", " scripts/ "))) s_currentBrowsePath = "scripts";
                 ImGui::SameLine();
             }
 
@@ -92,12 +93,12 @@ void drawEditorBottomPanels(bool immersivePlay,
                 ImGui::PopStyleColor();
                 ImGui::SameLine(0.0f, 3.0f * uiScale);
             };
-            drawAssetChip("Wszystko", 0);
-            drawAssetChip("Tekstury/HDR", 1);
-            drawAssetChip("Modele 3D", 2);
-            drawAssetChip("Skrypty JS", 3);
+            drawAssetChip(editorText("ui.asset_filter_all", "All"), 0);
+            drawAssetChip(editorText("ui.asset_filter_textures_hdr", "Textures/HDR"), 1);
+            drawAssetChip(editorText("ui.asset_filter_3d_models", "3D Models"), 2);
+            drawAssetChip(editorText("ui.asset_filter_scripts", "JS Scripts"), 3);
 
-            ImGui::TextDisabled("Lokalizacja: %s", s_currentBrowsePath.string().c_str());
+            ImGui::TextDisabled(editorText("ui.asset_location", "Location: %s"), s_currentBrowsePath.string().c_str());
             ImGui::Separator();
 
             // Grid of files & folders
@@ -185,7 +186,7 @@ void drawEditorBottomPanels(bool immersivePlay,
             ImGui::EndChild();
         } else {
             static bool s_autoScroll = true;
-            ImGui::Checkbox("Auto-scroll", &s_autoScroll);
+            ImGui::Checkbox(editorText("ui.auto_scroll", "Auto-scroll"), &s_autoScroll);
             ImGui::Separator();
             ImGui::BeginChild("OutputLogScroll", ImVec2(0, 0), false);
             for (const auto& line : core::Logger::getRecentLogs(60)) {
@@ -205,9 +206,9 @@ void drawEditorBottomPanels(bool immersivePlay,
         ImGui::SetNextWindowSize(ImVec2(screenW, bottomStatusH), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 3));
         ImGui::Begin("BottomStatusRail", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
-        if (ImGui::Button(" Content Drawer ")) { showContentDrawer = !showContentDrawer; if (showContentDrawer) showOutputLog = false; }
+        if (ImGui::Button(editorText("ui.content_drawer_status", " Content Drawer "))) { showContentDrawer = !showContentDrawer; if (showContentDrawer) showOutputLog = false; }
         ImGui::SameLine();
-        if (ImGui::Button(" >_ Output Log ")) { showOutputLog = !showOutputLog; if (showOutputLog) showContentDrawer = false; }
+        if (ImGui::Button(editorText("ui.output_log_status", " >_ Output Log "))) { showOutputLog = !showOutputLog; if (showOutputLog) showContentDrawer = false; }
         ImGui::SameLine(screenW - 220.0f * uiScale);
         ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Vulkan 1.3: %.0f FPS (%ux%u)", frameRate, renderWidth, renderHeight);
         ImGui::End();
