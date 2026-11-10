@@ -580,9 +580,16 @@ namespace engine::renderer {
                 item.pcs.baseColorFactor = glm::vec4(glm::vec3(baseColor), 1.0f);
                 drawItems.push_back(item);
                 if (isRayTracingEnabled() && rtGpuInstances.size() < RT_MAX_INSTANCE_COUNT) {
-                    if (m_accelerationStructure.ensureBLAS(m_commandBuffer, meshComp.meshId, *meshAsset)) {
+                    const bool hasDeformedRtGeometry = item.vertexBuffer != meshAsset->vertexBuffer;
+                    const uint64_t blasId = hasDeformedRtGeometry
+                        ? (0x8000000000000000ull |
+                           (static_cast<uint64_t>(static_cast<uint32_t>(entity)) << 32u) |
+                           static_cast<uint64_t>(meshComp.meshId))
+                        : static_cast<uint64_t>(meshComp.meshId);
+                    if (m_accelerationStructure.ensureBLAS(m_commandBuffer, blasId, *meshAsset,
+                                                            item.vertexBuffer, hasDeformedRtGeometry)) {
                         VkBufferDeviceAddressInfo vertexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
-                        vertexAddressInfo.buffer = meshAsset->vertexBuffer;
+                        vertexAddressInfo.buffer = item.vertexBuffer;
                         VkBufferDeviceAddressInfo indexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
                         indexAddressInfo.buffer = meshAsset->indexBuffer;
                         const VkDeviceAddress vertexAddress = vkGetBufferDeviceAddress(m_context->getDevice(), &vertexAddressInfo);
@@ -591,7 +598,7 @@ namespace engine::renderer {
                         if (vertexAddress != 0 && indexAddress != 0) {
                             const uint32_t rtIndex = static_cast<uint32_t>(rtGpuInstances.size());
                             AccelerationStructure::Instance instance{};
-                            instance.meshId = meshComp.meshId;
+                            instance.blasId = blasId;
                             instance.customIndex = rtIndex;
                             instance.transform = model;
                             rtInstances.push_back(instance);
