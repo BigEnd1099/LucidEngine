@@ -60,9 +60,9 @@ namespace engine::renderer {
         // The frame fence (or headless queue-idle) guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
-            uint64_t timestamps[9]{};
+            uint64_t timestamps[11]{};
             const VkResult queryResult = vkGetQueryPoolResults(
-                m_context->getDevice(), m_timestampQueryPool, 0, 9,
+                m_context->getDevice(), m_timestampQueryPool, 0, 11,
                 sizeof(timestamps), timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT);
             if (queryResult == VK_SUCCESS) {
@@ -83,6 +83,8 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("gpuDepthMs", elapsedMs(2, 3));
                 core::Profiler::get().recordMetric("gpuGBufferMs", elapsedMs(3, 4));
                 core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
+                core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", m_screenSpaceAoGiPassActive ? elapsedMs(4, 9) : 0.0);
+                core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", m_screenSpaceAoGiPassActive ? elapsedMs(9, 10) : 0.0);
                 core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
                 core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
                 core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
@@ -114,7 +116,7 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (m_timestampQueryPool) {
-            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 9);
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 11);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
         }
 
@@ -964,10 +966,9 @@ namespace engine::renderer {
         const VkViewport fullVp{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
         const VkRect2D fullSc{ {0, 0}, {m_width, m_height} };
 
-        // With no geometry and no screen-space/RT consumers, the depth and
-        // G-buffer prepasses are redundant. The HDR pass clears depth itself.
-        const bool skipEmptySceneGeometryPasses = drawItems.empty() &&
-            !m_gtaoEnabled && !m_lightBounceEnabled && !isRayTracingEnabled();
+        // With no raster draw items and no RT instances, geometry prepasses and
+        // screen-space AO/GI are redundant. The HDR pass clears the depth attachment.
+        const bool skipEmptySceneGeometryPasses = drawItems.empty() && rtInstances.empty();
 
         // =========================================================================
         // PASS 2A: DEPTH PREPASS (WypeĹ‚nienie Z-Bufora dla GTAO oraz Early-Z)
@@ -1129,7 +1130,11 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         }
 
-        if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline) {
+        core::Profiler::get().recordMetric("gtaoEnabled", m_gtaoEnabled ? 1.0 : 0.0);
+        core::Profiler::get().recordMetric("ssgiEnabled", m_lightBounceEnabled ? 1.0 : 0.0);
+        m_screenSpaceAoGiPassActive = (m_gtaoEnabled || m_lightBounceEnabled) &&
+            m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty();
+        if (m_screenSpaceAoGiPassActive) {
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1180,6 +1185,8 @@ namespace engine::renderer {
             vkCmdPushConstants(m_commandBuffer, m_gtaoPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(gtaoPcsData), &gtaoPcsData);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
+            if (m_timestampQueryPool)
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
 
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1211,6 +1218,8 @@ namespace engine::renderer {
             vkCmdPushConstants(m_commandBuffer, m_gtaoBlurPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(blurPcs), blurPcs);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
+            if (m_timestampQueryPool)
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
 
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1218,6 +1227,11 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         } else {
+            // No screen-space shader or bilateral blur ran this frame; keep both subpass timings at zero.
+            if (m_timestampQueryPool) {
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
+            }
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1262,6 +1276,9 @@ namespace engine::renderer {
                 m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&
                 tlasReady && m_descriptorSet != VK_NULL_HANDLE &&
                 (m_rtSettings.giEnabled || m_rtSettings.aoEnabled || m_rtSettings.reflectionsEnabled || m_rtSettings.debugMode != RtDebugMode::None);
+            core::Profiler::get().recordMetric("rtGiEnabled", m_rtSettings.giEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtAoEnabled", m_rtSettings.aoEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionsEnabled", m_rtSettings.reflectionsEnabled ? 1.0 : 0.0);
             if (rtIndirectActive) {
                 RtDenoiser::Params rtp;
                 rtp.viewProj = vp;
@@ -1289,6 +1306,13 @@ namespace engine::renderer {
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
             } else {
                 m_rtDenoiser.invalidateHistory();
+                core::Profiler::get().recordMetric("rtGiTraceMs", 0.0);
+                core::Profiler::get().recordMetric("rtGiTemporalMs", 0.0);
+                core::Profiler::get().recordMetric("rtGiAtrous0Ms", 0.0);
+                core::Profiler::get().recordMetric("rtGiAtrous1Ms", 0.0);
+                core::Profiler::get().recordMetric("rtReflectionTraceMs", 0.0);
+                core::Profiler::get().recordMetric("rtReflectionTemporalMs", 0.0);
+                core::Profiler::get().recordMetric("rtComputeTotalMs", 0.0);
             }
         }
 

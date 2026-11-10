@@ -66,7 +66,7 @@ namespace engine::renderer {
 
         bool isReady() const { return m_ready; }
         // Call when a frame was rendered without RT indirect (history would be stale).
-        void invalidateHistory() { m_historyValid = false; }
+        void invalidateHistory() { m_historyValid = false; m_giHistoryValid = false; }
 
         // Records all passes. Depth must be in DEPTH_STENCIL_READ_ONLY_OPTIMAL.
         void record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params);
@@ -98,6 +98,7 @@ namespace engine::renderer {
         bool m_ready{false};
         bool m_needsLayoutInit{true};
         bool m_historyValid{false};
+        bool m_giHistoryValid{false};
         uint32_t m_parity{0};
         glm::mat4 m_prevViewProj{1.0f};
 

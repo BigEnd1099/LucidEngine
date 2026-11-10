@@ -1,5 +1,6 @@
 #include "renderer/RtDenoiser.hpp"
 #include "core/Logger.hpp"
+#include "core/Profiler.hpp"
 #include "utils/FileIO.hpp"
 
 #include <algorithm>
@@ -154,6 +155,7 @@ namespace engine::renderer {
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
         m_needsLayoutInit = true;
         m_historyValid = false;
+        m_giHistoryValid = false;
     }
 
     void RtDenoiser::cleanup() {
@@ -218,7 +220,7 @@ namespace engine::renderer {
         ii.arrayLayers = 1;
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VmaAllocationCreateInfo ai{};
         ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -381,12 +383,15 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
             m_historyValid = false;
+            m_giHistoryValid = false;
         }
 
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
             m_historyValid = false;
+            m_giHistoryValid = false;
         }
+        m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
             uint64_t timestamps[7]{};
             VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 7,
@@ -406,6 +411,14 @@ namespace engine::renderer {
                 m_gpuTimings.totalMs        = toMs(timestamps[0], timestamps[6]);
             }
         }
+        auto& profiler = core::Profiler::get();
+        profiler.recordMetric("rtGiTraceMs", m_gpuTimings.traceMs);
+        profiler.recordMetric("rtGiTemporalMs", m_gpuTimings.temporalMs);
+        profiler.recordMetric("rtGiAtrous0Ms", m_gpuTimings.atrous0Ms);
+        profiler.recordMetric("rtGiAtrous1Ms", m_gpuTimings.atrous1Ms);
+        profiler.recordMetric("rtReflectionTraceMs", m_gpuTimings.reflTraceMs);
+        profiler.recordMetric("rtReflectionTemporalMs", m_gpuTimings.reflTemporalMs);
+        profiler.recordMetric("rtComputeTotalMs", m_gpuTimings.totalMs);
 
         // Reset query pool before recording timestamps
         if (m_timestampsSupported && m_queryPool) {
@@ -416,11 +429,6 @@ namespace engine::renderer {
         memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | kStorageRW);
-
-        // Place timestamp 0 AFTER the barrier, so we only measure compute time
-        if (m_timestampsSupported && m_queryPool) {
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
-        }
 
         const VkDescriptorSet sets[2] = { sceneSet, m_sets[m_parity] };
         const uint32_t gx = (m_width + 7u) / 8u;
@@ -448,40 +456,98 @@ namespace engine::renderer {
         PushData pd{};
         pd.m = m_prevViewProj;
         pd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(samples),
-                         m_historyValid ? 1.0f : 0.0f, params.svgfEnabled ? 1.0f : 0.0f);
+                         m_giHistoryValid ? 1.0f : 0.0f, params.svgfEnabled ? 1.0f : 0.0f);
         pd.u[0] = samples;
         pd.u[1] = params.frameIndex;
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) | (params.giCheckerboard ? 4u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
-        bindGI(m_tracePipelineHandle, pd);   // 1. trace
-        sync();
-        if (m_timestampsSupported && m_queryPool) {
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
-        }
+        const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
+        if (giOrAoActive) {
+            // Timestamp 0 starts the RT GI/AO compute section after the global dependency barrier.
+            if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
+            }
 
-        bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
-        sync();
-        if (m_timestampsSupported && m_queryPool) {
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
-        }
+            bindGI(m_tracePipelineHandle, pd);   // 1. trace
+            sync();
+            if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
+            }
 
-        // Pass 3: Atrous step 1 (hist -> A)
-        pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
-        pd.f.y = std::max(params.maxHistory, 1.0f);
-        pd.u[0] = 0u; // PASS 0: no debug override, continue filtering to imgA
-        bindGI(m_atrousPipelines[0], pd);
-        sync();
-        if (m_timestampsSupported && m_queryPool) {
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
-        }
+            bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
+            sync();
+            if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
+            }
 
-        // Pass 4: Atrous step 2 (A -> S, final output).
-        // Here we pass the requested debug mode to pd.u[0]!
-        pd.u[0] = static_cast<uint32_t>(params.debugMode);
-        bindGI(m_atrousPipelines[1], pd);
-        if (m_timestampsSupported && m_queryPool) {
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
+            // Pass 3: Atrous step 1 (hist -> A)
+            pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
+            pd.f.y = std::max(params.maxHistory, 1.0f);
+            pd.u[0] = 0u; // PASS 0: no debug override, continue filtering to imgA
+            bindGI(m_atrousPipelines[0], pd);
+            sync();
+            if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
+            }
+
+            // Pass 4: Atrous step 2 (A -> S, final output).
+            // Here we pass the requested debug mode to pd.u[0]!
+            pd.u[0] = static_cast<uint32_t>(params.debugMode);
+            bindGI(m_atrousPipelines[1], pd);
+            if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
+            }
+            m_giHistoryValid = true;
+        } else {
+            // GI and AO are both disabled: avoid trace, temporal and both a-trous dispatches.
+            // Keep the sampled output valid and neutral for the PBR combine (rgb=0, visibility=1).
+            VkImageMemoryBarrier2 toClear{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            toClear.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            toClear.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            toClear.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            toClear.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            toClear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            toClear.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            toClear.srcQueueFamilyIndex = toClear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toClear.image = m_imgS.image;
+            toClear.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            VkDependencyInfo clearBefore{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            clearBefore.imageMemoryBarrierCount = 1;
+            clearBefore.pImageMemoryBarriers = &toClear;
+            vkCmdPipelineBarrier2(cmd, &clearBefore);
+
+            VkClearColorValue neutralGi{};
+            neutralGi.float32[0] = 0.0f;
+            neutralGi.float32[1] = 0.0f;
+            neutralGi.float32[2] = 0.0f;
+            neutralGi.float32[3] = 1.0f;
+            const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            vkCmdClearColorImage(cmd, m_imgS.image, VK_IMAGE_LAYOUT_GENERAL, &neutralGi, 1, &colorRange);
+
+            VkImageMemoryBarrier2 afterClear{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            afterClear.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            afterClear.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            afterClear.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            afterClear.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            afterClear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            afterClear.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            afterClear.srcQueueFamilyIndex = afterClear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            afterClear.image = m_imgS.image;
+            afterClear.subresourceRange = colorRange;
+            VkDependencyInfo clearAfter{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            clearAfter.imageMemoryBarrierCount = 1;
+            clearAfter.pImageMemoryBarriers = &afterClear;
+            vkCmdPipelineBarrier2(cmd, &clearAfter);
+
+            // Keep all six timestamp boundaries valid while reporting zero GI/AO work.
+            if (m_timestampsSupported && m_queryPool) {
+                for (uint32_t query = 0; query <= 4; ++query) {
+                    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, query);
+                }
+            }
+            m_giHistoryValid = false;
         }
 
         // Pass 5 & 6: RT Reflections (trace -> specular temporal filter)
