@@ -40,7 +40,7 @@ namespace engine::renderer {
         bool reflectionCheckerboard{true};      // Variant 1: Roughness-adaptive checkerboard (roughness > 0.25)
         bool reflectionStochasticLights{true};  // Variant 2: Stochastic 1-light direct illumination on bounce >= 1
         bool reflectionLodBias{true};           // Variant 3: Mip LOD bias increasing with bounce depth
-        bool reflectionHalfRes{false};          // Variant 4: Global half-resolution reflections with bilateral filter
+        bool reflectionHalfRes{true};          // Variant 4: Global half-resolution reflections with bilateral filter
     };
 
 } // namespace engine::renderer
