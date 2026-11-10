@@ -1315,8 +1315,13 @@ namespace engine::core {
                     }
 
                     if (!m_paused) {
+                        // Reuse the input-state object directly instead of creating
+                        // and copying a temporary JSON object every frame.
+                        auto& keys = m_inputState["keys"];
+                        if (!keys.is_object()) keys = nlohmann::json::object();
+                        else keys.clear();
+
                         // Native Gameplay Controls in GLFW Desktop Window
-                        nlohmann::json keys = nlohmann::json::object();
                         if (!imguiWantsTextInput) {
                             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS) {
                                 keys["KeyA"] = true;
@@ -1344,7 +1349,6 @@ namespace engine::core {
                                 keys["ShiftLeft"] = true;
                             }
                         }
-                        m_inputState["keys"] = keys;
                     }
                 }
 #endif
