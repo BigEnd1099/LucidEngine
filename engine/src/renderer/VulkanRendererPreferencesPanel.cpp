@@ -1,6 +1,7 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorPreferencesPanel.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include <algorithm>
 #include <cstring>
@@ -57,12 +58,24 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
             if (state.showPreferencesWindow && engine) {
                 ImGui::SetNextWindowSize(ImVec2(820 * state.uiScale, 560 * state.uiScale), ImGuiCond_FirstUseEver);
                 ImGui::SetNextWindowSizeConstraints(ImVec2(500 * state.uiScale, 380 * state.uiScale), ImVec2(screenW, screenH));
-                if (ImGui::Begin("Editor Preferences (Preferencje Edytora)###EditorPrefsDialog", &state.showPreferencesWindow, ImGuiWindowFlags_NoCollapse)) {
+                if (ImGui::Begin(editorText("ui.editor_preferences_editorprefsdialog", "Editor Preferences###EditorPrefsDialog"), &state.showPreferencesWindow, ImGuiWindowFlags_NoCollapse)) {
                     auto& pref = engine->getPreferences();
 
+                    int languageIndex = pref.language == "pl" ? 1 : 0;
+                    const char* languageOptions[] = { "English", "Polski" };
+                    ImGui::SetNextItemWidth(220.0f * state.uiScale);
+                    if (ImGui::Combo(editorText("settings.language", "Language"), &languageIndex, languageOptions, 2)) {
+                        pref.language = languageIndex == 1 ? "pl" : "en";
+                        setEditorLanguage(pref.language);
+                        if (pref.autoSavePreferences) engine->saveUserPreferences();
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextDisabled(editorText("ui.changes_are_applied_immediately", "Changes are applied immediately."));
+                    ImGui::Separator();
+
                     // Header
-                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  LUCID ENGINE - PREFERENCJE I KONFIGURACJA UZYTKOWNIKA");
-                    ImGui::TextDisabled("  Zarzadzaj ukladem UI, sterowaniem kamera, grafika Vulkana i zachowaniem edytora.");
+                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), editorText("ui.lucid_engine_user_preferences", "  LUCID ENGINE - USER PREFERENCES"));
+                    ImGui::TextDisabled(editorText("ui.configure_the_interface_camera_controls_vulkan_graphics_and_editor_beh", "  Configure the interface, camera controls, Vulkan graphics and editor behavior."));
                     ImGui::Separator();
 
                     static int s_prefCategory = 0; // 0=UI, 1=Camera, 2=Graphics, 3=Audio, 4=Storage
@@ -73,11 +86,11 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                     // Category List (Left side)
                     const char* categories[] = {
-                        "  Interfejs (UI)",
-                        "  Kamera i Viewport",
-                        "  Grafika i Vulkan",
-                        "  Dzwiek (Audio)",
-                        "  Zapis i Projekty"
+                        editorText("ui.interface_ui", "  Interface (UI)"),
+                        editorText("ui.camera_viewport", "  Camera & Viewport"),
+                        editorText("ui.graphics_vulkan", "  Graphics & Vulkan"),
+                        editorText("ui.audio", "  Audio"),
+                        editorText("ui.storage_projects", "  Storage & Projects")
                     };
 
                     for (int i = 0; i < 5; ++i) {
@@ -94,16 +107,16 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                     if (s_prefCategory == 0) {
                         // Category 0: UI & Layout
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "UKLAD I SKALA INTERFEJSU");
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("ui.interface_layout", "INTERFACE & LAYOUT"));
                         ImGui::Separator();
 
                         static int s_themeChoice = 0;
-                        if (ImGui::Combo("Motyw i Styl Edytora (Theme)", &s_themeChoice, "Unreal Slate (Ciemny grafit)\0Blender Dark Pro (BUI Palette)\0\0")) {
+                        if (ImGui::Combo(editorText("ui.editor_theme", "Editor Theme"), &s_themeChoice, "Unreal Slate (Ciemny grafit)\0Blender Dark Pro (BUI Palette)\0\0")) {
                             applyEditorUiTheme(s_themeChoice == 1 ? EditorThemePreset::BlenderDarkPro : EditorThemePreset::UnrealSlate);
                         }
 
                         float curUiScale = pref.uiScale;
-                        if (ImGui::SliderFloat("Skala Interfejsu (UI Scale)", &curUiScale, 0.70f, 2.0f, "%.2fx")) {
+                        if (ImGui::SliderFloat(editorText("ui.interface_scale", "Interface Scale"), &curUiScale, 0.70f, 2.0f, "%.2fx")) {
                             pref.uiScale = curUiScale;
                             m_uiScale = curUiScale;
                             engine->setUiScale(curUiScale);
@@ -116,23 +129,23 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         if (ImGui::Button("150%")) { pref.uiScale = 1.50f; m_uiScale = 1.50f; engine->setUiScale(1.50f); }
 
                         ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Widocznosc domyslna paneli:");
-                        if (ImGui::Checkbox("Place Actors (Aktorzy)", &pref.showPlaceActors)) state.showPlaceActors = pref.showPlaceActors;
-                        if (ImGui::Checkbox("Outliner (Drzewo sceny)", &pref.showOutliner)) state.showOutliner = pref.showOutliner;
-                        if (ImGui::Checkbox("Details (Wlasciwosci / Inspektor)", &pref.showDetails)) state.showDetails = pref.showDetails;
-                        if (ImGui::Checkbox("Content Drawer (Przegladarka assetow)", &pref.showContentDrawer)) state.showContentDrawer = pref.showContentDrawer;
-                        if (ImGui::Checkbox("Output Log (Konsola logow)", &pref.showOutputLog)) state.showOutputLog = pref.showOutputLog;
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), editorText("ui.default_panel_visibility", "Default panel visibility:"));
+                        if (ImGui::Checkbox(editorText("ui.place_actors", "Place Actors"), &pref.showPlaceActors)) state.showPlaceActors = pref.showPlaceActors;
+                        if (ImGui::Checkbox(editorText("ui.scene_outliner", "Scene Outliner"), &pref.showOutliner)) state.showOutliner = pref.showOutliner;
+                        if (ImGui::Checkbox(editorText("ui.details_inspector", "Details Inspector"), &pref.showDetails)) state.showDetails = pref.showDetails;
+                        if (ImGui::Checkbox(editorText("ui.content_browser", "Content Browser"), &pref.showContentDrawer)) state.showContentDrawer = pref.showContentDrawer;
+                        if (ImGui::Checkbox(editorText("ui.output_log", "Output Log"), &pref.showOutputLog)) state.showOutputLog = pref.showOutputLog;
                         if (ImGui::Checkbox("Blueprints / QuickJS Studio", &pref.showScriptStudio)) state.showScriptStudio = pref.showScriptStudio;
 
                         ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Wymiary paneli:");
-                        if (ImGui::SliderFloat("Szerokosc panelu lewego", &state.userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = state.userLeftPanelW;
-                        if (ImGui::SliderFloat("Szerokosc panelu prawego", &state.userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = state.userRightPanelW;
-                        if (ImGui::SliderFloat("Wysokosc Outlinera", &state.userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = state.userOutlinerH;
-                        if (ImGui::SliderFloat("Wysokosc dolnej szuflady", &state.userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = state.userDrawerH;
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), editorText("ui.panel_dimensions", "Panel dimensions:"));
+                        if (ImGui::SliderFloat(editorText("ui.left_panel_width", "Left Panel Width"), &state.userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = state.userLeftPanelW;
+                        if (ImGui::SliderFloat(editorText("ui.right_panel_width", "Right Panel Width"), &state.userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = state.userRightPanelW;
+                        if (ImGui::SliderFloat(editorText("ui.outliner_height", "Outliner Height"), &state.userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = state.userOutlinerH;
+                        if (ImGui::SliderFloat(editorText("ui.content_drawer_height", "Content Drawer Height"), &state.userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = state.userDrawerH;
 
                         ImGui::Spacing();
-                        if (ImGui::Button(" Zresetuj uklad paneli do domyslnego ")) {
+                        if (ImGui::Button(editorText("ui.reset_panel_layout", " Reset Panel Layout "))) {
                             state.userLeftPanelW  = 260.0f * state.uiScale;
                             state.userRightPanelW = 310.0f * state.uiScale;
                             state.userOutlinerH   = 240.0f * state.uiScale;
@@ -150,22 +163,22 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         }
 
                         ImGui::Spacing();
-                        ImGui::Checkbox("Automatycznie zapisuj preferencje przy zmianach", &pref.autoSavePreferences);
+                        ImGui::Checkbox(editorText("ui.automatically_save_preferences_when_changed", "Automatically save preferences when changed"), &pref.autoSavePreferences);
 
                     } else if (s_prefCategory == 1) {
                         // Category 1: Camera & Viewport
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "STEROWANIE I NAWIGACJA W VIEWPORCIE");
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("ui.viewport_controls_navigation", "VIEWPORT CONTROLS & NAVIGATION"));
                         ImGui::Separator();
 
-                        if (ImGui::SliderFloat("Bazowa predkosc kamery (Fly Speed)", &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) state.camFlySpeed = pref.camFlySpeed;
-                        if (ImGui::SliderInt("Mnoznik biegu kamery (1..8)", &pref.cameraSpeed, 1, 8)) state.cameraSpeed = pref.cameraSpeed;
-                        ImGui::SliderFloat("Czulosz myszy (Mouse Sensitivity)", &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
-                        ImGui::Checkbox("Odwroc os pionowa (Invert Mouse Y)", &pref.invertY);
+                        if (ImGui::SliderFloat(editorText("ui.base_camera_speed_fly_speed", "Base Camera Speed (Fly Speed)"), &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) state.camFlySpeed = pref.camFlySpeed;
+                        if (ImGui::SliderInt(editorText("ui.camera_speed_multiplier_1_8", "Camera Speed Multiplier (1..8)"), &pref.cameraSpeed, 1, 8)) state.cameraSpeed = pref.cameraSpeed;
+                        ImGui::SliderFloat(editorText("ui.mouse_sensitivity", "Mouse Sensitivity"), &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
+                        ImGui::Checkbox(editorText("ui.invert_mouse_y", "Invert Mouse Y"), &pref.invertY);
 
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Przyciaganie (Snapping) & Transformacja:");
-                        if (ImGui::Checkbox("Wlacz przyciaganie do siatki (Grid Snap)", &pref.snapEnabled)) state.snapEnabled = pref.snapEnabled;
-                        if (ImGui::InputFloat("Krok przyciagania (Snap Step)", &pref.snapStep, 0.1f, 1.0f, "%.2f")) state.snapStep = pref.snapStep;
+                        if (ImGui::Checkbox(editorText("ui.enable_grid_snapping", "Enable Grid Snapping"), &pref.snapEnabled)) state.snapEnabled = pref.snapEnabled;
+                        if (ImGui::InputFloat(editorText("ui.snap_step", "Snap Step"), &pref.snapStep, 0.1f, 1.0f, "%.2f")) state.snapStep = pref.snapStep;
                         ImGui::SameLine();
                         if (ImGui::SmallButton("0.25")) { pref.snapStep = 0.25f; state.snapStep = 0.25f; }
                         ImGui::SameLine();
@@ -175,11 +188,11 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         ImGui::SameLine();
                         if (ImGui::SmallButton("2.00")) { pref.snapStep = 2.00f; state.snapStep = 2.00f; }
 
-                        if (ImGui::Checkbox("Uklad lokalny gizmo (Local Space)", &pref.gizmoSpaceLocal)) state.gizmoSpaceLocal = pref.gizmoSpaceLocal;
+                        if (ImGui::Checkbox(editorText("ui.local_gizmo_space", "Local Gizmo Space"), &pref.gizmoSpaceLocal)) state.gizmoSpaceLocal = pref.gizmoSpaceLocal;
 
                     } else if (s_prefCategory == 2) {
                         // Category 2: Graphics & Rendering
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "USTAWIENIA GRAFIKI I VULKANA");
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("ui.graphics_vulkan_settings", "GRAPHICS & VULKAN SETTINGS"));
                         ImGui::Separator();
 
                         const char* fpsLabels[] = {"Bez limitu (Unlimited)", "30 FPS", "60 FPS", "120 FPS", "240 FPS"};
@@ -188,12 +201,12 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         for (int f = 0; f < 5; ++f) {
                             if (pref.targetFps == fpsValues[f]) { curFpsIdx = f; break; }
                         }
-                        if (ImGui::Combo("Limit FPS", &curFpsIdx, fpsLabels, 5)) {
+                        if (ImGui::Combo(editorText("ui.fps_limit", "FPS Limit"), &curFpsIdx, fpsLabels, 5)) {
                             pref.targetFps = fpsValues[curFpsIdx];
                             engine->setTargetFps(pref.targetFps);
                         }
 
-                        if (ImGui::Checkbox("V-Sync (Synchronizacja pionowa)", &pref.vsync)) {
+                        if (ImGui::Checkbox(editorText("ui.v_sync", "V-Sync"), &pref.vsync)) {
                             engine->setVsyncEnabled(pref.vsync);
                         }
 
@@ -203,7 +216,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                             setAntiAliasingMode(pref.antiAliasingMode);
                         }
 
-                        if (ImGui::SliderFloat("Skala rozdzielczosci (Resolution Scale)", &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
+                        if (ImGui::SliderFloat(editorText("ui.render_resolution_scale", "Render Resolution Scale"), &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
                             setResolutionScale(pref.resolutionScale);
                         }
                         ImGui::Checkbox("Automatyczne dopasowanie rozdzielczosci do Viewportu", &pref.autoViewportResolution);
@@ -242,7 +255,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                     } else if (s_prefCategory == 3) {
                         // Category 3: Audio
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "GLOSNOSC I SYSTEM AUDIO");
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("ui.audio_system_volume", "AUDIO SYSTEM & VOLUME"));
                         ImGui::Separator();
 
                         ImGui::SliderFloat("Glosnosc glowna (Master Volume)", &pref.masterVolume, 0.0f, 1.0f, "%.0f%%");
@@ -253,7 +266,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                     } else if (s_prefCategory == 4) {
                         // Category 4: Storage & Projects
-                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "PLIKI, PROJEKTY I ZAPIS");
+                        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("ui.files_projects_storage", "FILES, PROJECTS & STORAGE"));
                         ImGui::Separator();
 
                         static char projPathBuf[512] = "";
@@ -269,7 +282,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                         ImGui::Spacing();
                         ImGui::Separator();
-                        ImGui::TextDisabled("Sciezka pliku konfiguracyjnego:");
+                        ImGui::TextDisabled(editorText("ui.configuration_file", "Configuration file:"));
                         ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "%s", pref.getDefaultConfigPath().c_str());
 
                         const bool fileExists = std::filesystem::exists(pref.getDefaultConfigPath());
@@ -307,13 +320,13 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         state.engineNotificationTimer = 4.0f;
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button(" ⚡ Zastosuj (Apply) ")) {
+                    if (ImGui::Button(editorText("ui.apply", " Apply "))) {
                         engine->applyPreferences();
                         std::snprintf(state.engineNotification, 128, "Zastosowano preferencje");
                         state.engineNotificationTimer = 3.0f;
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button(" 🔄 Przywroc domyslne (Reset) ")) {
+                    if (ImGui::Button(editorText("ui.reset_to_defaults", " Reset to Defaults "))) {
                         engine->getPreferences() = core::EditorPreferences{};
                         engine->applyPreferences();
                         state.userLeftPanelW  = 260.0f * state.uiScale;
@@ -327,7 +340,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         state.engineNotificationTimer = 3.0f;
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button(" Zamknij (Close) ")) {
+                    if (ImGui::Button(editorText("ui.close", " Close "))) {
                         state.showPreferencesWindow = false;
                     }
                     ImGui::Columns(1);

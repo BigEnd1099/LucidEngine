@@ -13,6 +13,7 @@
 #endif
 
 #include "core/Engine.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "core/Logger.hpp"
 #include "ecs/TypeExporter.hpp"
@@ -1769,6 +1770,9 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::stepSimulation(int steps, float dt) {
+        if (steps <= 0 || dt <= 0.0f) return;
+        // In GUI editor mode, prevent accidental stepping when no play session is active.
+        if (!m_headless && !m_simulationSessionActive) return;
         for (int i = 0; i < steps; ++i) {
             update(dt);
         }
@@ -2083,6 +2087,7 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::applyPreferences() {
+        renderer::setEditorLanguage(m_preferences.language);
         setTargetFps(m_preferences.targetFps);
         setVsyncEnabled(m_preferences.vsync);
         if (m_renderer) {

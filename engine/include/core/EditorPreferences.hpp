@@ -2,10 +2,13 @@
 #include <string>
 #include <filesystem>
 #include <nlohmann/json.hpp>
+#include <string_view>
 
 namespace engine::core {
 
     struct EditorPreferences {
+        // UI language: "en" (default) or "pl".
+        std::string language{"en"};
         // --- UI Layout & Display ---
         float uiScale{1.0f};
         bool showPlaceActors{true};
