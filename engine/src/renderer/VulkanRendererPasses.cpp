@@ -65,7 +65,12 @@ namespace engine::renderer {
         }
 #endif
 
-        // The frame fence (or headless queue-idle) guarantees the previous timestamp set
+        if (m_context->isHeadless()) {
+            core::Profiler::ScopedSample waitFenceSample("Vulkan Fence Wait");
+            vkWaitForFences(m_context->getDevice(), 1, &m_headlessInFlightFence, VK_TRUE, UINT64_MAX);
+        }
+
+        // The frame fence guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
             uint64_t timestamps[11]{};
