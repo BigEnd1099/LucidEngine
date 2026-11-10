@@ -1,6 +1,7 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorViewportOverlay.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #ifdef USE_GLFW
 #include "imgui.h"
 namespace engine::renderer {
@@ -14,8 +15,8 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                 const float leftOverlayW = (state.showPlaceActors ? 230.0f : 310.0f) * state.uiScale;
                 ImGui::BeginChild("VpOverlayTopLeft", ImVec2(leftOverlayW, 30.0f * state.uiScale), true, ImGuiWindowFlags_NoScrollbar);
                 if (!state.showPlaceActors) {
-                    if (ImGui::Button("> Aktorzy", ImVec2(0, 22.0f * state.uiScale))) state.showPlaceActors = true;
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin panel Place Actors");
+                    if (ImGui::Button(editorText("ui.expand_actors", "> Actors"), ImVec2(0, 22.0f * state.uiScale))) state.showPlaceActors = true;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.expand_place_actors_panel", "Expand Place Actors panel"));
                     ImGui::SameLine(0.0f, 4.0f * state.uiScale);
                 }
                 if (state.gizmoEnabled) {
@@ -32,10 +33,10 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                 gizmoToolBtn("##GizT", EditorGizmoMode::TRANSLATE, VectorIconType::Translate);
                 gizmoToolBtn("##GizR", EditorGizmoMode::ROTATE,    VectorIconType::Rotate);
                 gizmoToolBtn("##GizS", EditorGizmoMode::SCALE,     VectorIconType::Scale);
-                if (ImGui::Button(state.snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * state.uiScale))) state.snapEnabled = !state.snapEnabled;
+                if (ImGui::Button(state.snapEnabled ? editorText("ui.snap_half_meter", " Snap: 0.5m ") : editorText("ui.snap_off", " Snap: Off "), ImVec2(0, 22.0f * state.uiScale))) state.snapEnabled = !state.snapEnabled;
                 ImGui::SameLine();
                 } else {
-                    ImGui::TextDisabled("Gizmo locked until Stop");
+                    ImGui::TextDisabled(editorText("ui.gizmo_locked_until_stop", "Gizmo locked until Stop"));
                     ImGui::SameLine(0.0f, 6.0f * state.uiScale);
                 }
                 if (ImGui::Button((" Cam " + std::to_string(state.cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * state.uiScale))) state.cameraSpeed = (state.cameraSpeed % 8) + 1;
@@ -52,11 +53,11 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
                     ImGui::BeginChild("VpOverlayTopRight", ImVec2(trPillW, 30.0f * state.uiScale), true, ImGuiWindowFlags_NoScrollbar);
                     if (!state.showOutliner && !state.showDetails) {
-                        if (ImGui::Button("Inspektor <", ImVec2(0, 22.0f * state.uiScale))) { state.showOutliner = true; state.showDetails = true; }
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin prawy panel inspektora");
+                        if (ImGui::Button(editorText("ui.expand_inspector", "Inspector <"), ImVec2(0, 22.0f * state.uiScale))) { state.showOutliner = true; state.showDetails = true; }
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.expand_right_inspector", "Expand the right inspector panel"));
                         ImGui::SameLine(0.0f, 4.0f * state.uiScale);
                     }
-                    ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), "Cubemap IBL");
+                    ImGui::TextColored(ImVec4(0.22f, 0.85f, 1.0f, 1.0f), editorText("ui.cubemap_ibl", "Cubemap IBL"));
                     ImGui::SameLine();
                     ImGui::TextDisabled("|");
                     ImGui::SameLine();
