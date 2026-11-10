@@ -64,7 +64,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     int languageIndex = pref.language == "pl" ? 1 : 0;
                     const char* languageOptions[] = { "English", "Polski" };
                     ImGui::SetNextItemWidth(220.0f * state.uiScale);
-                    if (ImGui::Combo("Language / Język", &languageIndex, languageOptions, 2)) {
+                    if (ImGui::Combo(editorText("settings.language", "Language"), &languageIndex, languageOptions, 2)) {
                         pref.language = languageIndex == 1 ? "pl" : "en";
                         setEditorLanguage(pref.language);
                         if (pref.autoSavePreferences) engine->saveUserPreferences();
