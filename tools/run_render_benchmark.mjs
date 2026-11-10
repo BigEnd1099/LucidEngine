@@ -152,7 +152,7 @@ async function createAtriumBenchmarkScene() {
     { color: '#20252D', metallic: 0.22, roughness: 0.55 }));
 
   // Structural columns and cross beams.
-  for (const x of [-16, -8, 0, 8, 16]) {
+  for (const x of [-18, 18]) {
     for (const z of [-9, 0, 9]) {
       add(entity('BENCH_Column_' + x + '_' + z, [x, 5.8, z], [0.72, 5.8, 0.72], 2,
         { color: '#69717D', metallic: 0.72, roughness: 0.24 }));
@@ -185,7 +185,7 @@ async function createAtriumBenchmarkScene() {
   for (let row = 0; row < 5; row++) {
     for (let col = 0; col < 12; col++) {
       const x = -16.5 + col * 3;
-      const z = 2.5 + row * 2.1;
+      const z = 7.5 + row * 1.3;
       const h = 0.55 + ((row * 7 + col * 3) % 5) * 0.18;
       const color = palette[(row * 12 + col) % palette.length];
       add(entity('BENCH_Prop_' + row + '_' + col, [x, h, z],
