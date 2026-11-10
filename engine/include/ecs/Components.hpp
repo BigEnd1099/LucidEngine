@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <entt/entt.hpp>
 #include <string>
 #include <cstdint>
 #include <vector>
@@ -11,6 +12,20 @@ namespace engine::ecs {
         glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // Euler angles (degrees) for editor & scripts
         glm::vec3 scale{1.0f, 1.0f, 1.0f};
         glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f}; // Accurate 6-DOF quaternion (w, x, y, z)
+    };
+
+    // Local transform is authored relative to the parent. TransformComponent remains
+    // the evaluated world transform consumed by existing renderer and gameplay systems.
+    struct LocalTransformComponent {
+        glm::vec3 position{0.0f};
+        glm::vec3 rotation{0.0f};
+        glm::vec3 scale{1.0f};
+        glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    };
+
+    struct HierarchyComponent {
+        entt::entity parent{entt::null};
+        std::vector<entt::entity> children;
     };
 
     struct MeshComponent {
