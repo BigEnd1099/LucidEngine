@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createServer } from 'node:net';
 
 const ROOT = process.cwd();
 const EXE = path.resolve(process.argv[2] || 'engine/build/Release/engine.exe');
@@ -31,6 +32,15 @@ let stderrTail = '';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function assertPortFree() {
+  const probe = createServer();
+  await new Promise((resolve, reject) => {
+    probe.once('error', reject);
+    probe.listen(PORT, '127.0.0.1', resolve);
+  });
+  await new Promise((resolve, reject) => probe.close(err => err ? reject(err) : resolve()));
 }
 
 function startEngine() {
@@ -364,6 +374,7 @@ function writeSummary(results, sceneMeta) {
 }
 
 async function main() {
+  await assertPortFree();
   startEngine();
   await connectWebSocket();
   console.log('[BENCH] Connected. Configuring render resolution...');
