@@ -336,7 +336,15 @@ async function captureScenario(name, features, meta = {}) {
       rtSvgfEnabled: Number(metrics.rtSvgfEnabled || 0),
       rtGiCheckerboard: Number(metrics.rtGiCheckerboard || 0),
       rtGiHistoryValid: Number(metrics.rtGiHistoryValid || 0),
-      rtReflectionSamples: Number(metrics.rtReflectionSamples || 0)
+      rtReflectionSamples: Number(metrics.rtReflectionSamples || 0),
+      rtReflectionBounces: Number(metrics.rtReflectionBounces || 0),
+      rtReflectionInfiniteBounces: Number(metrics.rtReflectionInfiniteBounces || 0),
+      rtReflectionMaxRoughness: Number(metrics.rtReflectionMaxRoughness || 0),
+      rtReflectionCheckerboard: Number(metrics.rtReflectionCheckerboard || 0),
+      rtReflectionStochasticLights: Number(metrics.rtReflectionStochasticLights || 0),
+      rtReflectionLodBias: Number(metrics.rtReflectionLodBias || 0),
+      rtReflectionHalfRes: Number(metrics.rtReflectionHalfRes || 0),
+      rtDebugMode: Number(metrics.rtDebugMode || 0)
     });
     await sleep(SAMPLE_INTERVAL_MS);
   }
@@ -391,7 +399,9 @@ function writeSummary(results, sceneMeta) {
     'rtReflectionTemporalExecMs', 'rtReflectionTemporalSyncMs',
     'rtGiSamples', 'rtGiBounces', 'rtGiWidth', 'rtGiHeight', 'rtMaxHistory',
     'rtSpatialStrength', 'rtSvgfEnabled', 'rtGiCheckerboard', 'rtGiHistoryValid',
-    'rtReflectionSamples'
+    'rtReflectionSamples', 'rtReflectionBounces', 'rtReflectionInfiniteBounces',
+    'rtReflectionMaxRoughness', 'rtReflectionCheckerboard', 'rtReflectionStochasticLights',
+    'rtReflectionLodBias', 'rtReflectionHalfRes', 'rtDebugMode'
   ];
   const lines = [
     '# Lucid Engine Render Benchmark', '',
@@ -425,6 +435,18 @@ function writeSummary(results, sceneMeta) {
       a.rtMaxHistory ?? 0, a.rtSpatialStrength ?? 0,
       a.rtSvgfEnabled ?? 0, a.rtGiCheckerboard ?? 0, a.rtGiHistoryValid ?? 0,
       a.rtReflectionSamples ?? 0
+    ].join(' | ') + ' |');
+  }
+  lines.push('', '## RT reflection quality settings', '',
+    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Stochastic lights | LOD bias | Half resolution | Debug mode ID |',
+    '|---|' + Array(9).fill('---:').join('|') + '|');
+  for (const result of results) {
+    const a = result.averages;
+    lines.push('| ' + result.name + ' | ' + [
+      a.rtReflectionSamples ?? 0, a.rtReflectionBounces ?? 0,
+      a.rtReflectionInfiniteBounces ?? 0, a.rtReflectionMaxRoughness ?? 0,
+      a.rtReflectionCheckerboard ?? 0, a.rtReflectionStochasticLights ?? 0,
+      a.rtReflectionLodBias ?? 0, a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
     ].join(' | ') + ' |');
   }
   lines.push('', '## Notes', '',
