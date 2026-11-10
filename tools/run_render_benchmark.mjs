@@ -256,16 +256,46 @@ async function createAtriumBenchmarkScene() {
   return { entityCount: ids.length, meshEntityCount, lightEntityCount };
 }
 
-async function setFeatures(features) {
+async function setFeatures(features, quality = null) {
   return await callRpc('engine.setRenderFeatures', {
     gtao: !!features.gtao,
     ssgi: !!features.ssgi,
     rtEnabled: true,
     rtGi: !!features.rtGi,
     rtAo: !!features.rtAo,
-    rtReflections: !!features.rtReflections
+    rtReflections: !!features.rtReflections,
+    ...(quality ? { quality } : {})
   });
 }
+
+const RT_PROFILES = [
+  {
+    id: 'default',
+    label: 'Engine defaults',
+    settings: {
+      giSamples: 1, giBounces: 2, giHalfRes: true, giCheckerboard: true,
+      giIntensity: 1.0, reflectionSamples: 1, reflectionBounces: 2,
+      reflectionInfiniteBounces: false, reflectionMaxRoughness: 0.60,
+      reflectionMinThroughput: 0.06, maxHistory: 32, spatialStrength: 1.0,
+      denoiseEnabled: true, svgfEnabled: true, reflectionCheckerboard: true,
+      reflectionStochasticLights: true, reflectionLodBias: true,
+      reflectionHalfRes: false, debugMode: 0
+    }
+  },
+  {
+    id: 'editor_quality',
+    label: 'Editor Quality (reported configuration)',
+    settings: {
+      giSamples: 16, giBounces: 3, giHalfRes: true, giCheckerboard: true,
+      giIntensity: 1.0, reflectionSamples: 16, reflectionBounces: 2,
+      reflectionInfiniteBounces: false, reflectionMaxRoughness: 1.0,
+      reflectionMinThroughput: 0.06, maxHistory: 256, spatialStrength: 1.0,
+      denoiseEnabled: true, svgfEnabled: true, reflectionCheckerboard: true,
+      reflectionStochasticLights: true, reflectionLodBias: true,
+      reflectionHalfRes: false, debugMode: 0
+    }
+  }
+];
 
 function percentile(values, p) {
   if (!values.length) return 0;
@@ -279,8 +309,8 @@ function round(value, digits = 3) {
   return Number.isFinite(value) ? Number(value.toFixed(digits)) : 0;
 }
 
-async function captureScenario(name, features, meta = {}) {
-  const actual = await setFeatures(features);
+async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[0]) {
+  const actual = await setFeatures(features, profile.settings);
   console.log('\n[TEST] ' + name + ' | GTAO=' + actual.gtao + ' SSGI=' + actual.ssgi +
     ' RTGI=' + actual.rtGi + ' RTAO=' + actual.rtAo + ' RTRefl=' + actual.rtReflections);
   await sleep(WARMUP_MS);
@@ -346,7 +376,8 @@ async function captureScenario(name, features, meta = {}) {
       rtReflectionStochasticLights: Number(metrics.rtReflectionStochasticLights || 0),
       rtReflectionLodBias: Number(metrics.rtReflectionLodBias || 0),
       rtReflectionHalfRes: Number(metrics.rtReflectionHalfRes || 0),
-      rtDebugMode: Number(metrics.rtDebugMode || 0)
+      rtDebugMode: Number(metrics.rtDebugMode || 0),
+      ...Object.fromEntries(Object.entries(metrics).filter(([, value]) => typeof value === 'number'))
     });
     await sleep(SAMPLE_INTERVAL_MS);
   }
@@ -366,8 +397,12 @@ async function captureScenario(name, features, meta = {}) {
   averages.fps = averages.frameTimeMs > 0 ? round(1000.0 / averages.frameTimeMs) : 0;
 
   const result = {
-    name, features: actual, sampleCount: samples.length,
-    captureMs: CAPTURE_MS, warmupMs: WARMUP_MS,
+    name, profile: { id: profile.id, label: profile.label }, settings: actual,
+    features: {
+      gtao: actual.gtao, ssgi: actual.ssgi, rtEnabled: actual.rtEnabled,
+      rtGi: actual.rtGi, rtAo: actual.rtAo, rtReflections: actual.rtReflections
+    },
+    sampleCount: samples.length, captureMs: CAPTURE_MS, warmupMs: WARMUP_MS,
     averages, p95, rawSamples: samples, ...meta
   };
   fs.writeFileSync(path.join(outputDir, name + '.json'), JSON.stringify(result, null, 2));
@@ -412,6 +447,8 @@ function writeSummary(results, sceneMeta) {
     '- Resolution: ' + WIDTH + ' × ' + HEIGHT,
     '- Scene entities: ' + sceneMeta.entityCount,
     '- Samples per case: ' + (results[0]?.sampleCount || 0),
+    '- RT quality profiles: ' + [...new Set(results.map(r => r.profile?.id).filter(Boolean))].join(', '),
+    '- Profile settings are applied over JSON-RPC and captured from renderer readback; numeric profiler metrics are also copied dynamically into raw samples.',
     '- Warmup: ' + WARMUP_MS + ' ms; capture: ' + CAPTURE_MS + ' ms',
     '- GPU subpass values are nested inside AO + RT and must not be summed into the parent.',
     '',
@@ -420,6 +457,22 @@ function writeSummary(results, sceneMeta) {
   ];
   for (const result of results) {
     lines.push('| ' + result.name + ' | ' + fields.map(key => result.averages[key] ?? 0).join(' | ') + ' |');
+  }
+  lines.push('', '## Frame and GPU p95 values', '',
+    '| Test | ' + fields.join(' | ') + ' |',
+    '|---|' + fields.map(() => '---:').join('|') + '|');
+  for (const result of results) {
+    lines.push('| ' + result.name + ' | ' + fields.map(key => result.p95[key] ?? 0).join(' | ') + ' |');
+  }
+  lines.push('', '## Screen-space quality settings', '',
+    '| Test | GTAO radius | GTAO intensity | SSGI intensity | Ground reflectance | Multi-bounce |',
+    '|---|---:|---:|---:|---:|---:|');
+  for (const result of results) {
+    const a = result.averages;
+    lines.push('| ' + result.name + ' | ' + [
+      a.gtaoRadius ?? 0, a.gtaoIntensity ?? 0, a.ssgiIntensity ?? 0,
+      a.ssgiGroundReflectance ?? 0, a.ssgiMultiBounce ?? 0
+    ].join(' | ') + ' |');
   }
   lines.push('', '## RT pass execution and dependency gaps', '',
     '| Test | GI trace exec | GI trace gap | Temporal exec | Temporal gap | A-trous 0 exec | A-trous 0 gap | GI→reflection gap | Reflection trace exec | Reflection trace gap | Reflection temporal exec | Reflection temporal gap |',
@@ -460,11 +513,24 @@ function writeSummary(results, sceneMeta) {
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
     '- RT stage timings retain inclusive values and additionally expose dispatch-only execution and dependency-gap intervals.',
     '- Dependency-gap intervals are GPU scheduling gaps around synchronization barriers, not direct measurements of barrier instruction cost.',
-    '- RT quality telemetry (samples, internal GI resolution, temporal history and SVGF state) is observational; the harness does not change RT quality defaults or reflection algorithms.', '');
+    '- RT quality telemetry (samples, internal GI resolution, temporal history and SVGF state) is observational; the harness does not change RT quality defaults or reflection algorithms.',
+    '- Temporal debug views expose history length and variance, but this benchmark does not read back per-pixel history-age distributions or rejection counts; GPU readback would add measurement overhead and needs a separately gated diagnostic mode.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
-  const csvFields = [...fields, ...rtDiagnosticFields];
+  const csvFields = [...new Set([...fields, ...rtDiagnosticFields,
+    'gtaoRadius', 'gtaoIntensity', 'ssgiIntensity', 'ssgiGroundReflectance', 'ssgiMultiBounce',
+    'rtEnabled', 'rtAvailable', 'rtShadowsEnabled', 'rtGiHalfRes', 'rtGiIntensity', 'rtDenoiseEnabled',
+    'rtReflectionMinThroughput'])];
+  const p95Fields = csvFields.map(key => 'p95_' + key);
+  const csvEscape = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+  const csvHeader = ['test', 'profile', 'settings_json',
+    ...csvFields.map(key => 'avg_' + key), ...p95Fields];
   fs.writeFileSync(path.join(outputDir, 'REPORT.csv'),
-    ['test,' + csvFields.join(','), ...results.map(r => [r.name, ...csvFields.map(k => r.averages[k] ?? 0)].join(','))].join('\n') + '\n');
+    [csvHeader.join(','), ...results.map(r => [
+      csvEscape(r.name), csvEscape(r.profile?.id),
+      csvEscape(JSON.stringify(r.settings || {})),
+      ...csvFields.map(key => r.averages[key] ?? 0),
+      ...csvFields.map(key => r.p95[key] ?? 0)
+    ].join(','))].join('\n') + '\n');
   fs.writeFileSync(path.join(outputDir, 'REPORT.json'), JSON.stringify({
     generatedAt: new Date().toISOString(), executable: EXE, port: PORT,
     resolution: { width: WIDTH, height: HEIGHT }, scene: sceneMeta,
@@ -536,25 +602,23 @@ async function main() {
   await sleep(1000);
   await saveSceneCapture();
 
-  results.push(await captureScenario('atrium_all_off',
-    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_gtao_only',
-    { gtao: true, ssgi: false, rtGi: false, rtAo: false, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_ssgi_only',
-    { gtao: false, ssgi: true, rtGi: false, rtAo: false, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_gtao_ssgi',
-    { gtao: true, ssgi: true, rtGi: false, rtAo: false, rtReflections: false }, sceneMeta));
-
-  results.push(await captureScenario('atrium_rt_gi_only',
-    { gtao: false, ssgi: false, rtGi: true, rtAo: false, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_rt_ao_only',
-    { gtao: false, ssgi: false, rtGi: false, rtAo: true, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_rt_gi_ao',
-    { gtao: false, ssgi: false, rtGi: true, rtAo: true, rtReflections: false }, sceneMeta));
-  results.push(await captureScenario('atrium_reflections_only',
-    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: true }, sceneMeta));
-  results.push(await captureScenario('atrium_all_effects',
-    { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true }, sceneMeta));
+  const profileCases = [
+    ['all_off', { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false }],
+    ['gtao_only', { gtao: true, ssgi: false, rtGi: false, rtAo: false, rtReflections: false }],
+    ['ssgi_only', { gtao: false, ssgi: true, rtGi: false, rtAo: false, rtReflections: false }],
+    ['gtao_ssgi', { gtao: true, ssgi: true, rtGi: false, rtAo: false, rtReflections: false }],
+    ['rt_gi_only', { gtao: false, ssgi: false, rtGi: true, rtAo: false, rtReflections: false }],
+    ['rt_ao_only', { gtao: false, ssgi: false, rtGi: false, rtAo: true, rtReflections: false }],
+    ['rt_gi_ao', { gtao: false, ssgi: false, rtGi: true, rtAo: true, rtReflections: false }],
+    ['reflections_only', { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: true }],
+    ['all_effects', { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true }]
+  ];
+  for (const profile of RT_PROFILES) {
+    console.log('\\n[PROFILE] ' + profile.label);
+    for (const [caseName, features] of profileCases) {
+      results.push(await captureScenario('atrium_' + profile.id + '_' + caseName, features, sceneMeta, profile));
+    }
+  }
 
   writeSummary(results, sceneMeta);
   console.log('\n[BENCH] Completed ' + results.length + ' cases.');
