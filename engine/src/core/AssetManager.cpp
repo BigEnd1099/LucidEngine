@@ -768,7 +768,7 @@ namespace engine::core {
         return nullptr;
     }
 
-    uint32_t AssetManager::loadTextureFromFile(const std::string& path, bool generateMips) {
+    uint32_t AssetManager::loadTextureFromFile(const std::string& path, bool generateMips, bool srgb) {
         int w = 0, h = 0, comp = 0;
         stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
         if (!pixels) {
@@ -780,7 +780,8 @@ namespace engine::core {
         tex->id = m_nextTextureId++;
         tex->width = static_cast<uint32_t>(w);
         tex->height = static_cast<uint32_t>(h);
-        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels, tex->width, tex->height, VK_FORMAT_R8G8B8A8_UNORM, generateMips);
+        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels, tex->width, tex->height,
+            srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, generateMips);
         stbi_image_free(pixels);
 
         uint32_t id = tex->id;
@@ -1071,7 +1072,8 @@ namespace engine::core {
         tex->id = m_nextTextureId++;
         tex->width = size;
         tex->height = size;
-        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels.data(), size, size, VK_FORMAT_R8G8B8A8_UNORM, true);
+        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels.data(), size, size,
+            mapType == "albedo" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
 
         uint32_t id = tex->id;
         m_textures.push_back(std::move(tex));
