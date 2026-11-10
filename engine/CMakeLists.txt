@@ -163,11 +163,6 @@ if(Python3_FOUND)
 endif()
 
 add_executable(engine ${SRC_FILES} ${HEADER_FILES} ${IMGUI_SRCS})
-# Relink when a language catalog changes so the post-build copy stays up to date.
-set_property(TARGET engine APPEND PROPERTY LINK_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/language/en.json
-    ${CMAKE_CURRENT_SOURCE_DIR}/language/pl.json
-)
 add_dependencies(engine CompileShaders)
 if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
@@ -193,11 +188,17 @@ add_custom_command(TARGET engine POST_BUILD
     $<TARGET_FILE_DIR:engine>/assets/textures
 )
 
-add_custom_command(TARGET engine POST_BUILD
+# Copy catalogs on every build (including Visual Studio builds where LINK_DEPENDS is not portable).
+add_custom_target(CopyLanguageCatalogs ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/language
     $<TARGET_FILE_DIR:engine>/language
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/language/en.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/language/pl.json
+    VERBATIM
 )
+add_dependencies(CopyLanguageCatalogs engine)
 
 target_include_directories(engine PRIVATE include)
 target_include_directories(engine PRIVATE ${vma_SOURCE_DIR}/include)
