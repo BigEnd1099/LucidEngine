@@ -18,6 +18,7 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rozwin panel Place Actors");
                     ImGui::SameLine(0.0f, 4.0f * state.uiScale);
                 }
+                if (state.gizmoEnabled) {
                 auto gizmoToolBtn = [&](const char* id, EditorGizmoMode mode, VectorIconType icon) {
                     const bool active = (state.gizmoMode == mode);
                     ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.0f, 0.44f, 0.95f, 1.0f) : ImVec4(0.08f, 0.10f, 0.13f, 1.0f));
@@ -33,6 +34,7 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                 gizmoToolBtn("##GizS", EditorGizmoMode::SCALE,     VectorIconType::Scale);
                 if (ImGui::Button(state.snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * state.uiScale))) state.snapEnabled = !state.snapEnabled;
                 ImGui::SameLine();
+                }
                 if (ImGui::Button((" Cam " + std::to_string(state.cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * state.uiScale))) state.cameraSpeed = (state.cameraSpeed % 8) + 1;
                 ImGui::EndChild();
                 ImGui::PopStyleVar();

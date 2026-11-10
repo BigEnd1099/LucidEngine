@@ -516,7 +516,7 @@ namespace engine::renderer {
                 if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Comma)) {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
                 }
-                if (!s_isRmbNavigating) {
+                if (!isSimulationRunning && !s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = EditorGizmoMode::ROTATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = EditorGizmoMode::SCALE;
@@ -551,11 +551,15 @@ namespace engine::renderer {
                 }
             }
 
+            const bool isSimulationRunning = (engine != nullptr && !engine->isPaused());
+            const bool gizmoEnabled = !isSimulationRunning;
+            if (!gizmoEnabled) s_draggingGizmoAxis = 0;
+
             int hoveredGizmoAxis = 0;
             ImVec2 originScreen(0, 0), ptX(0, 0), ptY(0, 0), ptZ(0, 0);
             bool hasSelectedTransform = (selectedEnt != entt::null && registry.get().valid(selectedEnt) && registry.get().all_of<ecs::TransformComponent>(selectedEnt));
 
-            if (hasSelectedTransform) {
+            if (gizmoEnabled && hasSelectedTransform) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                 const float gizmoLen = std::max(0.7f, glm::length(camPos - t.position) * 0.14f);
                 float originW = 0.0f, wX = 0.0f, wY = 0.0f, wZ = 0.0f;
@@ -582,7 +586,7 @@ namespace engine::renderer {
             if (!blockViewportClicks && isHovered && altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { s_isAltOrbiting = true; ImGui::SetWindowFocus("Viewport"); }
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) { s_isAltOrbiting = false; s_draggingGizmoAxis = 0; }
 
-            if (!blockViewportClicks && isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            if (gizmoEnabled && !blockViewportClicks && isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 if (hoveredGizmoAxis > 0 && hasSelectedTransform) {
                     s_draggingGizmoAxis = hoveredGizmoAxis;
                     auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
@@ -657,7 +661,7 @@ namespace engine::renderer {
                 }
             }
 
-            if (s_draggingGizmoAxis > 0 && hasSelectedTransform) {
+            if (gizmoEnabled && s_draggingGizmoAxis > 0 && hasSelectedTransform) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                 if (s_gizmoMode == EditorGizmoMode::TRANSLATE) {
                     glm::vec3 curRayOrig, curRayDir;
@@ -730,7 +734,7 @@ namespace engine::renderer {
             }
 
             // Zaznaczenie i Gizmo 3D
-            if (hasSelectedTransform) {
+            if (gizmoEnabled && hasSelectedTransform) {
                 auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                 float origW = 0.0f;
                 if (worldToScreen(t.position, originScreen, origW)) {
@@ -747,7 +751,7 @@ namespace engine::renderer {
 
             EditorViewportOverlayState viewportOverlayState{
                 s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
-                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode
+                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode, gizmoEnabled
             };
             drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 

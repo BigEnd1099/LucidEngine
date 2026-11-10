@@ -10,5 +10,6 @@ struct EditorViewportOverlayState {
     int& cameraSpeed;
     float& uiScale;
     EditorGizmoMode& gizmoMode;
+    bool gizmoEnabled;
 };
 }
