@@ -480,6 +480,16 @@ namespace engine::renderer {
                     ? &registry.get().get<ecs::SkinComponent>(entity) : nullptr;
                 const ecs::MorphWeightsComponent* morph = registry.get().all_of<ecs::MorphWeightsComponent>(entity)
                     ? &registry.get().get<ecs::MorphWeightsComponent>(entity) : nullptr;
+                // Additional glTF primitives are child entities of the source node.
+                // Their morph weights are owned by that node and must stay live while
+                // animation channels update the node's component.
+                if (!morph && registry.get().all_of<ecs::HierarchyComponent>(entity)) {
+                    const entt::entity parent = registry.get().get<ecs::HierarchyComponent>(entity).parent;
+                    if (parent != entt::null && registry.get().valid(parent) &&
+                        registry.get().all_of<ecs::MorphWeightsComponent>(parent)) {
+                        morph = &registry.get().get<ecs::MorphWeightsComponent>(parent);
+                    }
+                }
                 const bool hasMorph = morph && !morph->weights.empty() && !meshAsset->morphTargets.empty();
                 const bool hasSkin = skin && !skin->jointMatrices.empty() && meshAsset->hasSkinInfluences &&
                                      meshAsset->skinInfluences.size() == meshAsset->vertexCount;
