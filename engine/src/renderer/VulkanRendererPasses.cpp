@@ -1873,16 +1873,14 @@ namespace engine::renderer {
                 m_context->recreateSwapchain();
             }
         } else {
-            const VkResult submitResult =
-                vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+            vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
+            const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
             m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
-            vkQueueWaitIdle(m_context->getGraphicsQueue());
         }
 #else
-        const VkResult submitResult =
-            vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+        vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
+        const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
         m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
-        vkQueueWaitIdle(m_context->getGraphicsQueue());
 #endif
     }
 }
