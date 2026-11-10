@@ -854,21 +854,21 @@ namespace engine::core {
                     // the source node as the transform parent. Geometry remains shared.
                     if (hasGpuInstances) {
                         size_t instanceCount = 0;
-                        if (const auto* translationAttribute = node.findInstancingAttribute("TRANSLATION");
-                            translationAttribute && translationAttribute->accessorIndex < asset.accessors.size())
+                        if (auto translationAttribute = node.findInstancingAttribute("TRANSLATION");
+                            translationAttribute != node.instancingAttributes.end() && translationAttribute->accessorIndex < asset.accessors.size())
                             instanceCount = asset.accessors[translationAttribute->accessorIndex].count;
-                        else if (const auto* rotationAttribute = node.findInstancingAttribute("ROTATION");
-                            rotationAttribute && rotationAttribute->accessorIndex < asset.accessors.size())
+                        else if (auto rotationAttribute = node.findInstancingAttribute("ROTATION");
+                            rotationAttribute != node.instancingAttributes.end() && rotationAttribute->accessorIndex < asset.accessors.size())
                             instanceCount = asset.accessors[rotationAttribute->accessorIndex].count;
-                        else if (const auto* scaleAttribute = node.findInstancingAttribute("SCALE");
-                            scaleAttribute && scaleAttribute->accessorIndex < asset.accessors.size())
+                        else if (auto scaleAttribute = node.findInstancingAttribute("SCALE");
+                            scaleAttribute != node.instancingAttributes.end() && scaleAttribute->accessorIndex < asset.accessors.size())
                             instanceCount = asset.accessors[scaleAttribute->accessorIndex].count;
 
                         std::vector<glm::vec3> translations(instanceCount, glm::vec3(0.0f));
                         std::vector<glm::quat> rotations(instanceCount, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
                         std::vector<glm::vec3> scales(instanceCount, glm::vec3(1.0f));
-                        if (const auto* attribute = node.findInstancingAttribute("TRANSLATION");
-                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                        if (auto attribute = node.findInstancingAttribute("TRANSLATION");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
                             size_t index = 0;
                             fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
                                 [&](const fastgltf::math::fvec3& value) {
@@ -878,8 +878,8 @@ namespace engine::core {
                                     ++index;
                                 });
                         }
-                        if (const auto* attribute = node.findInstancingAttribute("ROTATION");
-                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                        if (auto attribute = node.findInstancingAttribute("ROTATION");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
                             size_t index = 0;
                             fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
                                 [&](const fastgltf::math::fvec4& value) {
@@ -890,8 +890,8 @@ namespace engine::core {
                                     ++index;
                                 });
                         }
-                        if (const auto* attribute = node.findInstancingAttribute("SCALE");
-                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                        if (auto attribute = node.findInstancingAttribute("SCALE");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
                             size_t index = 0;
                             fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
                                 [&](const fastgltf::math::fvec3& value) {
