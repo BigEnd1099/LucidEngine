@@ -1392,6 +1392,7 @@ namespace engine::core {
                 lastTime = current_now;
                 if (!m_paused) {
                     try {
+                        LUCID_PROFILE_SCOPE("Simulation Update");
                         update(dt_real);
                     } catch (const std::exception& e) {
                         core::Logger::error(std::string("Update exception: ") + e.what());
@@ -1401,6 +1402,7 @@ namespace engine::core {
                 // because gizmo edits and imported scene changes still modify local transforms.
                 if (m_registry) {
                     try {
+                        LUCID_PROFILE_SCOPE("Animation & Skinning");
                         updateAnimationPlayers(*m_registry, m_paused ? 0.0f : dt_real);
                         updateSkinPalettes(*m_registry);
                     }
