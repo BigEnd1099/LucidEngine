@@ -132,9 +132,11 @@ namespace engine::core {
             if (clip.tracks.empty()) continue;
 
             if (player.playing && std::isfinite(deltaTime) && deltaTime > 0.0f) {
-                player.time += deltaTime * player.speed;
+                const float playbackSpeed = std::isfinite(player.speed) ? player.speed : 0.0f;
+                player.time += deltaTime * playbackSpeed;
             }
-            if (clip.duration > 1e-6f) {
+            if (!std::isfinite(player.time)) player.time = 0.0f;
+            if (std::isfinite(clip.duration) && clip.duration > 1e-6f) {
                 if (player.loop) {
                     player.time = std::fmod(player.time, clip.duration);
                     if (player.time < 0.0f) player.time += clip.duration;
@@ -156,6 +158,15 @@ namespace engine::core {
                     static_cast<uint8_t>(fastgltf::AnimationInterpolation::CubicSpline);
                 const size_t expectedValues = keyCount * componentCount * (cubic ? 3u : 1u);
                 if (track.values.size() < expectedValues) continue;
+                bool validTrackTimes = true;
+                for (size_t key = 0; key < keyCount; ++key) {
+                    if (!std::isfinite(track.keyframeTimes[key]) ||
+                        (key > 0 && track.keyframeTimes[key] < track.keyframeTimes[key - 1])) {
+                        validTrackTimes = false;
+                        break;
+                    }
+                }
+                if (!validTrackTimes) continue;
 
                 size_t keyA = 0;
                 size_t keyB = 0;
@@ -213,6 +224,10 @@ namespace engine::core {
                 } else {
                     for (uint32_t component = 0; component < componentCount; ++component)
                         sampled[component] = glm::mix(valueAt(keyA, component, 0), valueAt(keyB, component, 0), alpha);
+                }
+
+                for (float& component : sampled) {
+                    if (!std::isfinite(component)) component = 0.0f;
                 }
 
                 if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Translation) && componentCount >= 3) {
