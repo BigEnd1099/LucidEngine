@@ -50,6 +50,12 @@ namespace engine::core {
         glm::vec3 scale{1.0f};
     };
 
+    struct ImportedMorphTarget {
+        std::vector<glm::vec3> positionDeltas;
+        std::vector<glm::vec3> normalDeltas;
+        std::vector<glm::vec3> tangentDeltas;
+    };
+
     struct ImportedSceneNode {
         size_t nodeIndex{0};
         int64_t parentNodeIndex{-1};
@@ -57,7 +63,33 @@ namespace engine::core {
         glm::vec3 translation{0.0f};
         glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
         glm::vec3 scale{1.0f};
+        uint32_t skinId{0};
+        std::vector<float> morphWeights;
         std::vector<uint32_t> meshIds;
+    };
+
+    struct SkinAsset {
+        uint32_t id{0};
+        std::string name;
+        int64_t skeletonNodeIndex{-1};
+        std::vector<size_t> jointNodeIndices;
+        std::vector<glm::mat4> inverseBindMatrices;
+    };
+
+    struct ImportedAnimationTrack {
+        size_t nodeIndex{0};
+        uint8_t path{0};          // fastgltf AnimationPath
+        uint8_t interpolation{0}; // fastgltf AnimationInterpolation
+        uint32_t componentsPerKey{0};
+        std::vector<float> keyframeTimes;
+        // Packed component values. CUBICSPLINE keeps in/value/out triplets per key.
+        std::vector<float> values;
+    };
+
+    struct ImportedAnimationClip {
+        std::string name;
+        float duration{0.0f};
+        std::vector<ImportedAnimationTrack> tracks;
     };
 
     struct MeshAsset {
@@ -69,6 +101,7 @@ namespace engine::core {
         uint32_t indexCount{0};
         uint32_t vertexCount{0};
         uint32_t materialId{0};
+        std::vector<ImportedMorphTarget> morphTargets;
     };
 
     class AssetManager {
@@ -92,6 +125,8 @@ namespace engine::core {
         uint32_t getTextureCount() const { return m_nextTextureId - 1; }
         const std::vector<ImportedMeshInstance>& getLastImportedInstances() const { return m_lastImportedInstances; }
         const std::vector<ImportedSceneNode>& getLastImportedNodes() const { return m_lastImportedNodes; }
+        const std::vector<SkinAsset>& getLastImportedSkins() const { return m_lastImportedSkins; }
+        const std::vector<ImportedAnimationClip>& getLastImportedAnimations() const { return m_lastImportedAnimations; }
 
         // Uploads buffer data to GPU (creates staging buffer, copies, then destroys staging)
         void uploadBuffer(VkBuffer& dstBuffer, VmaAllocation& dstAlloc, const void* data, size_t size, VkBufferUsageFlags usage);
@@ -105,6 +140,8 @@ namespace engine::core {
         std::vector<std::unique_ptr<TextureAsset>> m_textures;
         std::vector<ImportedMeshInstance> m_lastImportedInstances;
         std::vector<ImportedSceneNode> m_lastImportedNodes;
+        std::vector<SkinAsset> m_lastImportedSkins;
+        std::vector<ImportedAnimationClip> m_lastImportedAnimations;
         uint32_t m_nextMeshId{1};
         uint32_t m_nextMaterialId{1};
         uint32_t m_nextTextureId{1};
