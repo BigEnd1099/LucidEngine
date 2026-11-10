@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #ifdef USE_GLFW
 #include "imgui.h"
@@ -624,6 +625,7 @@ namespace engine::renderer {
                                         ? std::string("ImportedModel") : droppedPath.stem().string();
                                     const glm::vec3 placementOrigin = camPos + front * 5.0f;
                                     std::vector<entt::entity> nodeEntities(importedNodes.size(), static_cast<entt::entity>(entt::null));
+                                    std::unordered_map<size_t, entt::entity> sourceNodeEntities;
                                     entt::entity firstCreated = entt::null;
                                     size_t createdCount = 0;
 
@@ -633,6 +635,7 @@ namespace engine::renderer {
                                         const auto& node = importedNodes[nodeIndex];
                                         const entt::entity entity = registry.createEntity();
                                         nodeEntities[nodeIndex] = entity;
+                                        sourceNodeEntities.emplace(node.nodeIndex, entity);
                                         const std::string nodeName = node.name.empty()
                                             ? "Node_" + std::to_string(node.nodeIndex) : node.name;
                                         registry.get().emplace<ecs::TagComponent>(entity,
@@ -671,6 +674,34 @@ namespace engine::renderer {
                                         const int64_t parentIndex = importedNodes[nodeIndex].parentNodeIndex;
                                         if (parentIndex >= 0 && static_cast<size_t>(parentIndex) < nodeEntities.size())
                                             registry.setParent(nodeEntities[nodeIndex], nodeEntities[static_cast<size_t>(parentIndex)]);
+                                    }
+
+                                    // Attach imported skin bindings and morph weights after all
+                                    // source-node entities exist, so joint references can be resolved.
+                                    const auto& importedSkins = assetManager->getLastImportedSkins();
+                                    for (size_t nodeIndex = 0; nodeIndex < importedNodes.size(); ++nodeIndex) {
+                                        const auto& node = importedNodes[nodeIndex];
+                                        const entt::entity entity = nodeEntities[nodeIndex];
+                                        if (node.skinId > 0 && node.skinId <= importedSkins.size()) {
+                                            const auto& sourceSkin = importedSkins[node.skinId - 1];
+                                            ecs::SkinComponent skinComponent{};
+                                            skinComponent.skinAssetId = sourceSkin.id;
+                                            skinComponent.inverseBindMatrices = sourceSkin.inverseBindMatrices;
+                                            if (sourceSkin.skeletonNodeIndex >= 0) {
+                                                const auto skeletonIt = sourceNodeEntities.find(static_cast<size_t>(sourceSkin.skeletonNodeIndex));
+                                                if (skeletonIt != sourceNodeEntities.end())
+                                                    skinComponent.skeleton = skeletonIt->second;
+                                            }
+                                            for (size_t jointNodeIndex : sourceSkin.jointNodeIndices) {
+                                                const auto jointIt = sourceNodeEntities.find(jointNodeIndex);
+                                                skinComponent.joints.push_back(jointIt != sourceNodeEntities.end()
+                                                    ? jointIt->second : entt::null);
+                                            }
+                                            registry.get().emplace<ecs::SkinComponent>(entity, std::move(skinComponent));
+                                        }
+                                        if (!node.morphWeights.empty())
+                                            registry.get().emplace<ecs::MorphWeightsComponent>(entity,
+                                                ecs::MorphWeightsComponent{node.morphWeights});
                                     }
 
                                     // A glTF mesh may contain several primitives. The first
