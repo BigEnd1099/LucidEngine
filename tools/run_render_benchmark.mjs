@@ -336,6 +336,8 @@ async function captureScenario(name, features, meta = {}) {
       rtSvgfEnabled: Number(metrics.rtSvgfEnabled || 0),
       rtGiCheckerboard: Number(metrics.rtGiCheckerboard || 0),
       rtGiHistoryValid: Number(metrics.rtGiHistoryValid || 0),
+      rtReflectionHistoryValid: Number(metrics.rtReflectionHistoryValid || 0),
+      rtHistoryInvalidatedByLightChange: Number(metrics.rtHistoryInvalidatedByLightChange || 0),
       rtReflectionSamples: Number(metrics.rtReflectionSamples || 0),
       rtReflectionBounces: Number(metrics.rtReflectionBounces || 0),
       rtReflectionInfiniteBounces: Number(metrics.rtReflectionInfiniteBounces || 0),
@@ -399,6 +401,7 @@ function writeSummary(results, sceneMeta) {
     'rtReflectionTemporalExecMs', 'rtReflectionTemporalSyncMs',
     'rtGiSamples', 'rtGiBounces', 'rtGiWidth', 'rtGiHeight', 'rtMaxHistory',
     'rtSpatialStrength', 'rtSvgfEnabled', 'rtGiCheckerboard', 'rtGiHistoryValid',
+    'rtReflectionHistoryValid', 'rtHistoryInvalidatedByLightChange',
     'rtReflectionSamples', 'rtReflectionBounces', 'rtReflectionInfiniteBounces',
     'rtReflectionMaxRoughness', 'rtReflectionCheckerboard', 'rtReflectionStochasticLights',
     'rtReflectionLodBias', 'rtReflectionHalfRes', 'rtDebugMode'
@@ -425,8 +428,8 @@ function writeSummary(results, sceneMeta) {
     lines.push('| ' + result.name + ' | ' + rtDiagnosticFields.slice(0, 11).map(key => result.averages[key] ?? 0).join(' | ') + ' |');
   }
   lines.push('', '## RT quality and temporal-history telemetry', '',
-    '| Test | GI samples | GI bounces | GI internal resolution | History capacity | Spatial strength | SVGF | Checkerboard | GI history valid | Reflection samples |',
-    '|---|' + Array(9).fill('---:').join('|') + '|');
+    '| Test | GI samples | GI bounces | GI internal resolution | History capacity | Spatial strength | SVGF | Checkerboard | GI history valid | Reflection history valid | History reset by light/camera | Reflection samples |',
+    '|---|' + Array(11).fill('---:').join('|') + '|');
   for (const result of results) {
     const a = result.averages;
     lines.push('| ' + result.name + ' | ' + [
@@ -434,6 +437,7 @@ function writeSummary(results, sceneMeta) {
       String(a.rtGiWidth ?? 0) + ' × ' + String(a.rtGiHeight ?? 0),
       a.rtMaxHistory ?? 0, a.rtSpatialStrength ?? 0,
       a.rtSvgfEnabled ?? 0, a.rtGiCheckerboard ?? 0, a.rtGiHistoryValid ?? 0,
+      a.rtReflectionHistoryValid ?? 0, a.rtHistoryInvalidatedByLightChange ?? 0,
       a.rtReflectionSamples ?? 0
     ].join(' | ') + ' |');
   }
