@@ -130,6 +130,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         if (!(engine && engine->isSimulationSessionActive()) &&
             ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
             !ImGui::GetIO().WantTextInput &&
+            !ImGui::IsAnyItemActive() &&
             ImGui::IsKeyPressed(ImGuiKey_D) && ImGui::GetIO().KeyCtrl &&
             selectedEntity != entt::null && registry.get().valid(selectedEntity)) {
             selectedEntity = duplicateEntity(selectedEntity);
