@@ -388,6 +388,11 @@ async function main() {
     { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true }));
 
   const sceneMeta = await createAtriumBenchmarkScene();
+  const savedProjectPath = path.join(outputDir, 'AtriumBenchmark');
+  const savedProject = await callRpc('engine.saveCurrentProject', { path: savedProjectPath }, 20000);
+  if (!savedProject?.success) throw new Error('Could not save the generated Atrium Benchmark project.');
+  sceneMeta.savedProjectPath = savedProject.path;
+  console.log('[SCENE] Saved editable benchmark project: ' + savedProject.path);
   await setFeatures({ gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
   await sleep(1000);
   await saveSceneCapture();
