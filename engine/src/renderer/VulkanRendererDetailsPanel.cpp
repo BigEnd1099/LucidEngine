@@ -181,22 +181,31 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         if (registry.get().all_of<ecs::TransformComponent>(selectedEntity) &&
                             componentMatches("Transform", "Transformacja")) {
                             inspectorHasVisibleComponent = true;
-                            auto& t = registry.get().get<ecs::TransformComponent>(selectedEntity);
+                            auto& worldTransform = registry.get().get<ecs::TransformComponent>(selectedEntity);
+                            auto* localTransform = registry.get().try_get<ecs::LocalTransformComponent>(selectedEntity);
+                            glm::vec3& editPosition = localTransform ? localTransform->position : worldTransform.position;
+                            glm::vec3& editRotation = localTransform ? localTransform->rotation : worldTransform.rotation;
+                            glm::vec3& editScale = localTransform ? localTransform->scale : worldTransform.scale;
+                            glm::quat& editOrientation = localTransform ? localTransform->orientation : worldTransform.orientation;
                             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                const bool pCh = drawEditorVec3Control("Location", t.position, 0.0f);
-                                const bool rCh = drawEditorVec3Control("Rotation", t.rotation, 0.0f);
-                                const bool sCh = drawEditorVec3Control("Scale", t.scale, 1.0f);
-                                if (rCh) t.orientation = glm::quat(glm::radians(t.rotation));
-                                if ((pCh || rCh || sCh) && engine) engine->syncEntityTransformPhysics(selectedEntity);
+                                const bool pCh = drawEditorVec3Control("Location", editPosition, 0.0f);
+                                const bool rCh = drawEditorVec3Control("Rotation", editRotation, 0.0f);
+                                const bool sCh = drawEditorVec3Control("Scale", editScale, 1.0f);
+                                if (rCh) editOrientation = glm::quat(glm::radians(editRotation));
+                                if (pCh || rCh || sCh) {
+                                    registry.updateWorldTransforms();
+                                    if (engine) engine->syncEntityTransformPhysics(selectedEntity);
+                                }
 
                                 ImGui::Spacing();
                                 if (ImGui::Button(editorText("ui.reset_position_0_0_0", " Reset Position (0, 0, 0) "))) {
-                                    t.position = glm::vec3(0.0f);
+                                    editPosition = glm::vec3(0.0f);
+                                    registry.updateWorldTransforms();
                                     if (engine) engine->syncEntityTransformPhysics(selectedEntity);
                                 }
                                 ImGui::SameLine();
                                 if (ImGui::Button(editorText("ui.focus_camera_f", " Focus Camera [F] "))) {
-                                    if (engine) engine->setCamera(t.position - cameraForward * 8.0f, cameraYaw, cameraPitch, cameraFov);
+                                    if (engine) engine->setCamera(worldTransform.position - cameraForward * 8.0f, cameraYaw, cameraPitch, cameraFov);
                                 }
                             }
                         }

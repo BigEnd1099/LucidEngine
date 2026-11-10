@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <functional>
+#include <cctype>
 
 #ifdef USE_GLFW
 namespace engine::renderer {
@@ -140,134 +142,180 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
         auto view = registry.get().view<ecs::TransformComponent>();
         int visibleEntityCount = 0;
-        for (auto entity : view) {
-            const auto& entityRegistry = registry.get();
-            switch (s_outlinerCategory) {
-            case 1:
-                if (!entityRegistry.all_of<ecs::MeshComponent>(entity)) continue;
-                break;
-            case 2:
-                if (!entityRegistry.all_of<ecs::LightComponent>(entity)) continue;
-                break;
-            case 3:
-                if (!entityRegistry.any_of<ecs::RigidBodyComponent, ecs::VelocityComponent,
-                                           ecs::ChemistryComponent, ecs::DestructibleComponent>(entity)) continue;
-                break;
-            case 4:
-                if (!entityRegistry.any_of<ecs::CharacterMovementComponent, ecs::CameraBoomComponent,
-                                           ecs::NavAgentComponent, ecs::IKFootPlacementComponent>(entity)) continue;
-                break;
-            default:
-                break;
-            }
-
+        auto entityLabel = [&](entt::entity entity) {
             std::string label = "Entity_" + std::to_string(static_cast<uint32_t>(entity));
-            if (registry.get().all_of<ecs::TagComponent>(entity)) {
+            if (registry.get().all_of<ecs::TagComponent>(entity))
                 label = registry.get().get<ecs::TagComponent>(entity).name;
+            return label;
+        };
+        auto categoryMatches = [&](entt::entity entity) {
+            const auto& r = registry.get();
+            switch (s_outlinerCategory) {
+            case 1: return r.all_of<ecs::MeshComponent>(entity);
+            case 2: return r.all_of<ecs::LightComponent>(entity);
+            case 3: return r.any_of<ecs::RigidBodyComponent, ecs::VelocityComponent,
+                                    ecs::ChemistryComponent, ecs::DestructibleComponent>(entity);
+            case 4: return r.any_of<ecs::CharacterMovementComponent, ecs::CameraBoomComponent,
+                                    ecs::NavAgentComponent, ecs::IKFootPlacementComponent>(entity);
+            default: return true;
             }
-            if (outlinerFilter[0] != '\0') {
-                std::string f = outlinerFilter, l = label;
-                const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
-                std::transform(f.begin(), f.end(), f.begin(), toLower);
-                std::transform(l.begin(), l.end(), l.begin(), toLower);
-                if (l.find(f) == std::string::npos) continue;
-            }
-            ++visibleEntityCount;
-            const bool isSelected = (selectedEntity == entity);
-            ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
-
-            // 1. Blender-style Eye (Visibility) Toggle
-            const bool hasMesh = registry.get().all_of<ecs::MeshComponent>(entity);
-            const bool isVis = hasMesh ? registry.get().get<ecs::MeshComponent>(entity).visible : true;
-            ImVec2 eyeP = ImGui::GetCursorScreenPos();
-            const float eyeSz = 16.0f * uiScale;
-            char eyeBtnId[32];
-            std::snprintf(eyeBtnId, sizeof(eyeBtnId), "##Eye_%u", static_cast<uint32_t>(entity));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 0.4f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.15f, 0.25f, 0.6f));
-            ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-            if (ImGui::Button(eyeBtnId, ImVec2(eyeSz, eyeSz))) {
-                if (hasMesh) {
-                    auto& mc = registry.get().get<ecs::MeshComponent>(entity);
-                    mc.visible = !mc.visible;
+        };
+        auto textMatches = [&](entt::entity entity) {
+            if (outlinerFilter[0] == '\0') return true;
+            std::string filter = outlinerFilter;
+            std::string label = entityLabel(entity);
+            const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+            std::transform(filter.begin(), filter.end(), filter.begin(), toLower);
+            std::transform(label.begin(), label.end(), label.begin(), toLower);
+            return label.find(filter) != std::string::npos;
+        };
+        std::function<bool(entt::entity, int)> hasVisibleDescendant =
+            [&](entt::entity entity, int depth) -> bool {
+                if (depth > 256 || !registry.get().valid(entity) ||
+                    !registry.get().all_of<ecs::HierarchyComponent>(entity)) return false;
+                const auto children = registry.get().get<ecs::HierarchyComponent>(entity).children;
+                for (entt::entity child : children) {
+                    if (!registry.get().valid(child) ||
+                        !registry.get().all_of<ecs::TransformComponent>(child)) continue;
+                    if ((categoryMatches(child) && textMatches(child)) ||
+                        hasVisibleDescendant(child, depth + 1)) return true;
                 }
-            }
-            ImGui::PopStyleColor(3);
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(isVis ? editorText("ui.visible_in_the_3d_viewport_click_to_hide", "Visible in the 3D viewport (click to hide)") : editorText("ui.hidden_in_the_3d_viewport_click_to_show", "Hidden in the 3D viewport (click to show)"));
-            }
-            const ImU32 eyeCol = isVis ? IM_COL32(200, 215, 235, 240) : IM_COL32(110, 115, 125, 150);
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(eyeP.x + eyeSz * 0.5f, eyeP.y + eyeSz * 0.5f), 4.2f * uiScale, isVis ? VectorIconType::Eye : VectorIconType::EyeClosed, eyeCol);
-            ImGui::SameLine(0.0f, 3.0f * uiScale);
+                return false;
+            };
 
-            // 2. Entity Type Vector Icon
-            VectorIconType typeIcon = VectorIconType::Shapes;
-            ImU32 iconCol = IM_COL32(160, 175, 195, 230);
-            if (registry.get().all_of<ecs::LightComponent>(entity)) {
-                typeIcon = VectorIconType::Light;
-                iconCol = IM_COL32(251, 191, 36, 255);
-            } else if (registry.get().all_of<ecs::ParticleEmitterComponent>(entity)) {
-                typeIcon = VectorIconType::Sparkles;
-                iconCol = IM_COL32(236, 72, 153, 255);
-            } else if (registry.get().all_of<ecs::CharacterMovementComponent>(entity)) {
-                typeIcon = VectorIconType::Character;
-                iconCol = IM_COL32(34, 197, 94, 255);
-            } else if (hasMesh) {
-                typeIcon = VectorIconType::Cube;
-                iconCol = IM_COL32(56, 189, 248, 255);
-            }
-            ImVec2 icPos = ImGui::GetCursorScreenPos();
-            drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(icPos.x + 8.0f * uiScale, icPos.y + 9.0f * uiScale), 4.5f * uiScale, typeIcon, iconCol);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * uiScale);
+        std::function<void(entt::entity, int)> drawEntityNode =
+            [&](entt::entity entity, int depth) {
+                if (depth > 256 || !registry.get().valid(entity) ||
+                    !registry.get().all_of<ecs::TransformComponent>(entity)) return;
 
-            // 3. Entity Row Selectable
-            if (ImGui::Selectable(label.c_str(), isSelected)) {
-                selectedEntity = entity;
-                if (engine) engine->setSelectedEntity(selectedEntity);
-            }
+                const bool ownMatch = categoryMatches(entity) && textMatches(entity);
+                const bool childMatch = hasVisibleDescendant(entity, depth);
+                if (!ownMatch && !childMatch) return;
 
-            // 4. Context Menu
-            if (ImGui::BeginPopupContextItem("EntityRowCtxMenu")) {
-                selectedEntity = entity;
-                if (engine) engine->setSelectedEntity(selectedEntity);
-                ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "Encja #%u: %s", static_cast<uint32_t>(entity), label.c_str());
-                ImGui::Separator();
-                if (ImGui::MenuItem("Skup kamere [F]")) {
-                    if (registry.get().all_of<ecs::TransformComponent>(entity)) {
-                        const auto& tc = registry.get().get<ecs::TransformComponent>(entity);
-                        if (engine) engine->setCamera(tc.position - cameraForward * std::max(5.0f, glm::length(tc.scale) * 3.5f), cameraYaw, cameraPitch, cameraFov);
-                    }
-                }
+                const bool hasChildren = registry.get().all_of<ecs::HierarchyComponent>(entity) &&
+                    !registry.get().get<ecs::HierarchyComponent>(entity).children.empty();
+                const bool hasMesh = registry.get().all_of<ecs::MeshComponent>(entity);
+                const bool isVisible = hasMesh ? registry.get().get<ecs::MeshComponent>(entity).visible : true;
+                const bool isSelected = selectedEntity == entity;
+                const std::string label = entityLabel(entity);
+                ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
+
+                const ImVec2 eyePos = ImGui::GetCursorScreenPos();
+                const float eyeSize = 16.0f * uiScale;
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 0.4f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.15f, 0.25f, 0.6f));
                 ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-                if (ImGui::MenuItem(editorText("ui.reset_position_context", "Reset Position (0, 0, 0)"))) {
-                    if (registry.get().all_of<ecs::TransformComponent>(entity)) {
-                        auto& tc = registry.get().get<ecs::TransformComponent>(entity);
-                        tc.position = glm::vec3(0.0f);
+                if (ImGui::Button("##Visibility", ImVec2(eyeSize, eyeSize)) && hasMesh)
+                    registry.get().get<ecs::MeshComponent>(entity).visible = !isVisible;
+                ImGui::EndDisabled();
+                ImGui::PopStyleColor(3);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip(isVisible ? "Visible in viewport (click to hide)" : "Hidden in viewport (click to show)");
+                drawEditorVectorIcon(ImGui::GetWindowDrawList(),
+                    ImVec2(eyePos.x + eyeSize * 0.5f, eyePos.y + eyeSize * 0.5f),
+                    4.2f * uiScale, isVisible ? VectorIconType::Eye : VectorIconType::EyeClosed,
+                    isVisible ? IM_COL32(200, 215, 235, 240) : IM_COL32(110, 115, 125, 150));
+                ImGui::SameLine(0.0f, 3.0f * uiScale);
+
+                VectorIconType typeIcon = VectorIconType::Shapes;
+                ImU32 iconColor = IM_COL32(160, 175, 195, 230);
+                if (registry.get().all_of<ecs::LightComponent>(entity)) {
+                    typeIcon = VectorIconType::Light; iconColor = IM_COL32(251, 191, 36, 255);
+                } else if (registry.get().all_of<ecs::ParticleEmitterComponent>(entity)) {
+                    typeIcon = VectorIconType::Sparkles; iconColor = IM_COL32(236, 72, 153, 255);
+                } else if (registry.get().all_of<ecs::CharacterMovementComponent>(entity)) {
+                    typeIcon = VectorIconType::Character; iconColor = IM_COL32(34, 197, 94, 255);
+                } else if (hasMesh) {
+                    typeIcon = VectorIconType::Cube; iconColor = IM_COL32(56, 189, 248, 255);
+                }
+                const ImVec2 iconPos = ImGui::GetCursorScreenPos();
+                drawEditorVectorIcon(ImGui::GetWindowDrawList(),
+                    ImVec2(iconPos.x + 8.0f * uiScale, iconPos.y + 9.0f * uiScale),
+                    4.5f * uiScale, typeIcon, iconColor);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * uiScale);
+
+                ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanAvailWidth |
+                    ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
+                if (isSelected) treeFlags |= ImGuiTreeNodeFlags_Selected;
+                if (!hasChildren) treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (childMatch && outlinerFilter[0] != '\0') ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+                const bool opened = ImGui::TreeNodeEx(label.c_str(), treeFlags);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+                    selectedEntity = entity;
+                    if (engine) engine->setSelectedEntity(entity);
+                }
+
+                if (ImGui::BeginDragDropSource()) {
+                    ImGui::SetDragDropPayload("LUCID_ENTITY_HIERARCHY", &entity, sizeof(entity));
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LUCID_ENTITY_HIERARCHY")) {
+                        if (payload->Data && payload->DataSize == sizeof(entt::entity) &&
+                            !(engine && engine->isSimulationSessionActive())) {
+                            const entt::entity draggedEntity = *static_cast<const entt::entity*>(payload->Data);
+                            if (registry.reparentEntity(draggedEntity, entity))
+                                registry.updateWorldTransforms();
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                if (ImGui::BeginPopupContextItem("EntityRowCtxMenu")) {
+                    selectedEntity = entity;
+                    if (engine) engine->setSelectedEntity(entity);
+                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f),
+                        "Entity #%u: %s", static_cast<uint32_t>(entity), label.c_str());
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Focus camera [F]")) {
+                        const auto& transform = registry.get().get<ecs::TransformComponent>(entity);
+                        if (engine) engine->setCamera(transform.position -
+                            cameraForward * std::max(5.0f, glm::length(transform.scale) * 3.5f),
+                            cameraYaw, cameraPitch, cameraFov);
+                    }
+                    ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
+                    if (ImGui::MenuItem("Reset Position")) {
+                        if (auto* local = registry.get().try_get<ecs::LocalTransformComponent>(entity))
+                            local->position = glm::vec3(0.0f);
+                        else
+                            registry.get().get<ecs::TransformComponent>(entity).position = glm::vec3(0.0f);
+                        registry.updateWorldTransforms();
                         if (engine) engine->syncEntityTransformPhysics(entity);
                     }
-                }
-                if (ImGui::MenuItem(editorText("ui.duplicate_entity_context", "Duplicate Object [Ctrl+D]"))) {
-                    selectedEntity = duplicateEntity(entity);
-                    if (engine) engine->setSelectedEntity(selectedEntity);
-                }
-                ImGui::Separator();
-                ImGui::EndDisabled();
-                ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-                if (ImGui::MenuItem(editorText("ui.delete_entity_context", "Delete Object [Delete]"))) {
-                    if (engine) engine->destroyEntity(static_cast<uint32_t>(entity)); else registry.get().destroy(entity);
-                    if (selectedEntity == entity) selectedEntity = entt::null;
-                    if (engine) engine->setSelectedEntity(entt::null);
+                    if (ImGui::MenuItem("Duplicate Object [Ctrl+D]")) {
+                        selectedEntity = duplicateEntity(entity);
+                        if (engine) engine->setSelectedEntity(selectedEntity);
+                    }
+                    if (ImGui::MenuItem("Delete Object [Delete]")) {
+                        if (engine) engine->destroyEntity(static_cast<uint32_t>(entity));
+                        else registry.destroyEntity(entity);
+                        if (selectedEntity == entity) selectedEntity = entt::null;
+                        if (engine) engine->setSelectedEntity(entt::null);
+                        ImGui::EndDisabled();
+                        ImGui::EndPopup();
+                        ImGui::PopID();
+                        return;
+                    }
                     ImGui::EndDisabled();
                     ImGui::EndPopup();
-                    ImGui::PopID();
-                    break;
                 }
-                ImGui::EndDisabled();
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
+
+                if (hasChildren && opened) {
+                    const auto children = registry.get().get<ecs::HierarchyComponent>(entity).children;
+                    for (entt::entity child : children) drawEntityNode(child, depth + 1);
+                    ImGui::TreePop();
+                }
+                if (ownMatch) ++visibleEntityCount;
+                ImGui::PopID();
+            };
+
+        for (auto entity : view) {
+            const bool hasParent = registry.get().all_of<ecs::HierarchyComponent>(entity) &&
+                registry.get().get<ecs::HierarchyComponent>(entity).parent != entt::null &&
+                registry.get().valid(registry.get().get<ecs::HierarchyComponent>(entity).parent);
+            if (!hasParent) drawEntityNode(entity, 0);
         }
         if (visibleEntityCount == 0) {
             ImGui::Spacing();

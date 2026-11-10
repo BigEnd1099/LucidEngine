@@ -10,6 +10,7 @@
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include "core/Logger.hpp"
 #include "utils/FileIO.hpp"
 
@@ -40,6 +41,7 @@ namespace engine::core {
 
     uint32_t AssetManager::loadGLTF(const std::string& path) {
         m_lastImportedInstances.clear();
+        m_lastImportedNodes.clear();
         try {
             fastgltf::Parser parser;
             auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
@@ -571,31 +573,10 @@ namespace engine::core {
             }
             // Instantiate only meshes referenced by nodes in the active scene when available.
             // Node TRS is preserved; assets without nodes fall back to one identity instance per primitive.
-            auto appendNodeInstances = [&](const fastgltf::Node& node, const glm::mat4& worldTransform) {
-                if (!node.meshIndex.has_value() || node.meshIndex.value() >= importedMeshIds.size()) return;
-                glm::vec3 worldPosition(worldTransform[3]);
-                glm::vec3 worldScale(
-                    glm::length(glm::vec3(worldTransform[0])),
-                    glm::length(glm::vec3(worldTransform[1])),
-                    glm::length(glm::vec3(worldTransform[2])));
-                glm::mat3 rotationMatrix(worldTransform);
-                for (int axis = 0; axis < 3; ++axis) {
-                    const float axisScale = worldScale[axis];
-                    if (axisScale > 1e-6f) rotationMatrix[axis] /= axisScale;
-                }
-                glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
-                for (uint32_t id : importedMeshIds[node.meshIndex.value()]) {
-                    ImportedMeshInstance instance;
-                    instance.meshId = id;
-                    instance.name = node.name.empty() ? std::string("Mesh") : std::string(node.name);
-                    instance.translation = worldPosition;
-                    instance.rotation = worldRotation;
-                    instance.scale = worldScale;
-                    m_lastImportedInstances.push_back(std::move(instance));
-                }
-            };
-            std::function<void(size_t, const glm::mat4&)> visitNode =
-                [&](size_t nodeIndex, const glm::mat4& parentTransform) {
+            // Preserve the authored glTF node tree. Each glTF node becomes an
+            // ImportedSceneNode, including transform-only grouping nodes.
+            std::function<void(size_t, int64_t, const glm::mat4&)> visitNode =
+                [&](size_t nodeIndex, int64_t parentNodeIndex, const glm::mat4& parentTransform) {
                     if (nodeIndex >= asset.nodes.size()) return;
                     const auto& node = asset.nodes[nodeIndex];
                     glm::mat4 local(1.0f);
@@ -617,32 +598,80 @@ namespace engine::core {
                                 glm::mat4_cast(rotation) *
                                 glm::scale(glm::mat4(1.0f), scale);
                     } else if (const auto* matrix = std::get_if<fastgltf::math::fmat4x4>(&node.transform)) {
-                        for (int column = 0; column < 4; ++column) {
-                            for (int row = 0; row < 4; ++row) {
+                        for (int column = 0; column < 4; ++column)
+                            for (int row = 0; row < 4; ++row)
                                 local[column][row] = static_cast<float>((*matrix)[column][row]);
-                            }
+                    }
+
+                    ImportedSceneNode importedNode;
+                    importedNode.nodeIndex = nodeIndex;
+                    const size_t importedNodePosition = m_lastImportedNodes.size();
+                    importedNode.parentNodeIndex = parentNodeIndex;
+                    importedNode.name = node.name.empty() ? ("Node_" + std::to_string(nodeIndex)) : std::string(node.name);
+                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size())
+                        importedNode.meshIds = importedMeshIds[node.meshIndex.value()];
+
+                    glm::vec3 skew(0.0f), localTranslation(0.0f), localScale(1.0f);
+                    glm::vec4 perspective(0.0f);
+                    glm::quat localRotation(1.0f, 0.0f, 0.0f, 0.0f);
+                    if (glm::decompose(local, localScale, localRotation, localTranslation, skew, perspective)) {
+                        importedNode.translation = localTranslation;
+                        importedNode.rotation = glm::normalize(localRotation);
+                        importedNode.scale = localScale;
+                    }
+                    m_lastImportedNodes.push_back(std::move(importedNode));
+
+                    const glm::mat4 world = parentTransform * local;
+                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
+                        glm::vec3 worldPosition(world[3]);
+                        glm::vec3 worldScale(
+                            glm::length(glm::vec3(world[0])),
+                            glm::length(glm::vec3(world[1])),
+                            glm::length(glm::vec3(world[2])));
+                        glm::mat3 rotationMatrix(world);
+                        for (int axis = 0; axis < 3; ++axis)
+                            if (worldScale[axis] > 1e-6f) rotationMatrix[axis] /= worldScale[axis];
+                        const glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
+                        for (uint32_t id : importedNode.meshIds) {
+                            ImportedMeshInstance instance;
+                            instance.meshId = id;
+                            instance.name = importedNode.name;
+                            instance.translation = worldPosition;
+                            instance.rotation = worldRotation;
+                            instance.scale = worldScale;
+                            m_lastImportedInstances.push_back(std::move(instance));
                         }
                     }
-                    const glm::mat4 world = parentTransform * local;
-                    appendNodeInstances(node, world);
-                    for (size_t childIndex : node.children) visitNode(childIndex, world);
+                    for (size_t childIndex : node.children)
+                        visitNode(childIndex, static_cast<int64_t>(importedNodePosition), world);
                 };
+
             if (!asset.scenes.empty()) {
                 size_t sceneIndex = asset.defaultScene.value_or(0);
                 if (sceneIndex >= asset.scenes.size()) sceneIndex = 0;
-                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) visitNode(nodeIndex, glm::mat4(1.0f));
+                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices)
+                    visitNode(nodeIndex, -1, glm::mat4(1.0f));
             } else {
-                // Some exporters omit scene declarations; visit only hierarchy roots.
                 std::vector<bool> isChild(asset.nodes.size(), false);
-                for (const auto& node : asset.nodes) {
-                    for (size_t childIndex : node.children) if (childIndex < isChild.size()) isChild[childIndex] = true;
-                }
-                for (size_t i = 0; i < asset.nodes.size(); ++i) if (!isChild[i]) visitNode(i, glm::mat4(1.0f));
+                for (const auto& node : asset.nodes)
+                    for (size_t childIndex : node.children)
+                        if (childIndex < isChild.size()) isChild[childIndex] = true;
+                for (size_t i = 0; i < asset.nodes.size(); ++i)
+                    if (!isChild[i]) visitNode(i, -1, glm::mat4(1.0f));
             }
-            if (m_lastImportedInstances.empty()) {
-                for (const auto& meshIds : importedMeshIds) for (uint32_t id : meshIds) {
-                    ImportedMeshInstance instance; instance.meshId = id; instance.name = "Mesh";
-                    m_lastImportedInstances.push_back(std::move(instance));
+            if (m_lastImportedNodes.empty()) {
+                for (size_t meshIndex = 0; meshIndex < importedMeshIds.size(); ++meshIndex) {
+                    ImportedSceneNode node;
+                    node.nodeIndex = meshIndex;
+                    node.name = "Mesh_" + std::to_string(meshIndex);
+                    node.meshIds = importedMeshIds[meshIndex];
+                    m_lastImportedNodes.push_back(std::move(node));
+                    for (uint32_t id : importedMeshIds[meshIndex]) {
+                        ImportedMeshInstance instance;
+                        instance.meshId = id;
+                        instance.name = node.name;
+                        m_lastImportedInstances.push_back(std::move(instance));
+                    }
                 }
             }
             if (rootMeshId == 0) {
