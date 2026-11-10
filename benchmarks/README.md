@@ -51,6 +51,8 @@ Every numeric profiler metric is copied into each raw sample dynamically, so new
 
 The editor-quality profile reproduces the RT values visible in the supplied capture; it does not claim to reproduce unreported editor settings. GTAO/SSGI values are recorded from the running renderer and are not silently inferred.
 
+The shader debug modes include history-length and variance visualizations. The benchmark deliberately does not read back per-pixel history-age distributions or rejection counts in its normal performance pass: that requires an additional GPU readback path and would perturb the timings. Those measurements should be added as an explicitly opt-in diagnostic capture, separate from clean performance numbers.
+
 ## Output
 
 Every run creates `benchmark-results/run-<timestamp>/` containing:
