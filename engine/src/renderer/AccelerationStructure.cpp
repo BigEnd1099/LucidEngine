@@ -164,6 +164,7 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, con
     record.dynamicGeometry = dynamicGeometry;
     if (!update) m_blas.emplace(blasId, std::move(record));
     else existing->second = std::move(record);
+    if (dynamicGeometry) m_blasChangedSinceTlas = true;
     return true;
 }
 
@@ -210,7 +211,8 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
 
     // Jeśli instancje i ich transformacje nie uległy zmianie i TLAS został już wybudowany,
     // całkowicie pomijamy pracę na GPU i aktualizację deskryptorów.
-    if (m_tlasBuiltOnce && m_tlas.handle != VK_NULL_HANDLE && currentHash == m_lastInstanceHash) {
+    if (m_tlasBuiltOnce && m_tlas.handle != VK_NULL_HANDLE &&
+        currentHash == m_lastInstanceHash && !m_blasChangedSinceTlas) {
         return true;
     }
 
@@ -347,6 +349,7 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
     m_lastInstanceHash = currentHash;
     m_lastInstanceCount = count;
     m_tlasBuiltOnce = true;
+    m_blasChangedSinceTlas = false;
 
     if (outHandleChanged) *outHandleChanged = handleChanged;
     return true;
