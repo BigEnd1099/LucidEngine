@@ -6,6 +6,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -154,7 +155,27 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
                         ImGui::Separator();
 
-                        if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
+                        static char inspectorFilterBuffer[96] = "";
+                        ImGui::SetNextItemWidth(-1.0f);
+                        ImGui::InputTextWithHint("##InspectorComponentFilter",
+                            editorText("details.search_components", "Search components..."),
+                            inspectorFilterBuffer, sizeof(inspectorFilterBuffer));
+                        std::string inspectorFilter = inspectorFilterBuffer;
+                        std::transform(inspectorFilter.begin(), inspectorFilter.end(), inspectorFilter.begin(),
+                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                        auto componentMatches = [&](const char* english, const char* polish) {
+                            if (inspectorFilter.empty()) return true;
+                            std::string a = english ? english : "";
+                            std::string b = polish ? polish : "";
+                            std::transform(a.begin(), a.end(), a.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            std::transform(b.begin(), b.end(), b.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            return a.find(inspectorFilter) != std::string::npos || b.find(inspectorFilter) != std::string::npos;
+                        };
+                        bool inspectorHasVisibleComponent = false;
+
+                        if (registry.get().all_of<ecs::TransformComponent>(selectedEntity) &&
+                            componentMatches("Transform", "Transformacja")) {
+                            inspectorHasVisibleComponent = true;
                             auto& t = registry.get().get<ecs::TransformComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const bool pCh = drawEditorVec3Control("Location", t.position, 0.0f);
@@ -175,7 +196,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::LightComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::LightComponent>(selectedEntity) && componentMatches("Light", "Swiatlo")) {
+                            inspectorHasVisibleComponent = true;
                             auto& lc = registry.get().get<ecs::LightComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Light Component (PBR)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* lightTypes[] = { "point", "sun", "spot", "area" };
@@ -287,7 +309,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity) && componentMatches("Mesh", "Siatka")) {
+                            inspectorHasVisibleComponent = true;
                             auto& mc = registry.get().get<ecs::MeshComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Static Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* meshes[] = { "None", "Plane (Ground)", "Cube (1x1x1)", "Sphere (R=0.5)", "Cylinder", "Capsule" };
@@ -299,7 +322,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
 
                         // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL)
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity) &&
+                            componentMatches("Material", "Material PBR")) {
+                            inspectorHasVisibleComponent = true;
                             if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 if (!registry.get().all_of<ecs::MaterialComponent>(selectedEntity)) {
                                     if (ImGui::Button(editorText("details.add_custom_pbr", "+ Add Custom PBR Material"))) {
@@ -320,7 +345,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity) && componentMatches("Physics", "Fizyka")) {
+                            inspectorHasVisibleComponent = true;
                             auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Jolt Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f);
@@ -330,7 +356,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity) && componentMatches("Particle", "Czasteczki")) {
+                            inspectorHasVisibleComponent = true;
                             auto& pe = registry.get().get<ecs::ParticleEmitterComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Particle Emitter (HDR VFX)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* pTypes[] = { "fire", "sparks", "smoke", "portal", "explosion" };
@@ -347,7 +374,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity) && componentMatches("Character", "Postac")) {
+                            inspectorHasVisibleComponent = true;
                             auto& cm = registry.get().get<ecs::CharacterMovementComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Character Movement (Sterowanie)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 ImGui::DragFloat("Max Walk Speed (m/s)", &cm.maxWalkSpeed, 0.2f, 1.0f, 50.0f, "%.1f m/s");
@@ -358,7 +386,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity) && componentMatches("Camera", "Kamera")) {
+                            inspectorHasVisibleComponent = true;
                             auto& cb = registry.get().get<ecs::CameraBoomComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Camera Boom (Ramie Kamery)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 if (ImGui::Checkbox(editorText("details.first_person_view", "First Person View (FPP)"), &cb.isFirstPerson)) {
@@ -388,6 +417,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     }
                                 }
                             }
+                        }
+                        if (!inspectorFilter.empty() && !inspectorHasVisibleComponent) {
+                            ImGui::TextDisabled("%s", editorText("details.no_component_matches", "No components match this filter."));
                         }
                     }
                 } else {
