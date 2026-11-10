@@ -318,7 +318,9 @@
     "ui.shortcut_duplicate": "Duplikuj zaznaczony obiekt",
     "ui.shortcuts_note": "Skróty viewportu są blokowane podczas edycji tekstu oraz w trakcie symulacji, gdy ma to zastosowanie.",
     "ui.refresh_assets": "Odśwież",
-    "details.simulation_readonly": "Inspektor jest tylko do odczytu podczas symulacji.",
+    "details.simulation_readonly": "Inspektor jest tylko do odczytu podczas symulacji.",,
+    "details.search_components": "Szukaj komponentów...",
+    "details.no_component_matches": "Brak komponentów pasujących do filtra."
     "script.discard_message": "Ten skrypt zawiera niezastosowane zmiany. Odrzucić je i zamknąć Script Studio?",
     "script.discard": "Odrzuć",
     "script.keep_editing": "Kontynuuj edycję",
