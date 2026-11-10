@@ -464,6 +464,9 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiCheckerboard", params.giCheckerboard ? 1.0 : 0.0);
         profiler.recordMetric("rtGiHistoryValid",
             (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionHistoryValid",
+            params.reflectionsEnabled && m_historyValid ? 1.0 : 0.0);
+        profiler.recordMetric("rtHistoryInvalidatedByLightChange", params.lightChanged ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
         profiler.recordMetric("rtReflectionBounces", params.reflectionBounces);
         profiler.recordMetric("rtReflectionInfiniteBounces", params.reflectionInfiniteBounces ? 1.0 : 0.0);
