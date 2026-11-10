@@ -12,7 +12,6 @@
 
 - Frames-in-flight ring (2–3 slots) for the windowed renderer.
 - Per-frame copies of offscreen attachments, descriptor sets, command buffers, semaphores, scene upload buffers, timestamp query pools, and RT denoiser resources.
-- GPU counters for temporal rejection reasons (history disabled, reprojection out of bounds, sky, depth mismatch, normal mismatch, accepted history, checkerboard reuse, and spatial fallback).
 
 ## Requirements before enabling multiple frames in flight
 
@@ -37,3 +36,9 @@ The renderer still has one shared command buffer, shared render targets, shared 
 ## Validation
 
 The headless fence change requires a Vulkan build and runtime validation in both headless and windowed configurations. The reflection-history alpha change requires shader compilation and a scene test with reflections enabled, including checkerboard on/off and camera/light history invalidation. No GPU runtime result is claimed by this document.
+
+## Performance Profiler: RT temporal diagnostics
+
+The in-editor Performance Profiler now samples all 48 RT diagnostic metrics into the same rolling one-second window as CPU/GPU timings. It displays GI and reflection history acceptance, checkerboard reuse, depth/normal rejection, and two 16-bin history-age histograms. The **Copy 1-second average report** export includes every counter as an average count per rendered frame, the derived history acceptance percentages, and the exact values for all 32 histogram bins. The histogram values are not percentages; compare their distribution and totals against the corresponding pixel counters.
+
+The profiler only reads the metrics already published by RtDenoiser; it does not add GPU work, alter RT settings, or change temporal accumulation. A zero value can mean the corresponding effect is disabled or that no diagnostic events were recorded in the capture window.
