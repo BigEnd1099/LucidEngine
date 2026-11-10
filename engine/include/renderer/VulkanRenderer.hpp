@@ -29,6 +29,7 @@ namespace engine::renderer {
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
         ~VulkanRenderer();
 
+        void setBenchmarkMode(bool enabled) { m_benchmarkMode = enabled; }
         void render(ecs::Registry& registry, core::AssetManager* assetManager = nullptr, glm::mat4 viewMatrix = glm::mat4(1.0f), core::Engine* engine = nullptr);
         std::string captureFrameBase64();
         void submitBufferBarrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size);
@@ -224,6 +225,7 @@ namespace engine::renderer {
         bool areSoftShadowsEnabled() const { return m_softShadows; }
         int m_antiAliasingMode{2};
         bool m_standaloneGameMode{false};
+        bool m_benchmarkMode{false};
         bool m_showPerformanceProfiler{false};
         uint32_t m_frameCounter{0};
 
