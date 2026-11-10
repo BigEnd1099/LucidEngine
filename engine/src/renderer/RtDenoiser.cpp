@@ -540,7 +540,7 @@ namespace engine::renderer {
             // Keep all six timestamp boundaries valid while reporting zero GI/AO work.
             if (m_timestampsSupported && m_queryPool) {
                 for (uint32_t query = 0; query <= 4; ++query) {
-                    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, m_queryPool, query);
+                    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, query);
                 }
             }
             m_giHistoryValid = false;
