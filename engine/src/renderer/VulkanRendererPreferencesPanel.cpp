@@ -19,12 +19,19 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                 ImGui::SetNextWindowSizeConstraints(
                     ImVec2(std::min(360.0f * state.uiScale, screenW), std::min(240.0f * state.uiScale, screenH)),
                     ImVec2(screenW, screenH));
+                static char scriptBuf[16384] = "";
+                static bool s_scriptInit = false;
+                static bool s_scriptDirty = false;
+                static bool s_scriptLastRunOk = true;
+                bool scriptStudioOpen = state.showScriptStudio;
                 const std::string scriptStudioTitle = std::string(editorText("script.studio_title", "Blueprints / QuickJS Script Studio")) + "###QuickJSScriptStudio";
-                if (ImGui::Begin(scriptStudioTitle.c_str(), &state.showScriptStudio)) {
-                    static char scriptBuf[16384] = "";
-                    static bool s_scriptInit = false;
-                    static bool s_scriptDirty = false;
-                    static bool s_scriptLastRunOk = true;
+                const bool scriptStudioVisible = ImGui::Begin(scriptStudioTitle.c_str(), &scriptStudioOpen);
+                if (!scriptStudioOpen && s_scriptDirty) {
+                    scriptStudioOpen = true;
+                    ImGui::OpenPopup("DiscardScriptChanges");
+                }
+                state.showScriptStudio = scriptStudioOpen;
+                if (scriptStudioVisible) {
                     if (engine && !s_scriptInit) {
                         s_scriptInit = true;
                         const std::string code = engine->getCurrentScript();
@@ -79,6 +86,20 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         s_scriptDirty = true;
                         s_scriptLastRunOk = true;
                     }
+                }
+                if (ImGui::BeginPopupModal("DiscardScriptChanges", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::TextUnformatted(editorText("script.discard_message", "This script has unapplied changes. Discard them and close Script Studio?"));
+                    ImGui::Separator();
+                    if (ImGui::Button(editorText("script.discard", "Discard"), ImVec2(110.0f * state.uiScale, 0.0f))) {
+                        s_scriptDirty = false;
+                        state.showScriptStudio = false;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(editorText("script.keep_editing", "Keep Editing"), ImVec2(130.0f * state.uiScale, 0.0f))) {
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
                 }
                 ImGui::End();
             }
