@@ -240,14 +240,15 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             const float transportPos = screenW * 0.44f;
             if (ImGui::GetCursorPosX() < transportPos) ImGui::SameLine(transportPos);
             const bool isPaused = engine ? engine->isPaused() : true;
+            const bool simulationActive = engine && engine->isSimulationSessionActive();
 
             ImVec2 plPos = ImGui::GetCursorScreenPos();
             if (!isPaused) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.55f, 0.25f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                if (ImGui::Button("     PLAYING ", ImVec2(0, btnH)) && engine) {
-                    engine->playSimulation();
-                }
+                ImGui::BeginDisabled();
+                ImGui::Button("     PLAYING ", ImVec2(0, btnH));
+                ImGui::EndDisabled();
                 ImGui::PopStyleColor(2);
             } else {
                 if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) {
@@ -270,16 +271,20 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             ImGui::SameLine();
 
             ImVec2 paPos = ImGui::GetCursorScreenPos();
+            ImGui::BeginDisabled(!simulationActive || isPaused);
             if (ImGui::Button("     Pauza ", ImVec2(0, btnH)) && engine) engine->setPaused(true);
+            ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(paPos.x + 11.0f * state.uiScale, paPos.y + btnH * 0.5f), 4.8f * state.uiScale, VectorIconType::Pause, IM_COL32(251, 191, 36, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wstrzymaj symulacje fizyki");
             ImGui::SameLine();
 
             ImVec2 stPos = ImGui::GetCursorScreenPos();
+            ImGui::BeginDisabled(!simulationActive);
             if (ImGui::Button("     Stop ", ImVec2(0, btnH)) && engine) {
                 engine->stopSimulation();
                 engine->setCameraMode("editor");
             }
+            ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(stPos.x + 11.0f * state.uiScale, stPos.y + btnH * 0.5f), 4.8f * state.uiScale, VectorIconType::Stop, IM_COL32(239, 68, 68, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zatrzymaj i przywroc pozycje edycyjne obiektow");
             ImGui::SameLine();
