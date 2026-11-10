@@ -220,22 +220,27 @@ namespace engine::renderer {
             const float topToolbarH   = 36.0f * s_uiScale;
             const float topTotalH     = topTitleBarH + topLevelTabsH + topToolbarH;
 
-            const float minPanelW = 130.0f * s_uiScale;
-            const float maxPanelW = std::max(minPanelW, (screenW - 200.0f * s_uiScale) * 0.5f);
+            // Keep a usable viewport on narrow windows instead of forcing fixed minimum side panels.
+            const float minViewportW = std::min(180.0f * s_uiScale, screenW * 0.35f);
+            const float minPanelW = std::min(130.0f * s_uiScale,
+                std::max(24.0f * s_uiScale, (screenW - minViewportW) * 0.5f));
+            const float maxPanelW = std::max(minPanelW, (screenW - minViewportW) * 0.5f);
             s_userLeftPanelW  = std::clamp(s_userLeftPanelW, minPanelW, maxPanelW);
             s_userRightPanelW = std::clamp(s_userRightPanelW, minPanelW, maxPanelW);
 
             const float bottomStatusH = s_immersivePlay ? 0.0f : (24.0f * s_uiScale);
-            const float maxDrawerH    = std::max(80.0f * s_uiScale, screenH * 0.70f);
-            s_userDrawerH             = std::clamp(s_userDrawerH, 80.0f * s_uiScale, maxDrawerH);
+            const float minContentH = std::min(120.0f * s_uiScale, screenH * 0.25f);
+            const float maxDrawerH = std::max(0.0f,
+                std::min(screenH * 0.70f, screenH - topTotalH - bottomStatusH - minContentH));
+            s_userDrawerH = std::clamp(s_userDrawerH, std::min(80.0f * s_uiScale, maxDrawerH), maxDrawerH);
 
-            const float drawerH       = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? s_userDrawerH : 0.0f;
-            const float bottomTotalH  = bottomStatusH + drawerH;
+            const float drawerH = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? s_userDrawerH : 0.0f;
+            const float bottomTotalH = bottomStatusH + drawerH;
 
-            const float contentH        = std::max(120.0f, screenH - topTotalH - bottomTotalH);
-            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? s_userLeftPanelW : 0.0f;
-            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_userRightPanelW : 0.0f;
-            const float centerViewportW = std::max(100.0f, screenW - leftPanelW - rightPanelW);
+            const float contentH = std::max(minContentH, screenH - topTotalH - bottomTotalH);
+            const float leftPanelW = (!s_immersivePlay && s_showPlaceActors) ? s_userLeftPanelW : 0.0f;
+            const float rightPanelW = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_userRightPanelW : 0.0f;
+            const float centerViewportW = std::max(minViewportW, screenW - leftPanelW - rightPanelW);
 
             const float minOutlinerH = 60.0f * s_uiScale;
             const float maxOutlinerH = std::max(minOutlinerH, contentH - 60.0f * s_uiScale);
@@ -259,7 +264,7 @@ namespace engine::renderer {
                 ImGuiID myId = ImGui::GetID(id);
                 const bool isDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 
-                if (hovered && s_activeSplitterId == 0 && isDown) {
+                if (hovered && s_activeSplitterId == 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                     s_activeSplitterId = myId;
                 }
                 if (s_activeSplitterId == myId && !isDown) {
