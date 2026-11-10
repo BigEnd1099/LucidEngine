@@ -169,9 +169,8 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::End();
                 ImGui::PopStyleColor(2);
                 ImGui::PopStyleVar();
-            }
 
-            // 2. LEVEL TABS STRIP
+                // 2. LEVEL TABS STRIP
                 ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 2));
