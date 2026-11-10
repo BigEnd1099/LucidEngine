@@ -111,12 +111,12 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         ImGui::Separator();
 
                         static int s_themeChoice = 0;
-                        if (ImGui::Combo("Motyw i Styl Edytora (Theme)", &s_themeChoice, "Unreal Slate (Ciemny grafit)\0Blender Dark Pro (BUI Palette)\0\0")) {
+                        if (ImGui::Combo(editorText("Editor Theme", "Motyw edytora"), &s_themeChoice, "Unreal Slate (Ciemny grafit)\0Blender Dark Pro (BUI Palette)\0\0")) {
                             applyEditorUiTheme(s_themeChoice == 1 ? EditorThemePreset::BlenderDarkPro : EditorThemePreset::UnrealSlate);
                         }
 
                         float curUiScale = pref.uiScale;
-                        if (ImGui::SliderFloat("Skala Interfejsu (UI Scale)", &curUiScale, 0.70f, 2.0f, "%.2fx")) {
+                        if (ImGui::SliderFloat(editorText("Interface Scale", "Skala interfejsu"), &curUiScale, 0.70f, 2.0f, "%.2fx")) {
                             pref.uiScale = curUiScale;
                             m_uiScale = curUiScale;
                             engine->setUiScale(curUiScale);
@@ -130,22 +130,22 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), editorText("Default panel visibility:", "Domyślna widoczność paneli:"));
-                        if (ImGui::Checkbox("Place Actors (Aktorzy)", &pref.showPlaceActors)) state.showPlaceActors = pref.showPlaceActors;
-                        if (ImGui::Checkbox("Outliner (Drzewo sceny)", &pref.showOutliner)) state.showOutliner = pref.showOutliner;
-                        if (ImGui::Checkbox("Details (Wlasciwosci / Inspektor)", &pref.showDetails)) state.showDetails = pref.showDetails;
-                        if (ImGui::Checkbox("Content Drawer (Przegladarka assetow)", &pref.showContentDrawer)) state.showContentDrawer = pref.showContentDrawer;
-                        if (ImGui::Checkbox("Output Log (Konsola logow)", &pref.showOutputLog)) state.showOutputLog = pref.showOutputLog;
+                        if (ImGui::Checkbox(editorText("Place Actors", "Dodaj obiekty"), &pref.showPlaceActors)) state.showPlaceActors = pref.showPlaceActors;
+                        if (ImGui::Checkbox(editorText("Scene Outliner", "Hierarchia sceny"), &pref.showOutliner)) state.showOutliner = pref.showOutliner;
+                        if (ImGui::Checkbox(editorText("Details Inspector", "Właściwości / Inspektor"), &pref.showDetails)) state.showDetails = pref.showDetails;
+                        if (ImGui::Checkbox(editorText("Content Browser", "Przeglądarka zasobów"), &pref.showContentDrawer)) state.showContentDrawer = pref.showContentDrawer;
+                        if (ImGui::Checkbox(editorText("Output Log", "Dziennik"), &pref.showOutputLog)) state.showOutputLog = pref.showOutputLog;
                         if (ImGui::Checkbox("Blueprints / QuickJS Studio", &pref.showScriptStudio)) state.showScriptStudio = pref.showScriptStudio;
 
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), editorText("Panel dimensions:", "Wymiary paneli:"));
-                        if (ImGui::SliderFloat("Szerokosc panelu lewego", &state.userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = state.userLeftPanelW;
-                        if (ImGui::SliderFloat("Szerokosc panelu prawego", &state.userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = state.userRightPanelW;
-                        if (ImGui::SliderFloat("Wysokosc Outlinera", &state.userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = state.userOutlinerH;
-                        if (ImGui::SliderFloat("Wysokosc dolnej szuflady", &state.userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = state.userDrawerH;
+                        if (ImGui::SliderFloat(editorText("Left Panel Width", "Szerokość lewego panelu"), &state.userLeftPanelW, 140.0f, 600.0f, "%.0f px")) pref.userLeftPanelW = state.userLeftPanelW;
+                        if (ImGui::SliderFloat(editorText("Right Panel Width", "Szerokość prawego panelu"), &state.userRightPanelW, 180.0f, 700.0f, "%.0f px")) pref.userRightPanelW = state.userRightPanelW;
+                        if (ImGui::SliderFloat(editorText("Outliner Height", "Wysokość hierarchii"), &state.userOutlinerH, 100.0f, 600.0f, "%.0f px")) pref.userOutlinerH = state.userOutlinerH;
+                        if (ImGui::SliderFloat(editorText("Content Drawer Height", "Wysokość dolnego panelu"), &state.userDrawerH, 100.0f, 500.0f, "%.0f px")) pref.userDrawerH = state.userDrawerH;
 
                         ImGui::Spacing();
-                        if (ImGui::Button(" Zresetuj uklad paneli do domyslnego ")) {
+                        if (ImGui::Button(editorText(" Reset Panel Layout ", " Przywróć domyślny układ paneli "))) {
                             state.userLeftPanelW  = 260.0f * state.uiScale;
                             state.userRightPanelW = 310.0f * state.uiScale;
                             state.userOutlinerH   = 240.0f * state.uiScale;
@@ -163,22 +163,22 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         }
 
                         ImGui::Spacing();
-                        ImGui::Checkbox("Automatycznie zapisuj preferencje przy zmianach", &pref.autoSavePreferences);
+                        ImGui::Checkbox(editorText("Automatically save preferences when changed", "Automatycznie zapisuj preferencje przy zmianach"), &pref.autoSavePreferences);
 
                     } else if (s_prefCategory == 1) {
                         // Category 1: Camera & Viewport
                         ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), editorText("VIEWPORT CONTROLS & NAVIGATION", "STEROWANIE I NAWIGACJA W VIEWPORCIE"));
                         ImGui::Separator();
 
-                        if (ImGui::SliderFloat("Bazowa predkosc kamery (Fly Speed)", &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) state.camFlySpeed = pref.camFlySpeed;
-                        if (ImGui::SliderInt("Mnoznik biegu kamery (1..8)", &pref.cameraSpeed, 1, 8)) state.cameraSpeed = pref.cameraSpeed;
-                        ImGui::SliderFloat("Czulosz myszy (Mouse Sensitivity)", &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
-                        ImGui::Checkbox("Odwroc os pionowa (Invert Mouse Y)", &pref.invertY);
+                        if (ImGui::SliderFloat(editorText("Base Camera Speed (Fly Speed)", "Bazowa prędkość kamery"), &pref.camFlySpeed, 5.0f, 100.0f, "%.1f m/s")) state.camFlySpeed = pref.camFlySpeed;
+                        if (ImGui::SliderInt(editorText("Camera Speed Multiplier (1..8)", "Mnożnik prędkości kamery (1..8)"), &pref.cameraSpeed, 1, 8)) state.cameraSpeed = pref.cameraSpeed;
+                        ImGui::SliderFloat(editorText("Mouse Sensitivity", "Czułość myszy"), &pref.camMouseSensitivity, 0.02f, 1.0f, "%.2f");
+                        ImGui::Checkbox(editorText("Invert Mouse Y", "Odwróć oś pionową myszy"), &pref.invertY);
 
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Przyciaganie (Snapping) & Transformacja:");
-                        if (ImGui::Checkbox("Wlacz przyciaganie do siatki (Grid Snap)", &pref.snapEnabled)) state.snapEnabled = pref.snapEnabled;
-                        if (ImGui::InputFloat("Krok przyciagania (Snap Step)", &pref.snapStep, 0.1f, 1.0f, "%.2f")) state.snapStep = pref.snapStep;
+                        if (ImGui::Checkbox(editorText("Enable Grid Snapping", "Włącz przyciąganie do siatki"), &pref.snapEnabled)) state.snapEnabled = pref.snapEnabled;
+                        if (ImGui::InputFloat(editorText("Snap Step", "Krok przyciągania"), &pref.snapStep, 0.1f, 1.0f, "%.2f")) state.snapStep = pref.snapStep;
                         ImGui::SameLine();
                         if (ImGui::SmallButton("0.25")) { pref.snapStep = 0.25f; state.snapStep = 0.25f; }
                         ImGui::SameLine();
@@ -188,7 +188,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         ImGui::SameLine();
                         if (ImGui::SmallButton("2.00")) { pref.snapStep = 2.00f; state.snapStep = 2.00f; }
 
-                        if (ImGui::Checkbox("Uklad lokalny gizmo (Local Space)", &pref.gizmoSpaceLocal)) state.gizmoSpaceLocal = pref.gizmoSpaceLocal;
+                        if (ImGui::Checkbox(editorText("Local Gizmo Space", "Lokalny układ gizmo"), &pref.gizmoSpaceLocal)) state.gizmoSpaceLocal = pref.gizmoSpaceLocal;
 
                     } else if (s_prefCategory == 2) {
                         // Category 2: Graphics & Rendering
@@ -201,12 +201,12 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         for (int f = 0; f < 5; ++f) {
                             if (pref.targetFps == fpsValues[f]) { curFpsIdx = f; break; }
                         }
-                        if (ImGui::Combo("Limit FPS", &curFpsIdx, fpsLabels, 5)) {
+                        if (ImGui::Combo(editorText("FPS Limit", "Limit FPS"), &curFpsIdx, fpsLabels, 5)) {
                             pref.targetFps = fpsValues[curFpsIdx];
                             engine->setTargetFps(pref.targetFps);
                         }
 
-                        if (ImGui::Checkbox("V-Sync (Synchronizacja pionowa)", &pref.vsync)) {
+                        if (ImGui::Checkbox(editorText("V-Sync", "Synchronizacja pionowa"), &pref.vsync)) {
                             engine->setVsyncEnabled(pref.vsync);
                         }
 
@@ -216,7 +216,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                             setAntiAliasingMode(pref.antiAliasingMode);
                         }
 
-                        if (ImGui::SliderFloat("Skala rozdzielczosci (Resolution Scale)", &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
+                        if (ImGui::SliderFloat(editorText("Render Resolution Scale", "Skala rozdzielczości renderowania"), &pref.resolutionScale, 0.25f, 2.50f, "%.2fx")) {
                             setResolutionScale(pref.resolutionScale);
                         }
                         ImGui::Checkbox("Automatyczne dopasowanie rozdzielczosci do Viewportu", &pref.autoViewportResolution);
@@ -282,7 +282,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
                         ImGui::Spacing();
                         ImGui::Separator();
-                        ImGui::TextDisabled("Sciezka pliku konfiguracyjnego:");
+                        ImGui::TextDisabled(editorText("Configuration file:", "Plik konfiguracyjny:"));
                         ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "%s", pref.getDefaultConfigPath().c_str());
 
                         const bool fileExists = std::filesystem::exists(pref.getDefaultConfigPath());
