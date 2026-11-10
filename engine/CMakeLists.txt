@@ -188,6 +188,12 @@ add_custom_command(TARGET engine POST_BUILD
     $<TARGET_FILE_DIR:engine>/assets/textures
 )
 
+add_custom_command(TARGET engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/language
+    $<TARGET_FILE_DIR:engine>/language
+)
+
 target_include_directories(engine PRIVATE include)
 target_include_directories(engine PRIVATE ${vma_SOURCE_DIR}/include)
 target_include_directories(engine PRIVATE ${jolt_SOURCE_DIR})
