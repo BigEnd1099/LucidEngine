@@ -371,6 +371,8 @@ namespace engine::renderer {
                 report << "SVGF enabled: " << (metrics.value("rtSvgfEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "GI checkerboard: " << (metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "GI history valid at frame start: " << (metrics.value("rtGiHistoryValid", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection history valid at frame start: " << (metrics.value("rtReflectionHistoryValid", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "History invalidated by light/camera change this frame: " << (metrics.value("rtHistoryInvalidatedByLightChange", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "Reflection samples: " << metrics.value("rtReflectionSamples", 0.0) << "\n";
                 report << "Reflection bounces: " << metrics.value("rtReflectionBounces", 0.0) << "\n";
                 report << "Reflection infinite bounces: " << (metrics.value("rtReflectionInfiniteBounces", 0.0) > 0.5 ? "yes" : "no") << "\n";
@@ -551,6 +553,8 @@ namespace engine::renderer {
                 ImGui::TableNextRow();
                 metric("GI checkerboard", metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("RT denoiser CPU", averageCpuScope("RT Denoiser Command Recording"), "ms");
+                metric("Reflection history", metrics.value("rtReflectionHistoryValid", 0.0) > 0.5 ? 1.0 : 0.0, "valid");
+                metric("History reset by light/camera", metrics.value("rtHistoryInvalidatedByLightChange", 0.0) > 0.5 ? 1.0 : 0.0, "yes");
                 ImGui::TableNextRow();
                 metric("Reflection bounces", metrics.value("rtReflectionBounces", 0.0), "bounces");
                 metric("Reflection max roughness", metrics.value("rtReflectionMaxRoughness", 0.0), "");
