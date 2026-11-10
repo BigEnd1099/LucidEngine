@@ -330,6 +330,6 @@
     "ui.asset_size": "Size",
     "ui.asset_select_hint": "Select a file to inspect its metadata.",
     "ui.drop_model_into_viewport": "Drop model into viewport to create actor",
-    "ui.drag_model_tooltip": "Drag this glTF model into the 3D viewport."
+    "ui.drag_model_tooltip": "Drag this GLB model into the 3D viewport."
   }
 }
