@@ -162,6 +162,7 @@ namespace engine::renderer {
             double drawItems{0.0};
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
+            std::array<double, 9> effectStages{};
             std::unordered_map<std::string, double> cpuScopes;
         };
         static std::deque<ProfilerWindowSample> oneSecondSamples;
@@ -187,6 +188,14 @@ namespace engine::renderer {
             };
             for (size_t i = 0; i < sample.gpuStages.size(); ++i)
                 sample.gpuStages[i] = metrics.value(gpuMetricNames[i], 0.0);
+
+            const char* effectMetricNames[] = {
+                "gpuScreenSpaceAoGiMs", "gpuScreenSpaceBlurMs",
+                "rtGiTraceMs", "rtGiTemporalMs", "rtGiAtrous0Ms", "rtGiAtrous1Ms",
+                "rtReflectionTraceMs", "rtReflectionTemporalMs", "rtComputeTotalMs"
+            };
+            for (size_t i = 0; i < sample.effectStages.size(); ++i)
+                sample.effectStages[i] = metrics.value(effectMetricNames[i], 0.0);
 
             if (cpuStats.is_object()) {
                 for (auto it = cpuStats.begin(); it != cpuStats.end(); ++it)
@@ -248,6 +257,10 @@ namespace engine::renderer {
         std::array<double, 8> avgGpuStages{};
         for (size_t i = 0; i < avgGpuStages.size(); ++i) {
             avgGpuStages[i] = average([i](const ProfilerWindowSample& s) { return s.gpuStages[i]; });
+        }
+        std::array<double, 9> avgEffectStages{};
+        for (size_t i = 0; i < avgEffectStages.size(); ++i) {
+            avgEffectStages[i] = average([i](const ProfilerWindowSample& s) { return s.effectStages[i]; });
         }
 
         const uint64_t registryEntities = engineStats.value("registryEntities", uint64_t{0});
@@ -327,6 +340,19 @@ namespace engine::renderer {
                 };
                 for (size_t i = 0; i < avgGpuStages.size(); ++i)
                     report << gpuStageLabels[i] << ": " << avgGpuStages[i] << " ms\n";
+                report << "\n[SCREEN-SPACE AND RT SUBPASSES - 1s AVERAGE]\n";
+                const char* effectStageLabels[] = {
+                    "GTAO + SSGI main shader", "GTAO/SSGI bilateral blur",
+                    "RT GI trace", "RT GI temporal", "RT GI a-trous 0", "RT GI a-trous 1",
+                    "RT reflections trace", "RT reflections temporal", "RT compute total (inclusive)"
+                };
+                for (size_t i = 0; i < avgEffectStages.size(); ++i)
+                    report << effectStageLabels[i] << ": " << avgEffectStages[i] << " ms\n";
+                report << "GTAO enabled: " << (metrics.value("gtaoEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "SSGI enabled: " << (metrics.value("ssgiEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT GI enabled: " << (metrics.value("rtGiEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT AO enabled: " << (metrics.value("rtAoEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT reflections enabled: " << (metrics.value("rtReflectionsEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "\n[SCENE]\n";
                 report << "Registry entities: " << registryEntities << "\n";
                 report << "Mesh entities: " << meshEntities << "\n";
@@ -441,6 +467,29 @@ namespace engine::renderer {
                         ImGui::Text("%.3f ms", avgGpuStages[stage.second]);
                     else
                         ImGui::TextDisabled("N/A");
+                }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("SCREEN-SPACE / RT SUBPASS BREAKDOWN");
+            if (ImGui::BeginTable("##EffectSubpassTable", 2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn("Subpass", ImGuiTableColumnFlags_WidthStretch, 0.70f);
+                ImGui::TableSetupColumn("1s average", ImGuiTableColumnFlags_WidthFixed, 0.30f);
+                ImGui::TableHeadersRow();
+                const char* effectStageLabels[] = {
+                    "GTAO + SSGI main shader", "GTAO/SSGI bilateral blur",
+                    "RT GI trace", "RT GI temporal", "RT GI a-trous 0", "RT GI a-trous 1",
+                    "RT reflections trace", "RT reflections temporal", "RT compute total (inclusive)"
+                };
+                for (size_t i = 0; i < avgEffectStages.size(); ++i) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(effectStageLabels[i]);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.3f ms", avgEffectStages[i]);
                 }
                 ImGui::EndTable();
             }
