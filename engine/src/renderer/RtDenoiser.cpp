@@ -465,6 +465,14 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiHistoryValid",
             (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
+        profiler.recordMetric("rtReflectionBounces", params.reflectionBounces);
+        profiler.recordMetric("rtReflectionInfiniteBounces", params.reflectionInfiniteBounces ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionMaxRoughness", params.reflectionMaxRoughness);
+        profiler.recordMetric("rtReflectionCheckerboard", params.reflectionCheckerboard ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionStochasticLights", params.reflectionStochasticLights ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionLodBias", params.reflectionLodBias ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionHalfRes", params.reflectionHalfRes ? 1.0 : 0.0);
+        profiler.recordMetric("rtDebugMode", static_cast<uint32_t>(params.debugMode));
 
         // Reset query pool before recording timestamps
         if (m_timestampsSupported && m_queryPool) {
