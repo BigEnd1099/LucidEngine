@@ -330,6 +330,9 @@ namespace engine::core {
 
     uint32_t AssetManager::loadGLTFFromMemory(const std::vector<uint8_t>& data) {
         m_lastImportedInstances.clear();
+        m_lastImportedNodes.clear();
+        m_lastImportedSkins.clear();
+        m_lastImportedAnimations.clear();
         if (data.empty()) return 0;
         try {
             fastgltf::Parser parser(fastgltf::Extensions::EXT_mesh_gpu_instancing);
