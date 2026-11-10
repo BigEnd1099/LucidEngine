@@ -474,13 +474,14 @@ function writeSummary(results, sceneMeta) {
     lines.push('| ' + result.name + ' | ' + fields.map(key => result.p95[key] ?? 0).join(' | ') + ' |');
   }
   lines.push('', '## Screen-space quality settings', '',
-    '| Test | GTAO radius | GTAO intensity | SSGI intensity | Ground reflectance | Multi-bounce |',
-    '|---|---:|---:|---:|---:|---:|');
+    '| Test | GTAO radius | GTAO intensity | SSGI intensity | Ground reflectance | Multi-bounce | Ground color (linear RGB) |',
+    '|---|---:|---:|---:|---:|---:|---|');
   for (const result of results) {
     const a = result.averages;
     lines.push('| ' + result.name + ' | ' + [
       a.gtaoRadius ?? 0, a.gtaoIntensity ?? 0, a.ssgiIntensity ?? 0,
-      a.ssgiGroundReflectance ?? 0, a.ssgiMultiBounce ?? 0
+      a.ssgiGroundReflectance ?? 0, a.ssgiMultiBounce ?? 0,
+      [a.ssgiGroundColorR ?? 0, a.ssgiGroundColorG ?? 0, a.ssgiGroundColorB ?? 0].join(', ')
     ].join(' | ') + ' |');
   }
   lines.push('', '## RT pass execution and dependency gaps', '',
@@ -527,6 +528,7 @@ function writeSummary(results, sceneMeta) {
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
   const csvFields = [...new Set([...fields, ...rtDiagnosticFields,
     'gtaoRadius', 'gtaoIntensity', 'ssgiIntensity', 'ssgiGroundReflectance', 'ssgiMultiBounce',
+    'ssgiGroundColorR', 'ssgiGroundColorG', 'ssgiGroundColorB',
     'rtEnabled', 'rtAvailable', 'rtShadowsEnabled', 'rtGiHalfRes', 'rtGiIntensity', 'rtDenoiseEnabled',
     'rtReflectionMinThroughput'])];
   const p95Fields = csvFields.map(key => 'p95_' + key);
