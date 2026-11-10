@@ -502,6 +502,7 @@ namespace engine::renderer {
         // Eleven timestamp queries split the GPU command buffer and screen-space AO/GI subpasses.
         VkQueryPool m_timestampQueryPool{VK_NULL_HANDLE};
         bool m_timestampQueryPending{false};
+        bool m_screenSpaceAoGiPassActive{false};
 
         // Persistent capture staging buffer & command buffer
         VkBuffer m_captureStagingBuffer{VK_NULL_HANDLE};
