@@ -83,8 +83,8 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("gpuDepthMs", elapsedMs(2, 3));
                 core::Profiler::get().recordMetric("gpuGBufferMs", elapsedMs(3, 4));
                 core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
-                core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", elapsedMs(4, 9));
-                core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", elapsedMs(9, 10));
+                core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", m_screenSpaceAoGiPassActive ? elapsedMs(4, 9) : 0.0);
+                core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", m_screenSpaceAoGiPassActive ? elapsedMs(9, 10) : 0.0);
                 core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
                 core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
                 core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
@@ -1132,7 +1132,9 @@ namespace engine::renderer {
 
         core::Profiler::get().recordMetric("gtaoEnabled", m_gtaoEnabled ? 1.0 : 0.0);
         core::Profiler::get().recordMetric("ssgiEnabled", m_lightBounceEnabled ? 1.0 : 0.0);
-        if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty()) {
+        m_screenSpaceAoGiPassActive = (m_gtaoEnabled || m_lightBounceEnabled) &&
+            m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty();
+        if (m_screenSpaceAoGiPassActive) {
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
