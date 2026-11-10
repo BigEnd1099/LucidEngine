@@ -1304,6 +1304,7 @@ namespace engine::renderer {
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;
                 rtp.lightChanged = rtLightOrCameraMoved;
                 rtp.debugMode = m_rtSettings.debugMode;
+                core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
             } else {
                 m_rtDenoiser.invalidateHistory();
