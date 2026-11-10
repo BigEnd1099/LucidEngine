@@ -393,4 +393,6 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             }
 
 }
+
+} // namespace engine::renderer
 #endif
