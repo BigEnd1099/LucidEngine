@@ -178,7 +178,6 @@ namespace engine::ecs {
                     evaluated.orientation = glm::normalize(orientation);
                     evaluated.rotation = glm::degrees(glm::eulerAngles(evaluated.orientation));
                 }
-            }
             } else if (m_registry.all_of<TransformComponent>(entity)) {
                 // A detached child keeps its last evaluated world transform after
                 // its former parent is destroyed.
