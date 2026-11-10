@@ -163,6 +163,11 @@ if(Python3_FOUND)
 endif()
 
 add_executable(engine ${SRC_FILES} ${HEADER_FILES} ${IMGUI_SRCS})
+# Relink when a language catalog changes so the post-build copy stays up to date.
+set_property(TARGET engine APPEND PROPERTY LINK_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/language/en.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/language/pl.json
+)
 add_dependencies(engine CompileShaders)
 if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
