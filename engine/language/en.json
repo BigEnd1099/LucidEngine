@@ -321,6 +321,11 @@
     "details.simulation_readonly": "Inspector is read-only while simulation is running.",
     "script.discard_message": "This script has unapplied changes. Discard them and close Script Studio?",
     "script.discard": "Discard",
-    "script.keep_editing": "Keep Editing"
+    "script.keep_editing": "Keep Editing",
+    "ui.asset_unknown_type": "Unknown type",
+    "ui.copy_asset_path": "Copy Path",
+    "ui.asset_size_unavailable": "Size unavailable",
+    "ui.asset_size": "Size",
+    "ui.asset_select_hint": "Select a file to inspect its metadata."
   }
 }
