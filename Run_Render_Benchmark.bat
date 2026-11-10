@@ -8,7 +8,7 @@ if not exist "%EXE%" set "EXE=engine\build\engine.exe"
 if not exist "%EXE%" (
   echo [ERROR] engine.exe not found. Building Release...
   call build_engine.bat release
-  if errorlevel 1 exit /b %ERRORLEVEL%
+  if errorlevel 1 exit /b 1
 )
 if not exist "%EXE%" (
   echo [ERROR] Release executable still missing: %EXE%
