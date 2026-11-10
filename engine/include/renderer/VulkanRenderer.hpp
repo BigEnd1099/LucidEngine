@@ -81,6 +81,8 @@ namespace engine::renderer {
         float getSsgiGroundReflectance() const { return m_lightBounceGroundReflectance; }
         void setSsgiMultiBounce(float value) { m_lightBounceMultiBounce = std::clamp(value, 0.0f, 3.0f); }
         float getSsgiMultiBounce() const { return m_lightBounceMultiBounce; }
+        void setSsgiGroundColor(const glm::vec3& color) { m_lightBounceGroundColor = color; }
+        glm::vec3 getSsgiGroundColor() const { return m_lightBounceGroundColor; }
 
         void setExposure(float ev) { m_exposure = std::clamp(ev, 0.1f, 6.0f); }
         float getExposure() const { return m_exposure; }
