@@ -1,4 +1,5 @@
 #include "network/JsonRpcDispatcher.hpp"
+#include <algorithm>
 #include "core/Engine.hpp"
 #include "core/Logger.hpp"
 #include <iostream>
@@ -834,31 +835,111 @@ namespace engine::network {
                         return;
                     }
 
-                    if (options.contains("gtao") && options["gtao"].is_boolean())
-                        renderer->setGtaoEnabled(options["gtao"].get<bool>());
-                    if (options.contains("ssgi") && options["ssgi"].is_boolean())
-                        renderer->setSsgiEnabled(options["ssgi"].get<bool>());
+                    auto setBool = [](const nlohmann::json& src, const char* key, bool& target) {
+                        if (src.contains(key) && src[key].is_boolean()) target = src[key].get<bool>();
+                    };
+                    auto setInt = [](const nlohmann::json& src, const char* key, int& target, int lo, int hi) {
+                        if (src.contains(key) && src[key].is_number_integer())
+                            target = std::clamp(src[key].get<int>(), lo, hi);
+                    };
+                    auto setFloat = [](const nlohmann::json& src, const char* key, float& target, float lo, float hi) {
+                        if (src.contains(key) && src[key].is_number())
+                            target = std::clamp(src[key].get<float>(), lo, hi);
+                    };
+
+                    bool gtaoEnabled = renderer->isGtaoEnabled();
+                    bool ssgiEnabled = renderer->isSsgiEnabled();
+                    setBool(options, "gtao", gtaoEnabled);
+                    setBool(options, "ssgi", ssgiEnabled);
+                    renderer->setGtaoEnabled(gtaoEnabled);
+                    renderer->setSsgiEnabled(ssgiEnabled);
+
+                    if (options.contains("gtaoRadius") && options["gtaoRadius"].is_number())
+                        renderer->setGtaoRadius(options["gtaoRadius"].get<float>());
+                    if (options.contains("gtaoIntensity") && options["gtaoIntensity"].is_number())
+                        renderer->setGtaoIntensity(options["gtaoIntensity"].get<float>());
+                    if (options.contains("ssgiIntensity") && options["ssgiIntensity"].is_number())
+                        renderer->setSsgiIntensity(options["ssgiIntensity"].get<float>());
+                    if (options.contains("ssgiGroundReflectance") && options["ssgiGroundReflectance"].is_number())
+                        renderer->setSsgiGroundReflectance(options["ssgiGroundReflectance"].get<float>());
+                    if (options.contains("ssgiMultiBounce") && options["ssgiMultiBounce"].is_number())
+                        renderer->setSsgiMultiBounce(options["ssgiMultiBounce"].get<float>());
+                    if (options.contains("ssgiGroundColor") && options["ssgiGroundColor"].is_array() &&
+                        options["ssgiGroundColor"].size() >= 3 &&
+                        options["ssgiGroundColor"][0].is_number() &&
+                        options["ssgiGroundColor"][1].is_number() &&
+                        options["ssgiGroundColor"][2].is_number()) {
+                        renderer->setSsgiGroundColor(glm::vec3(
+                            options["ssgiGroundColor"][0].get<float>(),
+                            options["ssgiGroundColor"][1].get<float>(),
+                            options["ssgiGroundColor"][2].get<float>()));
+                    }
 
                     auto& rt = renderer->getRtSettings();
-                    if (options.contains("rtEnabled") && options["rtEnabled"].is_boolean())
-                        rt.enabled = options["rtEnabled"].get<bool>();
-                    if (options.contains("rtGi") && options["rtGi"].is_boolean())
-                        rt.giEnabled = options["rtGi"].get<bool>();
-                    if (options.contains("rtAo") && options["rtAo"].is_boolean())
-                        rt.aoEnabled = options["rtAo"].get<bool>();
-                    if (options.contains("rtReflections") && options["rtReflections"].is_boolean())
-                        rt.reflectionsEnabled = options["rtReflections"].get<bool>();
+                    setBool(options, "rtEnabled", rt.enabled);
+                    setBool(options, "rtGi", rt.giEnabled);
+                    setBool(options, "rtAo", rt.aoEnabled);
+                    setBool(options, "rtReflections", rt.reflectionsEnabled);
 
-                    // Each benchmark case starts with clean temporal accumulation.
+                    const nlohmann::json quality = options.value("quality", nlohmann::json::object());
+                    setBool(quality, "shadowsEnabled", rt.shadowsEnabled);
+                    setBool(quality, "giHalfRes", rt.giHalfRes);
+                    setBool(quality, "giCheckerboard", rt.giCheckerboard);
+                    setBool(quality, "reflectionInfiniteBounces", rt.reflectionInfiniteBounces);
+                    setBool(quality, "denoiseEnabled", rt.denoiseEnabled);
+                    setBool(quality, "svgfEnabled", rt.svgfEnabled);
+                    setBool(quality, "reflectionCheckerboard", rt.reflectionCheckerboard);
+                    setBool(quality, "reflectionStochasticLights", rt.reflectionStochasticLights);
+                    setBool(quality, "reflectionLodBias", rt.reflectionLodBias);
+                    setBool(quality, "reflectionHalfRes", rt.reflectionHalfRes);
+                    setInt(quality, "giSamples", rt.giSamples, 1, 16);
+                    setInt(quality, "reflectionSamples", rt.reflectionSamples, 1, 16);
+                    setInt(quality, "giBounces", rt.giBounces, 1, 15);
+                    setInt(quality, "reflectionBounces", rt.reflectionBounces, 2, 4);
+                    setInt(quality, "maxHistory", rt.maxHistory, 4, 256);
+                    setFloat(quality, "giIntensity", rt.giIntensity, 0.0f, 10.0f);
+                    setFloat(quality, "reflectionMaxRoughness", rt.reflectionMaxRoughness, 0.0f, 1.0f);
+                    setFloat(quality, "reflectionMinThroughput", rt.reflectionMinThroughput, 0.0f, 1.0f);
+                    setFloat(quality, "spatialStrength", rt.spatialStrength, 0.0f, 1.0f);
+                    if (quality.contains("debugMode") && quality["debugMode"].is_number_integer())
+                        rt.debugMode = static_cast<engine::renderer::RtDebugMode>(
+                            std::clamp(quality["debugMode"].get<int>(), 0, 7));
+
+                    // A settings change starts a fresh temporal accumulation window.
                     renderer->invalidateRtHistory();
 
+                    nlohmann::json actualQuality = {
+                        {"shadowsEnabled", rt.shadowsEnabled},
+                        {"giHalfRes", rt.giHalfRes}, {"giCheckerboard", rt.giCheckerboard},
+                        {"giIntensity", rt.giIntensity}, {"giSamples", rt.giSamples},
+                        {"giBounces", rt.giBounces}, {"reflectionSamples", rt.reflectionSamples},
+                        {"reflectionBounces", rt.reflectionBounces},
+                        {"reflectionInfiniteBounces", rt.reflectionInfiniteBounces},
+                        {"reflectionMaxRoughness", rt.reflectionMaxRoughness},
+                        {"reflectionMinThroughput", rt.reflectionMinThroughput},
+                        {"maxHistory", rt.maxHistory}, {"spatialStrength", rt.spatialStrength},
+                        {"denoiseEnabled", rt.denoiseEnabled}, {"svgfEnabled", rt.svgfEnabled},
+                        {"reflectionCheckerboard", rt.reflectionCheckerboard},
+                        {"reflectionStochasticLights", rt.reflectionStochasticLights},
+                        {"reflectionLodBias", rt.reflectionLodBias},
+                        {"reflectionHalfRes", rt.reflectionHalfRes},
+                        {"debugMode", static_cast<uint32_t>(rt.debugMode)}
+                    };
                     nlohmann::json result = {
-                        {"gtao", renderer->isGtaoEnabled()},
-                        {"ssgi", renderer->isSsgiEnabled()},
-                        {"rtEnabled", rt.enabled},
-                        {"rtGi", rt.giEnabled},
-                        {"rtAo", rt.aoEnabled},
-                        {"rtReflections", rt.reflectionsEnabled}
+                        {"gtao", renderer->isGtaoEnabled()}, {"ssgi", renderer->isSsgiEnabled()},
+                        {"rtEnabled", rt.enabled}, {"rtGi", rt.giEnabled},
+                        {"rtAo", rt.aoEnabled}, {"rtReflections", rt.reflectionsEnabled},
+                        {"gtaoRadius", renderer->getGtaoRadius()},
+                        {"gtaoIntensity", renderer->getGtaoIntensity()},
+                        {"ssgiIntensity", renderer->getSsgiIntensity()},
+                        {"ssgiGroundReflectance", renderer->getSsgiGroundReflectance()},
+                        {"ssgiMultiBounce", renderer->getSsgiMultiBounce()},
+                        {"ssgiGroundColor", {
+                            renderer->getSsgiGroundColor().r,
+                            renderer->getSsgiGroundColor().g,
+                            renderer->getSsgiGroundColor().b
+                        }},
+                        {"quality", actualQuality}
                     };
                     nlohmann::json response = {
                         {"jsonrpc", "2.0"}, {"id", id}, {"result", result}

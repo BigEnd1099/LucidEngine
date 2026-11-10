@@ -74,6 +74,16 @@ namespace engine::renderer {
         void setGtaoIntensity(float intensity) { m_gtaoIntensity = std::clamp(intensity, 0.0f, 5.0f); }
         float getGtaoIntensity() const { return m_gtaoIntensity; }
 
+        // Public SSGI quality controls for benchmark/RPC diagnostics.
+        void setSsgiIntensity(float intensity) { m_lightBounceIntensity = std::clamp(intensity, 0.0f, 5.0f); }
+        float getSsgiIntensity() const { return m_lightBounceIntensity; }
+        void setSsgiGroundReflectance(float value) { m_lightBounceGroundReflectance = std::clamp(value, 0.0f, 1.0f); }
+        float getSsgiGroundReflectance() const { return m_lightBounceGroundReflectance; }
+        void setSsgiMultiBounce(float value) { m_lightBounceMultiBounce = std::clamp(value, 0.0f, 3.0f); }
+        float getSsgiMultiBounce() const { return m_lightBounceMultiBounce; }
+        void setSsgiGroundColor(const glm::vec3& color) { m_lightBounceGroundColor = color; }
+        glm::vec3 getSsgiGroundColor() const { return m_lightBounceGroundColor; }
+
         void setExposure(float ev) { m_exposure = std::clamp(ev, 0.1f, 6.0f); }
         float getExposure() const { return m_exposure; }
 

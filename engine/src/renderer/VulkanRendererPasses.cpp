@@ -1133,6 +1133,14 @@ namespace engine::renderer {
 
         core::Profiler::get().recordMetric("gtaoEnabled", m_gtaoEnabled ? 1.0 : 0.0);
         core::Profiler::get().recordMetric("ssgiEnabled", m_lightBounceEnabled ? 1.0 : 0.0);
+        core::Profiler::get().recordMetric("gtaoRadius", m_gtaoRadius);
+        core::Profiler::get().recordMetric("gtaoIntensity", m_gtaoIntensity);
+        core::Profiler::get().recordMetric("ssgiIntensity", m_lightBounceIntensity);
+        core::Profiler::get().recordMetric("ssgiGroundReflectance", m_lightBounceGroundReflectance);
+        core::Profiler::get().recordMetric("ssgiMultiBounce", m_lightBounceMultiBounce);
+        core::Profiler::get().recordMetric("ssgiGroundColorR", m_lightBounceGroundColor.r);
+        core::Profiler::get().recordMetric("ssgiGroundColorG", m_lightBounceGroundColor.g);
+        core::Profiler::get().recordMetric("ssgiGroundColorB", m_lightBounceGroundColor.b);
         m_screenSpaceAoGiPassActive = (m_gtaoEnabled || m_lightBounceEnabled) &&
             m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty();
         if (m_screenSpaceAoGiPassActive) {
@@ -1280,6 +1288,28 @@ namespace engine::renderer {
             core::Profiler::get().recordMetric("rtGiEnabled", m_rtSettings.giEnabled ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtAoEnabled", m_rtSettings.aoEnabled ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtReflectionsEnabled", m_rtSettings.reflectionsEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtEnabled", m_rtSettings.enabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtAvailable", isRayTracingEnabled() ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtShadowsEnabled", m_rtSettings.shadowsEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtGiHalfRes", m_rtSettings.giHalfRes ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtGiIntensity", m_rtSettings.giIntensity);
+            core::Profiler::get().recordMetric("rtGiSamples", std::clamp(m_rtSettings.giSamples, 1, 16));
+            core::Profiler::get().recordMetric("rtGiBounces", std::clamp(m_rtSettings.giBounces, 1, 15));
+            core::Profiler::get().recordMetric("rtReflectionSamples", std::clamp(m_rtSettings.reflectionSamples, 1, 16));
+            core::Profiler::get().recordMetric("rtReflectionBounces", std::clamp(m_rtSettings.reflectionBounces, 2, 4));
+            core::Profiler::get().recordMetric("rtReflectionInfiniteBounces", m_rtSettings.reflectionInfiniteBounces ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionMaxRoughness", m_rtSettings.reflectionMaxRoughness);
+            core::Profiler::get().recordMetric("rtReflectionMinThroughput", m_rtSettings.reflectionMinThroughput);
+            core::Profiler::get().recordMetric("rtDenoiseEnabled", m_rtSettings.denoiseEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtSvgfEnabled", (m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled) ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtMaxHistory", m_rtSettings.denoiseEnabled ? m_rtSettings.maxHistory : 1.0);
+            core::Profiler::get().recordMetric("rtSpatialStrength", m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionCheckerboard", m_rtSettings.reflectionCheckerboard ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionStochasticLights", m_rtSettings.reflectionStochasticLights ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionLodBias", m_rtSettings.reflectionLodBias ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));
             if (rtIndirectActive) {
                 RtDenoiser::Params rtp;
                 rtp.viewProj = vp;

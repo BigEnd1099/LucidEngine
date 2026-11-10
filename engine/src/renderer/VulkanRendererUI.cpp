@@ -358,6 +358,24 @@ namespace engine::renderer {
                     report << effectStageLabels[i] << ": " << avgEffectStages[i] << " ms\n";
                 report << "GTAO enabled: " << (metrics.value("gtaoEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "SSGI enabled: " << (metrics.value("ssgiEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "\n[SCREEN-SPACE QUALITY]\n";
+                report << "GTAO radius: " << metrics.value("gtaoRadius", 0.0) << "\n";
+                report << "GTAO intensity: " << metrics.value("gtaoIntensity", 0.0) << "\n";
+                report << "SSGI intensity: " << metrics.value("ssgiIntensity", 0.0) << "\n";
+                report << "SSGI ground reflectance: " << metrics.value("ssgiGroundReflectance", 0.0) << "\n";
+                report << "SSGI multi-bounce: " << metrics.value("ssgiMultiBounce", 0.0) << "\n";
+                report << "SSGI ground color (linear RGB): "
+                       << metrics.value("ssgiGroundColorR", 0.0) << ", "
+                       << metrics.value("ssgiGroundColorG", 0.0) << ", "
+                       << metrics.value("ssgiGroundColorB", 0.0) << "\n";
+                report << "\n[RT STATE]\n";
+                report << "RT enabled: " << (metrics.value("rtEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT available: " << (metrics.value("rtAvailable", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT shadows enabled: " << (metrics.value("rtShadowsEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "GI half resolution: " << (metrics.value("rtGiHalfRes", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "GI intensity: " << metrics.value("rtGiIntensity", 0.0) << "\n";
+                report << "RT denoiser enabled: " << (metrics.value("rtDenoiseEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection minimum throughput: " << metrics.value("rtReflectionMinThroughput", 0.0) << "\n";
                 report << "RT GI enabled: " << (metrics.value("rtGiEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "RT AO enabled: " << (metrics.value("rtAoEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "RT reflections enabled: " << (metrics.value("rtReflectionsEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
@@ -531,6 +549,25 @@ namespace engine::renderer {
                     ImGui::TableNextColumn();
                     ImGui::Text("%.3f ms", avgEffectStages[i]);
                 }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("SCREEN-SPACE QUALITY");
+            if (ImGui::BeginTable("##ScreenSpaceQualityDiagnostics", 3,
+                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                metric("GTAO radius", metrics.value("gtaoRadius", 0.0), "");
+                metric("GTAO intensity", metrics.value("gtaoIntensity", 0.0), "");
+                metric("SSGI intensity", metrics.value("ssgiIntensity", 0.0), "");
+                ImGui::TableNextRow();
+                metric("Ground reflectance", metrics.value("ssgiGroundReflectance", 0.0), "");
+                metric("SSGI multi-bounce", metrics.value("ssgiMultiBounce", 0.0), "");
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("SSGI ground color (linear RGB)");
+                ImGui::Text("%.3f, %.3f, %.3f",
+                    metrics.value("ssgiGroundColorR", 0.0),
+                    metrics.value("ssgiGroundColorG", 0.0),
+                    metrics.value("ssgiGroundColorB", 0.0));
                 ImGui::EndTable();
             }
 
