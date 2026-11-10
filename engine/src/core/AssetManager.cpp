@@ -604,6 +604,19 @@ namespace engine::core {
                 );
                 materialAsset->metallicFactor = mat.pbrData.metallicFactor;
                 materialAsset->roughnessFactor = mat.pbrData.roughnessFactor;
+                materialAsset->emissiveFactor = glm::vec3(
+                    static_cast<float>(mat.emissiveFactor[0]),
+                    static_cast<float>(mat.emissiveFactor[1]),
+                    static_cast<float>(mat.emissiveFactor[2]));
+                materialAsset->emissiveStrength = static_cast<float>(mat.emissiveStrength);
+                materialAsset->alphaCutoff = static_cast<float>(mat.alphaCutoff);
+                materialAsset->alphaMode = static_cast<uint32_t>(mat.alphaMode);
+                materialAsset->doubleSided = mat.doubleSided;
+                materialAsset->unlit = mat.unlit;
+                if (mat.normalTexture.has_value())
+                    materialAsset->normalScale = static_cast<float>(mat.normalTexture->scale);
+                if (mat.occlusionTexture.has_value())
+                    materialAsset->occlusionStrength = static_cast<float>(mat.occlusionTexture->strength);
 
                 if (mat.pbrData.baseColorTexture.has_value())
                     materialAsset->albedoTextureId = getGltfTextureId(mat.pbrData.baseColorTexture->textureIndex, true);
@@ -611,6 +624,10 @@ namespace engine::core {
                     materialAsset->normalTextureId = getGltfTextureId(mat.normalTexture->textureIndex, false);
                 if (mat.pbrData.metallicRoughnessTexture.has_value())
                     materialAsset->ormTextureId = getGltfTextureId(mat.pbrData.metallicRoughnessTexture->textureIndex, false);
+                if (mat.occlusionTexture.has_value())
+                    materialAsset->occlusionTextureId = getGltfTextureId(mat.occlusionTexture->textureIndex, false);
+                if (mat.emissiveTexture.has_value())
+                    materialAsset->emissiveTextureId = getGltfTextureId(mat.emissiveTexture->textureIndex, true);
                 meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
