@@ -122,15 +122,6 @@ namespace engine::ecs {
 
         void destroyEntity(entt::entity entity) {
             if (!m_registry.valid(entity)) return;
-            } else if (m_registry.all_of<TransformComponent>(entity)) {
-                // A detached child keeps its last evaluated world transform after
-                // its former parent is destroyed.
-                const auto& transform = m_registry.get<TransformComponent>(entity);
-                const glm::quat rotation = glm::length(transform.orientation) > 1e-6f
-                    ? glm::normalize(transform.orientation) : glm::quat(glm::radians(transform.rotation));
-                world = glm::translate(glm::mat4(1.0f), transform.position) *
-                    glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), transform.scale);
-            }
             if (m_registry.all_of<HierarchyComponent>(entity)) {
                 const auto children = m_registry.get<HierarchyComponent>(entity).children;
                 for (entt::entity child : children) {
@@ -187,6 +178,15 @@ namespace engine::ecs {
                     evaluated.orientation = glm::normalize(orientation);
                     evaluated.rotation = glm::degrees(glm::eulerAngles(evaluated.orientation));
                 }
+            }
+            } else if (m_registry.all_of<TransformComponent>(entity)) {
+                // A detached child keeps its last evaluated world transform after
+                // its former parent is destroyed.
+                const auto& transform = m_registry.get<TransformComponent>(entity);
+                const glm::quat rotation = glm::length(transform.orientation) > 1e-6f
+                    ? glm::normalize(transform.orientation) : glm::quat(glm::radians(transform.rotation));
+                world = glm::translate(glm::mat4(1.0f), transform.position) *
+                    glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), transform.scale);
             }
             if (m_registry.all_of<HierarchyComponent>(entity)) {
                 const auto children = m_registry.get<HierarchyComponent>(entity).children;
