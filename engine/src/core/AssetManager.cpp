@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
+#include <limits>
 #include <functional>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -29,6 +31,7 @@ namespace engine::core {
         for (auto& mesh : m_meshes) {
             if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
             if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+            if (mesh->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->skinInfluenceBuffer, mesh->skinInfluenceAllocation);
         }
     }
 
@@ -42,8 +45,10 @@ namespace engine::core {
     uint32_t AssetManager::loadGLTF(const std::string& path) {
         m_lastImportedInstances.clear();
         m_lastImportedNodes.clear();
+        m_lastImportedSkins.clear();
+        m_lastImportedAnimations.clear();
         try {
-            fastgltf::Parser parser;
+            fastgltf::Parser parser(fastgltf::Extensions::EXT_mesh_gpu_instancing);
             auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
             if (!buffer) {
                 core::Logger::error("AssetManager: unable to read glTF file: " + path);
@@ -326,9 +331,12 @@ namespace engine::core {
 
     uint32_t AssetManager::loadGLTFFromMemory(const std::vector<uint8_t>& data) {
         m_lastImportedInstances.clear();
+        m_lastImportedNodes.clear();
+        m_lastImportedSkins.clear();
+        m_lastImportedAnimations.clear();
         if (data.empty()) return 0;
         try {
-            fastgltf::Parser parser;
+            fastgltf::Parser parser(fastgltf::Extensions::EXT_mesh_gpu_instancing);
             auto buffer = fastgltf::GltfDataBuffer::FromBytes(reinterpret_cast<const std::byte*>(data.data()), data.size());
             if (!buffer) return 0;
             const auto options = fastgltf::Options::DecomposeNodeMatrices |
@@ -349,18 +357,216 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTFAsset(fastgltf::Asset& asset) {
+        const size_t meshCheckpoint = m_meshes.size();
+        const size_t materialCheckpoint = m_materials.size();
+        const size_t textureCheckpoint = m_textures.size();
+        const uint32_t nextMeshCheckpoint = m_nextMeshId;
+        const uint32_t nextMaterialCheckpoint = m_nextMaterialId;
+        const uint32_t nextTextureCheckpoint = m_nextTextureId;
+        auto rollbackImport = [&]() {
+            for (size_t i = textureCheckpoint; i < m_textures.size(); ++i) {
+                auto& texture = m_textures[i];
+                if (texture->imageView) vkDestroyImageView(m_context->getDevice(), texture->imageView, nullptr);
+                if (texture->image) vmaDestroyImage(m_context->getAllocator(), texture->image, texture->allocation);
+            }
+            for (size_t i = meshCheckpoint; i < m_meshes.size(); ++i) {
+                auto& mesh = m_meshes[i];
+                if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
+                if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+            }
+            m_textures.resize(textureCheckpoint);
+            m_meshes.resize(meshCheckpoint);
+            m_materials.resize(materialCheckpoint);
+            m_nextMeshId = nextMeshCheckpoint;
+            m_nextMaterialId = nextMaterialCheckpoint;
+            m_nextTextureId = nextTextureCheckpoint;
+            m_lastImportedInstances.clear();
+            m_lastImportedNodes.clear();
+            m_lastImportedSkins.clear();
+            m_lastImportedAnimations.clear();
+        };
         try {
             uint32_t rootMeshId = 0;
-            
+
             if (asset.meshes.empty()) return 0;
+
+            // Preserve skin definitions and inverse-bind matrices for runtime animation.
+            m_lastImportedSkins.reserve(asset.skins.size());
+            for (size_t skinIndex = 0; skinIndex < asset.skins.size(); ++skinIndex) {
+                const auto& sourceSkin = asset.skins[skinIndex];
+                SkinAsset skin;
+                skin.id = static_cast<uint32_t>(skinIndex + 1);
+                skin.name = sourceSkin.name.empty() ? ("Skin_" + std::to_string(skinIndex)) : std::string(sourceSkin.name);
+                if (sourceSkin.skeleton.has_value())
+                    skin.skeletonNodeIndex = static_cast<int64_t>(sourceSkin.skeleton.value());
+                skin.jointNodeIndices.assign(sourceSkin.joints.begin(), sourceSkin.joints.end());
+                skin.inverseBindMatrices.assign(skin.jointNodeIndices.size(), glm::mat4(1.0f));
+                if (sourceSkin.inverseBindMatrices.has_value() &&
+                    sourceSkin.inverseBindMatrices.value() < asset.accessors.size()) {
+                    size_t matrixIndex = 0;
+                    fastgltf::iterateAccessor<fastgltf::math::fmat4x4>(
+                        asset, asset.accessors[sourceSkin.inverseBindMatrices.value()],
+                        [&](const fastgltf::math::fmat4x4& matrix) {
+                            if (matrixIndex >= skin.inverseBindMatrices.size()) return;
+                            glm::mat4 converted(1.0f);
+                            for (int column = 0; column < 4; ++column)
+                                for (int row = 0; row < 4; ++row)
+                                    converted[column][row] = static_cast<float>(matrix[column][row]);
+                            skin.inverseBindMatrices[matrixIndex++] = converted;
+                        });
+                }
+                m_lastImportedSkins.push_back(std::move(skin));
+            }
+
+            // Keep animation channels in a renderer-independent representation so they can
+            // be sampled later without retaining pointers into fastgltf's temporary Asset.
+            m_lastImportedAnimations.reserve(asset.animations.size());
+            for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex) {
+                const auto& sourceAnimation = asset.animations[animationIndex];
+                ImportedAnimationClip clip;
+                clip.name = sourceAnimation.name.empty()
+                    ? ("Animation_" + std::to_string(animationIndex)) : std::string(sourceAnimation.name);
+                for (const auto& channel : sourceAnimation.channels) {
+                    if (!channel.nodeIndex.has_value() || channel.samplerIndex >= sourceAnimation.samplers.size())
+                        continue;
+                    const auto& sampler = sourceAnimation.samplers[channel.samplerIndex];
+                    if (sampler.inputAccessor >= asset.accessors.size() ||
+                        sampler.outputAccessor >= asset.accessors.size()) continue;
+
+                    ImportedAnimationTrack track;
+                    track.nodeIndex = channel.nodeIndex.value();
+                    track.path = static_cast<uint8_t>(channel.path);
+                    track.interpolation = static_cast<uint8_t>(sampler.interpolation);
+                    fastgltf::iterateAccessor<float>(asset, asset.accessors[sampler.inputAccessor],
+                        [&](float time) {
+                            track.keyframeTimes.push_back(time);
+                            clip.duration = std::max(clip.duration, time);
+                        });
+
+                    const auto& outputAccessor = asset.accessors[sampler.outputAccessor];
+                    if (outputAccessor.type == fastgltf::AccessorType::Vec3) {
+                        fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, outputAccessor,
+                            [&](const fastgltf::math::fvec3& value) {
+                                track.values.insert(track.values.end(), {
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2])});
+                            });
+                    } else if (outputAccessor.type == fastgltf::AccessorType::Vec4) {
+                        fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, outputAccessor,
+                            [&](const fastgltf::math::fvec4& value) {
+                                track.values.insert(track.values.end(), {
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), static_cast<float>(value[3])});
+                            });
+                    } else if (outputAccessor.type == fastgltf::AccessorType::Scalar) {
+                        fastgltf::iterateAccessor<float>(asset, outputAccessor,
+                            [&](float value) { track.values.push_back(value); });
+                    } else {
+                        core::Logger::warn("AssetManager: skipping animation channel with unsupported output accessor type");
+                        continue;
+                    }
+
+                    const size_t splineMultiplier = sampler.interpolation == fastgltf::AnimationInterpolation::CubicSpline ? 3u : 1u;
+                    const size_t keyCount = track.keyframeTimes.size() * splineMultiplier;
+                    if (keyCount > 0)
+                        track.componentsPerKey = static_cast<uint32_t>(track.values.size() / keyCount);
+                    if (!track.keyframeTimes.empty() && !track.values.empty())
+                        clip.tracks.push_back(std::move(track));
+                }
+                if (!clip.tracks.empty())
+                    m_lastImportedAnimations.push_back(std::move(clip));
+            }
+
+            // Decode/upload glTF images lazily and cache by source image + color space.
+            // Base-color/emissive data is sRGB; normal/metallic-roughness/occlusion is linear.
+            std::unordered_map<uint64_t, uint32_t> gltfTextureCache;
+            auto getGltfTextureId = [&](size_t textureIndex, bool srgb) -> uint32_t {
+                if (textureIndex >= asset.textures.size()) return 0;
+                const auto& gltfTexture = asset.textures[textureIndex];
+                if (!gltfTexture.imageIndex.has_value() || gltfTexture.imageIndex.value() >= asset.images.size()) return 0;
+                const size_t imageIndex = gltfTexture.imageIndex.value();
+                const uint64_t cacheKey = (static_cast<uint64_t>(imageIndex) << 1u) | (srgb ? 1ull : 0ull);
+                if (const auto cached = gltfTextureCache.find(cacheKey); cached != gltfTextureCache.end())
+                    return cached->second;
+
+                const auto& image = asset.images[imageIndex];
+                const uint8_t* rawBytes = nullptr;
+                size_t rawSize = 0;
+                if (const auto* bufferViewSource = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
+                    if (bufferViewSource->bufferViewIndex < asset.bufferViews.size()) {
+                        const auto& bufferView = asset.bufferViews[bufferViewSource->bufferViewIndex];
+                        if (bufferView.bufferIndex < asset.buffers.size()) {
+                            const auto& buffer = asset.buffers[bufferView.bufferIndex];
+                            const uint8_t* bufferStart = nullptr;
+                            size_t bufferSize = 0;
+                            if (const auto* vectorSource = std::get_if<fastgltf::sources::Vector>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(vectorSource->bytes.data());
+                                bufferSize = vectorSource->bytes.size();
+                            } else if (const auto* arraySource = std::get_if<fastgltf::sources::Array>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(arraySource->bytes.data());
+                                bufferSize = arraySource->bytes.size();
+                            } else if (const auto* byteViewSource = std::get_if<fastgltf::sources::ByteView>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(byteViewSource->bytes.data());
+                                bufferSize = byteViewSource->bytes.size();
+                            }
+                            if (bufferStart && bufferView.byteOffset <= bufferSize &&
+                                bufferView.byteLength <= bufferSize - bufferView.byteOffset) {
+                                rawBytes = bufferStart + bufferView.byteOffset;
+                                rawSize = bufferView.byteLength;
+                            }
+                        }
+                    }
+                } else if (const auto* vectorSource = std::get_if<fastgltf::sources::Vector>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(vectorSource->bytes.data());
+                    rawSize = vectorSource->bytes.size();
+                } else if (const auto* byteViewSource = std::get_if<fastgltf::sources::ByteView>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(byteViewSource->bytes.data());
+                    rawSize = byteViewSource->bytes.size();
+                } else if (const auto* arraySource = std::get_if<fastgltf::sources::Array>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(arraySource->bytes.data());
+                    rawSize = arraySource->bytes.size();
+                }
+
+                if (!rawBytes || rawSize == 0 || rawSize > static_cast<size_t>(std::numeric_limits<int>::max()))
+                    return 0;
+                int width = 0, height = 0, channels = 0;
+                stbi_uc* decoded = stbi_load_from_memory(rawBytes, static_cast<int>(rawSize), &width, &height, &channels, 4);
+                if (!decoded || width <= 0 || height <= 0) {
+                    if (decoded) stbi_image_free(decoded);
+                    core::Logger::warn("AssetManager: failed to decode glTF image " + std::to_string(imageIndex));
+                    return 0;
+                }
+                std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(decoded, &stbi_image_free);
+                auto textureAsset = std::make_unique<TextureAsset>();
+                textureAsset->id = m_nextTextureId++;
+                textureAsset->width = static_cast<uint32_t>(width);
+                textureAsset->height = static_cast<uint32_t>(height);
+                try {
+                    uploadTexture(textureAsset->image, textureAsset->allocation, textureAsset->imageView,
+                        pixels.get(), textureAsset->width, textureAsset->height,
+                        srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
+                } catch (...) {
+                    if (textureAsset->imageView) vkDestroyImageView(m_context->getDevice(), textureAsset->imageView, nullptr);
+                    if (textureAsset->image) vmaDestroyImage(m_context->getAllocator(), textureAsset->image, textureAsset->allocation);
+                    throw;
+                }
+                const uint32_t id = textureAsset->id;
+                m_textures.push_back(std::move(textureAsset));
+                gltfTextureCache.emplace(cacheKey, id);
+                core::Logger::info("Uploaded cached glTF image " + std::to_string(imageIndex) +
+                    (srgb ? " (sRGB)" : " (linear)"));
+                return id;
+            };
+
             // Import every mesh primitive. glTF meshes may contain multiple primitives,
             // each with its own material and index/vertex streams.
             std::vector<std::vector<uint32_t>> importedMeshIds(asset.meshes.size());
             for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex) {
               const auto& gltfMesh = asset.meshes[meshIndex];
               for (const auto& primitive : gltfMesh.primitives) {
-            if (primitive.type != fastgltf::PrimitiveType::Triangles) {
-                core::Logger::warn("AssetManager: skipping non-triangle glTF primitive");
+            if (primitive.type != fastgltf::PrimitiveType::Triangles &&
+                primitive.type != fastgltf::PrimitiveType::TriangleStrip &&
+                primitive.type != fastgltf::PrimitiveType::TriangleFan) {
+                core::Logger::warn("AssetManager: skipping glTF point/line primitive; renderer currently supports triangle surfaces");
                 continue;
             }
             
@@ -388,6 +594,7 @@ namespace engine::core {
                     vertices[positionIndex].normal = glm::vec3(0.0f);
                     vertices[positionIndex].texCoord = glm::vec2(0.0f);
                     vertices[positionIndex].tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                    vertices[positionIndex].color = glm::vec4(1.0f);
                     ++positionIndex;
                 });
 
@@ -419,6 +626,34 @@ namespace engine::core {
                     });
             }
 
+            // glTF COLOR_0 may be VEC3 or VEC4 and may use normalized integer storage.
+            if (auto it = primitive.findAttribute("COLOR_0"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                const auto& colorAccessor = asset.accessors[it->accessorIndex];
+                size_t index = 0;
+                if (colorAccessor.type == fastgltf::AccessorType::Vec3) {
+                    fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, colorAccessor,
+                        [&](const fastgltf::math::fvec3& value) {
+                            if (index < vertices.size()) {
+                                vertices[index].color = glm::vec4(
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), 1.0f);
+                            }
+                            ++index;
+                        });
+                } else if (colorAccessor.type == fastgltf::AccessorType::Vec4) {
+                    fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, colorAccessor,
+                        [&](const fastgltf::math::fvec4& value) {
+                            if (index < vertices.size()) {
+                                vertices[index].color = glm::vec4(
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), static_cast<float>(value[3]));
+                            }
+                            ++index;
+                        });
+                }
+            }
+
             if (auto it = primitive.findAttribute("TANGENT"); it != primitive.attributes.end() &&
                 it->accessorIndex < asset.accessors.size()) {
                 size_t index = 0;
@@ -433,11 +668,111 @@ namespace engine::core {
                     });
             }
 
+            // glTF skinning attributes are per-vertex and independent of the render Vertex
+            // ABI. Keep them in a dedicated stream so ray-tracing buffer references and all
+            // existing graphics pipelines retain their exact packed vertex layout.
+            std::vector<SkinVertexInfluence> skinInfluences(vertices.size());
+            auto readJointSet = [&](const char* semantic, bool secondSet) {
+                auto attribute = primitive.findAttribute(semantic);
+                if (attribute == primitive.attributes.end() || attribute->accessorIndex >= asset.accessors.size())
+                    return false;
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < skinInfluences.size()) {
+                            glm::uvec4 joints(
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[0])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[1])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[2])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[3])))));
+                            if (secondSet) skinInfluences[index].joints1 = joints;
+                            else skinInfluences[index].joints0 = joints;
+                        }
+                        ++index;
+                    });
+                return true;
+            };
+            auto readWeightSet = [&](const char* semantic, bool secondSet) {
+                auto attribute = primitive.findAttribute(semantic);
+                if (attribute == primitive.attributes.end() || attribute->accessorIndex >= asset.accessors.size())
+                    return false;
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < skinInfluences.size()) {
+                            glm::vec4 weights(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                static_cast<float>(value[2]), static_cast<float>(value[3]));
+                            if (secondSet) skinInfluences[index].weights1 = weights;
+                            else skinInfluences[index].weights0 = weights;
+                        }
+                        ++index;
+                    });
+                return true;
+            };
+            const bool hasJoints0 = readJointSet("JOINTS_0", false);
+            const bool hasWeights0 = readWeightSet("WEIGHTS_0", false);
+            const bool hasJoints1 = readJointSet("JOINTS_1", true);
+            const bool hasWeights1 = readWeightSet("WEIGHTS_1", true);
+            const bool hasSkinAttributes = hasJoints0 && hasWeights0;
+            if ((hasJoints0 != hasWeights0) || (hasJoints1 != hasWeights1)) {
+                core::Logger::warn("AssetManager: incomplete glTF JOINTS/WEIGHTS attribute pair; incomplete influence set will be ignored");
+            }
+            if (hasSkinAttributes) {
+                for (auto& influence : skinInfluences) {
+                    if (hasJoints1 != hasWeights1)
+                        influence.weights1 = glm::vec4(0.0f);
+                    auto sanitizeWeights = [](glm::vec4& weights) {
+                        for (int component = 0; component < 4; ++component) {
+                            float& weight = weights[component];
+                            weight = std::isfinite(weight) ? std::max(0.0f, weight) : 0.0f;
+                        }
+                    };
+                    sanitizeWeights(influence.weights0);
+                    sanitizeWeights(influence.weights1);
+                    float total = glm::dot(influence.weights0, glm::vec4(1.0f)) +
+                                  glm::dot(influence.weights1, glm::vec4(1.0f));
+                    if (!std::isfinite(total) || total <= 1e-8f) {
+                        influence.joints0 = glm::uvec4(0u);
+                        influence.weights0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                        influence.joints1 = glm::uvec4(0u);
+                        influence.weights1 = glm::vec4(0.0f);
+                    } else {
+                        const float invTotal = 1.0f / total;
+                        influence.weights0 *= invTotal;
+                        influence.weights1 *= invTotal;
+                    }
+                }
+            }
+
             if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
                 fastgltf::iterateAccessor<uint32_t>(asset, asset.accessors[primitive.indicesAccessor.value()],
                     [&](uint32_t index) { indices.push_back(index); });
             } else {
                 for (size_t i = 0; i < vertices.size(); ++i) indices.push_back(static_cast<uint32_t>(i));
+            }
+
+            if (primitive.type == fastgltf::PrimitiveType::TriangleStrip ||
+                primitive.type == fastgltf::PrimitiveType::TriangleFan) {
+                std::vector<uint32_t> triangles;
+                if (indices.size() >= 3)
+                    triangles.reserve((indices.size() - 2) * 3);
+                if (primitive.type == fastgltf::PrimitiveType::TriangleStrip) {
+                    for (size_t i = 2; i < indices.size(); ++i) {
+                        const uint32_t a = (i & 1u) ? indices[i - 1] : indices[i - 2];
+                        const uint32_t b = (i & 1u) ? indices[i - 2] : indices[i - 1];
+                        const uint32_t d = indices[i];
+                        if (a != b && b != d && a != d)
+                            triangles.insert(triangles.end(), {a, b, d});
+                    }
+                } else {
+                    for (size_t i = 2; i < indices.size(); ++i) {
+                        const uint32_t a = indices[0], b = indices[i - 1], d = indices[i];
+                        if (a != b && b != d && a != d)
+                            triangles.insert(triangles.end(), {a, b, d});
+                    }
+                }
+                indices = std::move(triangles);
             }
 
             if (vertices.empty() || indices.empty()) continue;
@@ -469,69 +804,56 @@ namespace engine::core {
             meshAsset->id = m_nextMeshId++;
             meshAsset->vertexCount = vertices.size();
             meshAsset->indexCount = indices.size();
+            meshAsset->vertices = vertices;
+            meshAsset->hasSkinInfluences = hasSkinAttributes && skinInfluences.size() == vertices.size();
+            if (meshAsset->hasSkinInfluences)
+                meshAsset->skinInfluences = std::move(skinInfluences);
+
+            // Preserve all morph target deltas on CPU. They are indexed per primitive
+            // and can be uploaded to a dedicated deformation stream by the animation renderer.
+            for (const auto& targetAttributes : primitive.targets) {
+                ImportedMorphTarget target;
+                auto readTargetVector = [&](const char* semantic, std::vector<glm::vec3>& destination) {
+                    for (const auto& attribute : targetAttributes) {
+                        if (attribute.name != semantic || attribute.accessorIndex >= asset.accessors.size()) continue;
+                        destination.assign(vertices.size(), glm::vec3(0.0f));
+                        size_t targetIndex = 0;
+                        fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute.accessorIndex],
+                            [&](const fastgltf::math::fvec3& value) {
+                                if (targetIndex < destination.size())
+                                    destination[targetIndex] = glm::vec3(
+                                        static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                ++targetIndex;
+                            });
+                        break;
+                    }
+                };
+                readTargetVector("POSITION", target.positionDeltas);
+                readTargetVector("NORMAL", target.normalDeltas);
+                readTargetVector("TANGENT", target.tangentDeltas);
+                meshAsset->morphTargets.push_back(std::move(target));
+            }
             
-            uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(), vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-            uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+            try {
+                uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(),
+                    vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(),
+                    indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+                if (meshAsset->hasSkinInfluences) {
+                    uploadBuffer(meshAsset->skinInfluenceBuffer, meshAsset->skinInfluenceAllocation,
+                        meshAsset->skinInfluences.data(),
+                        meshAsset->skinInfluences.size() * sizeof(SkinVertexInfluence),
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                }
+            } catch (...) {
+                if (meshAsset->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->vertexBuffer, meshAsset->vertexAllocation);
+                if (meshAsset->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->indexBuffer, meshAsset->indexAllocation);
+                if (meshAsset->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->skinInfluenceBuffer, meshAsset->skinInfluenceAllocation);
+                throw;
+            }
 
             if (rootMeshId == 0) rootMeshId = meshAsset->id;
             
-            // --- Load Textures from glTF ---
-            std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
-            for (size_t t = 0; t < asset.textures.size(); ++t) {
-                const auto& gltfTex = asset.textures[t];
-                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.images.size()) continue;
-
-                const auto& image = asset.images[gltfTex.imageIndex.value()];
-                const uint8_t* rawBytes = nullptr;
-                size_t rawSize = 0;
-
-                if (auto* bv = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
-                    if (bv->bufferViewIndex < asset.bufferViews.size()) {
-                        const auto& bufferView = asset.bufferViews[bv->bufferViewIndex];
-                        if (bufferView.bufferIndex < asset.buffers.size()) {
-                            const auto& buf = asset.buffers[bufferView.bufferIndex];
-                            const uint8_t* bufferStart = nullptr;
-                            if (auto* vb = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(vb->bytes.data());
-                            } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(ab->bytes.data());
-                            } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
-                            }
-                            if (bufferStart) {
-                                rawBytes = bufferStart + bufferView.byteOffset;
-                                rawSize = bufferView.byteLength;
-                            }
-                        }
-                    }
-                } else if (auto* vb = std::get_if<fastgltf::sources::Vector>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(vb->bytes.data());
-                    rawSize = vb->bytes.size();
-                } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
-                    rawSize = bvb->bytes.size();
-                } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(ab->bytes.data());
-                    rawSize = ab->bytes.size();
-                }
-
-                if (rawBytes && rawSize > 0) {
-                    int w = 0, h = 0, comp = 0;
-                    stbi_uc* pixels = stbi_load_from_memory(rawBytes, static_cast<int>(rawSize), &w, &h, &comp, 4);
-                    if (pixels) {
-                        auto texAsset = std::make_unique<TextureAsset>();
-                        texAsset->id = m_nextTextureId++;
-                        texAsset->width = static_cast<uint32_t>(w);
-                        texAsset->height = static_cast<uint32_t>(h);
-                        uploadTexture(texAsset->image, texAsset->allocation, texAsset->imageView, pixels, texAsset->width, texAsset->height, VK_FORMAT_R8G8B8A8_UNORM, true);
-                        stbi_image_free(pixels);
-                        textureIdMap[t] = texAsset->id;
-                        m_textures.push_back(std::move(texAsset));
-                        core::Logger::info("Uploaded glTF texture " + std::to_string(t) + " (" + std::to_string(w) + "x" + std::to_string(h) + ")");
-                    }
-                }
-            }
-
             if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.materials.size()) {
                 auto& mat = asset.materials[primitive.materialIndex.value()];
                 auto materialAsset = std::make_unique<MaterialAsset>();
@@ -544,25 +866,30 @@ namespace engine::core {
                 );
                 materialAsset->metallicFactor = mat.pbrData.metallicFactor;
                 materialAsset->roughnessFactor = mat.pbrData.roughnessFactor;
+                materialAsset->emissiveFactor = glm::vec3(
+                    static_cast<float>(mat.emissiveFactor[0]),
+                    static_cast<float>(mat.emissiveFactor[1]),
+                    static_cast<float>(mat.emissiveFactor[2]));
+                materialAsset->emissiveStrength = static_cast<float>(mat.emissiveStrength);
+                materialAsset->alphaCutoff = static_cast<float>(mat.alphaCutoff);
+                materialAsset->alphaMode = static_cast<uint32_t>(mat.alphaMode);
+                materialAsset->doubleSided = mat.doubleSided;
+                materialAsset->unlit = mat.unlit;
+                if (mat.normalTexture.has_value())
+                    materialAsset->normalScale = static_cast<float>(mat.normalTexture->scale);
+                if (mat.occlusionTexture.has_value())
+                    materialAsset->occlusionStrength = static_cast<float>(mat.occlusionTexture->strength);
 
-                if (mat.pbrData.baseColorTexture.has_value()) {
-                    size_t texIdx = mat.pbrData.baseColorTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->albedoTextureId = textureIdMap[texIdx];
-                    }
-                }
-                if (mat.normalTexture.has_value()) {
-                    size_t texIdx = mat.normalTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->normalTextureId = textureIdMap[texIdx];
-                    }
-                }
-                if (mat.pbrData.metallicRoughnessTexture.has_value()) {
-                    size_t texIdx = mat.pbrData.metallicRoughnessTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->ormTextureId = textureIdMap[texIdx];
-                    }
-                }
+                if (mat.pbrData.baseColorTexture.has_value())
+                    materialAsset->albedoTextureId = getGltfTextureId(mat.pbrData.baseColorTexture->textureIndex, true);
+                if (mat.normalTexture.has_value())
+                    materialAsset->normalTextureId = getGltfTextureId(mat.normalTexture->textureIndex, false);
+                if (mat.pbrData.metallicRoughnessTexture.has_value())
+                    materialAsset->ormTextureId = getGltfTextureId(mat.pbrData.metallicRoughnessTexture->textureIndex, false);
+                if (mat.occlusionTexture.has_value())
+                    materialAsset->occlusionTextureId = getGltfTextureId(mat.occlusionTexture->textureIndex, false);
+                if (mat.emissiveTexture.has_value())
+                    materialAsset->emissiveTextureId = getGltfTextureId(mat.emissiveTexture->textureIndex, true);
                 meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
@@ -608,8 +935,21 @@ namespace engine::core {
                     const size_t importedNodePosition = m_lastImportedNodes.size();
                     importedNode.parentNodeIndex = parentNodeIndex;
                     importedNode.name = node.name.empty() ? ("Node_" + std::to_string(nodeIndex)) : std::string(node.name);
-                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size())
+                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
                         importedNode.meshIds = importedMeshIds[node.meshIndex.value()];
+                        if (!node.weights.empty()) {
+                            importedNode.morphWeights.reserve(node.weights.size());
+                            for (auto weight : node.weights)
+                                importedNode.morphWeights.push_back(static_cast<float>(weight));
+                        } else if (node.meshIndex.value() < asset.meshes.size()) {
+                            const auto& defaultWeights = asset.meshes[node.meshIndex.value()].weights;
+                            importedNode.morphWeights.reserve(defaultWeights.size());
+                            for (auto weight : defaultWeights)
+                                importedNode.morphWeights.push_back(static_cast<float>(weight));
+                        }
+                    }
+                    if (node.skinIndex.has_value() && node.skinIndex.value() < m_lastImportedSkins.size())
+                        importedNode.skinId = m_lastImportedSkins[node.skinIndex.value()].id;
 
                     glm::vec3 skew(0.0f), localTranslation(0.0f), localScale(1.0f);
                     glm::vec4 perspective(0.0f);
@@ -619,10 +959,82 @@ namespace engine::core {
                         importedNode.rotation = glm::normalize(localRotation);
                         importedNode.scale = localScale;
                     }
+                    const std::string sourceNodeName = importedNode.name;
+                    const std::vector<uint32_t> instancedMeshIds = importedNode.meshIds;
+                    const bool hasGpuInstances = !node.instancingAttributes.empty() && !instancedMeshIds.empty();
+                    if (hasGpuInstances)
+                        importedNode.meshIds.clear();
                     m_lastImportedNodes.push_back(std::move(importedNode));
 
+                    // EXT_mesh_gpu_instancing supplies per-instance TRS accessors. Expand
+                    // them into child scene nodes for the current ECS renderer, preserving
+                    // the source node as the transform parent. Geometry remains shared.
+                    if (hasGpuInstances) {
+                        size_t instanceCount = 0;
+                        if (auto translationAttribute = node.findInstancingAttribute("TRANSLATION");
+                            translationAttribute != node.instancingAttributes.end() && translationAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[translationAttribute->accessorIndex].count;
+                        else if (auto rotationAttribute = node.findInstancingAttribute("ROTATION");
+                            rotationAttribute != node.instancingAttributes.end() && rotationAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[rotationAttribute->accessorIndex].count;
+                        else if (auto scaleAttribute = node.findInstancingAttribute("SCALE");
+                            scaleAttribute != node.instancingAttributes.end() && scaleAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[scaleAttribute->accessorIndex].count;
+
+                        std::vector<glm::vec3> translations(instanceCount, glm::vec3(0.0f));
+                        std::vector<glm::quat> rotations(instanceCount, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                        std::vector<glm::vec3> scales(instanceCount, glm::vec3(1.0f));
+                        if (auto attribute = node.findInstancingAttribute("TRANSLATION");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec3& value) {
+                                    if (index < translations.size())
+                                        translations[index] = glm::vec3(
+                                            static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                    ++index;
+                                });
+                        }
+                        if (auto attribute = node.findInstancingAttribute("ROTATION");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec4& value) {
+                                    if (index < rotations.size())
+                                        rotations[index] = glm::normalize(glm::quat(
+                                            static_cast<float>(value[3]), static_cast<float>(value[0]),
+                                            static_cast<float>(value[1]), static_cast<float>(value[2])));
+                                    ++index;
+                                });
+                        }
+                        if (auto attribute = node.findInstancingAttribute("SCALE");
+                            attribute != node.instancingAttributes.end() && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec3& value) {
+                                    if (index < scales.size())
+                                        scales[index] = glm::vec3(
+                                            static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                    ++index;
+                                });
+                        }
+
+                        for (size_t instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex) {
+                            ImportedSceneNode instanceNode;
+                            instanceNode.nodeIndex = nodeIndex;
+                            instanceNode.parentNodeIndex = static_cast<int64_t>(importedNodePosition);
+                            instanceNode.name = sourceNodeName + "_Instance_" + std::to_string(instanceIndex + 1);
+                            instanceNode.translation = translations[instanceIndex];
+                            instanceNode.rotation = rotations[instanceIndex];
+                            instanceNode.scale = scales[instanceIndex];
+                            instanceNode.meshIds = instancedMeshIds;
+                            m_lastImportedNodes.push_back(std::move(instanceNode));
+                        }
+                    }
+
                     const glm::mat4 world = parentTransform * local;
-                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
+                    if (!hasGpuInstances && node.meshIndex.has_value() &&
+                        node.meshIndex.value() < importedMeshIds.size()) {
                         glm::vec3 worldPosition(world[3]);
                         glm::vec3 worldScale(
                             glm::length(glm::vec3(world[0])),
@@ -632,10 +1044,10 @@ namespace engine::core {
                         for (int axis = 0; axis < 3; ++axis)
                             if (worldScale[axis] > 1e-6f) rotationMatrix[axis] /= worldScale[axis];
                         const glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
-                        for (uint32_t id : importedNode.meshIds) {
+                        for (uint32_t id : instancedMeshIds) {
                             ImportedMeshInstance instance;
                             instance.meshId = id;
-                            instance.name = importedNode.name;
+                            instance.name = sourceNodeName;
                             instance.translation = worldPosition;
                             instance.rotation = worldRotation;
                             instance.scale = worldScale;
@@ -679,10 +1091,12 @@ namespace engine::core {
             }
             return rootMeshId;
         } catch (const std::exception& e) {
-            core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
+            rollbackImport();
+            core::Logger::error(std::string("GLTF asset import rolled back: ") + e.what());
             return 0;
         } catch (...) {
-            core::Logger::error("Unknown GLTF asset import exception");
+            rollbackImport();
+            core::Logger::error("Unknown GLTF asset import exception; import rolled back");
             return 0;
         }
     }
@@ -701,7 +1115,7 @@ namespace engine::core {
         return nullptr;
     }
 
-    uint32_t AssetManager::loadTextureFromFile(const std::string& path, bool generateMips) {
+    uint32_t AssetManager::loadTextureFromFile(const std::string& path, bool generateMips, bool srgb) {
         int w = 0, h = 0, comp = 0;
         stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
         if (!pixels) {
@@ -713,7 +1127,8 @@ namespace engine::core {
         tex->id = m_nextTextureId++;
         tex->width = static_cast<uint32_t>(w);
         tex->height = static_cast<uint32_t>(h);
-        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels, tex->width, tex->height, VK_FORMAT_R8G8B8A8_UNORM, generateMips);
+        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels, tex->width, tex->height,
+            srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, generateMips);
         stbi_image_free(pixels);
 
         uint32_t id = tex->id;
@@ -1004,7 +1419,8 @@ namespace engine::core {
         tex->id = m_nextTextureId++;
         tex->width = size;
         tex->height = size;
-        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels.data(), size, size, VK_FORMAT_R8G8B8A8_UNORM, true);
+        uploadTexture(tex->image, tex->allocation, tex->imageView, pixels.data(), size, size,
+            mapType == "albedo" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
 
         uint32_t id = tex->id;
         m_textures.push_back(std::move(tex));

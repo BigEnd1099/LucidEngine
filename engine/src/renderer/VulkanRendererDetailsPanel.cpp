@@ -425,7 +425,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                         ImGui::SameLine();
                                         if (ImGui::Button("Wczytaj")) {
                                             if (engine && engine->getAssetManager() && !path.empty()) {
-                                                uint32_t newId = engine->getAssetManager()->loadTextureFromFile(path);
+                                                const bool isAlbedo = std::string(label) == "Albedo";
+                                                uint32_t newId = engine->getAssetManager()->loadTextureFromFile(path, true, isAlbedo);
                                                 if (newId != 0) {
                                                     texId = newId;
                                                     syncCustomMaterial();

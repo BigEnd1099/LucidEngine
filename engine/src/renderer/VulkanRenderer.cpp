@@ -74,6 +74,10 @@ namespace engine::renderer {
         if (m_context && m_context->getDevice()) {
             VkDevice dev = m_context->getDevice();
             vkDeviceWaitIdle(dev);
+            for (const auto& transient : m_transientVertexBuffers) {
+                if (transient.buffer) vmaDestroyBuffer(m_context->getAllocator(), transient.buffer, transient.allocation);
+            }
+            m_transientVertexBuffers.clear();
 
             m_rtDenoiser.cleanup();
             m_accelerationStructure.cleanup();

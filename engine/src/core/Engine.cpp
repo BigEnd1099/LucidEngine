@@ -15,6 +15,7 @@
 #include "core/Engine.hpp"
 #include "renderer/EditorLocalization.hpp"
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include "core/Logger.hpp"
 #include "ecs/TypeExporter.hpp"
 #include <chrono>
@@ -63,6 +64,192 @@ namespace engine::core {
             }
         }
         return out;
+    }
+
+    // Build a world matrix from the evaluated TransformComponent. In this ECS,
+    // TransformComponent stores world-space values while LocalTransformComponent
+    // stores authored values relative to the parent.
+    static glm::mat4 makeSkinWorldMatrix(const ecs::TransformComponent& transform) {
+        glm::quat orientation = transform.orientation;
+        const float orientationLength2 = glm::dot(orientation, orientation);
+        if (!std::isfinite(orientationLength2) || orientationLength2 < 1e-8f)
+            orientation = glm::quat(glm::radians(transform.rotation));
+        else
+            orientation = glm::normalize(orientation);
+
+        return glm::translate(glm::mat4(1.0f), transform.position) *
+               glm::mat4_cast(orientation) *
+               glm::scale(glm::mat4(1.0f), transform.scale);
+    }
+
+    // Evaluate the glTF skin palette after hierarchy propagation and gameplay updates.
+    // glTF column-vector convention: inverse(meshWorld) * jointWorld * inverseBind.
+    static void updateSkinPalettes(ecs::Registry& registry) {
+        registry.updateWorldTransforms();
+        auto view = registry.get().view<ecs::SkinComponent, ecs::TransformComponent>();
+        for (const entt::entity entity : view) {
+            auto& skin = view.get<ecs::SkinComponent>(entity);
+            const auto& meshTransform = view.get<ecs::TransformComponent>(entity);
+            const glm::mat4 meshWorld = makeSkinWorldMatrix(meshTransform);
+            const float determinant = glm::determinant(meshWorld);
+            if (!std::isfinite(determinant) || std::abs(determinant) < 1e-10f) {
+                skin.paletteDirty = true;
+                continue;
+            }
+
+            skin.inverseMeshTransform = glm::inverse(meshWorld);
+            const size_t jointCount = skin.joints.size();
+            if (skin.jointMatrices.size() != jointCount)
+                skin.jointMatrices.resize(jointCount, glm::mat4(1.0f));
+            if (skin.inverseBindMatrices.size() < jointCount)
+                skin.inverseBindMatrices.resize(jointCount, glm::mat4(1.0f));
+
+            for (size_t jointIndex = 0; jointIndex < jointCount; ++jointIndex) {
+                const entt::entity jointEntity = skin.joints[jointIndex];
+                if (jointEntity == entt::null || !registry.get().valid(jointEntity) ||
+                    !registry.get().all_of<ecs::TransformComponent>(jointEntity)) {
+                    skin.jointMatrices[jointIndex] = glm::mat4(1.0f);
+                    continue;
+                }
+
+                const auto& jointTransform = registry.get().get<ecs::TransformComponent>(jointEntity);
+                skin.jointMatrices[jointIndex] =
+                    skin.inverseMeshTransform *
+                    makeSkinWorldMatrix(jointTransform) *
+                    skin.inverseBindMatrices[jointIndex];
+            }
+            skin.paletteDirty = false;
+        }
+    }
+
+    // Sample glTF animation tracks and apply the pose to local ECS transforms/morph weights.
+    static void updateAnimationPlayers(ecs::Registry& registry, float deltaTime) {
+        auto view = registry.get().view<ecs::AnimationPlayerComponent>();
+        for (const entt::entity playerEntity : view) {
+            auto& player = view.get<ecs::AnimationPlayerComponent>(playerEntity);
+            if (player.clips.empty() || player.activeClip >= player.clips.size()) continue;
+            const auto& clip = player.clips[player.activeClip];
+            if (clip.tracks.empty()) continue;
+
+            if (player.playing && std::isfinite(deltaTime) && deltaTime > 0.0f) {
+                player.time += deltaTime * player.speed;
+            }
+            if (clip.duration > 1e-6f) {
+                if (player.loop) {
+                    player.time = std::fmod(player.time, clip.duration);
+                    if (player.time < 0.0f) player.time += clip.duration;
+                } else {
+                    player.time = std::clamp(player.time, 0.0f, clip.duration);
+                    if (player.time >= clip.duration) player.playing = false;
+                }
+            } else {
+                player.time = 0.0f;
+            }
+
+            for (const auto& track : clip.tracks) {
+                if (track.target == entt::null || !registry.get().valid(track.target) ||
+                    track.keyframeTimes.empty() || track.componentsPerKey == 0) continue;
+
+                const size_t keyCount = track.keyframeTimes.size();
+                const uint32_t componentCount = track.componentsPerKey;
+                const bool cubic = track.interpolation ==
+                    static_cast<uint8_t>(fastgltf::AnimationInterpolation::CubicSpline);
+                const size_t expectedValues = keyCount * componentCount * (cubic ? 3u : 1u);
+                if (track.values.size() < expectedValues) continue;
+
+                size_t keyA = 0;
+                size_t keyB = 0;
+                float alpha = 0.0f;
+                const float sampleTime = player.time;
+                auto upper = std::upper_bound(track.keyframeTimes.begin(), track.keyframeTimes.end(), sampleTime);
+                if (upper == track.keyframeTimes.begin()) {
+                    keyA = keyB = 0;
+                } else if (upper == track.keyframeTimes.end()) {
+                    keyA = keyB = keyCount - 1;
+                } else {
+                    keyB = static_cast<size_t>(upper - track.keyframeTimes.begin());
+                    keyA = keyB - 1;
+                    const float t0 = track.keyframeTimes[keyA];
+                    const float t1 = track.keyframeTimes[keyB];
+                    alpha = (t1 > t0) ? std::clamp((sampleTime - t0) / (t1 - t0), 0.0f, 1.0f) : 0.0f;
+                }
+
+                const bool step = track.interpolation ==
+                    static_cast<uint8_t>(fastgltf::AnimationInterpolation::Step);
+                const bool rotation = track.path ==
+                    static_cast<uint8_t>(fastgltf::AnimationPath::Rotation);
+                auto valueAt = [&](size_t key, uint32_t component, uint32_t cubicPart) -> float {
+                    const size_t base = cubic ? (key * 3u + cubicPart) * componentCount : key * componentCount;
+                    return track.values[base + component];
+                };
+
+                std::vector<float> sampled(componentCount, 0.0f);
+                if (keyA == keyB || step) {
+                    for (uint32_t component = 0; component < componentCount; ++component)
+                        sampled[component] = valueAt(keyA, component, cubic ? 1u : 0u);
+                } else if (cubic) {
+                    const float t = alpha;
+                    const float t2 = t * t;
+                    const float t3 = t2 * t;
+                    const float dt = track.keyframeTimes[keyB] - track.keyframeTimes[keyA];
+                    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+                    const float h10 = t3 - 2.0f * t2 + t;
+                    const float h01 = -2.0f * t3 + 3.0f * t2;
+                    const float h11 = t3 - t2;
+                    for (uint32_t component = 0; component < componentCount; ++component) {
+                        const float p0 = valueAt(keyA, component, 1u);
+                        const float m0 = valueAt(keyA, component, 2u);
+                        const float p1 = valueAt(keyB, component, 1u);
+                        const float m1 = valueAt(keyB, component, 0u);
+                        sampled[component] = h00 * p0 + h10 * dt * m0 + h01 * p1 + h11 * dt * m1;
+                    }
+                } else if (rotation && componentCount == 4) {
+                    const glm::quat q0(valueAt(keyA, 3, 0), valueAt(keyA, 0, 0),
+                                       valueAt(keyA, 1, 0), valueAt(keyA, 2, 0));
+                    const glm::quat q1(valueAt(keyB, 3, 0), valueAt(keyB, 0, 0),
+                                       valueAt(keyB, 1, 0), valueAt(keyB, 2, 0));
+                    const glm::quat q = glm::normalize(glm::slerp(glm::normalize(q0), glm::normalize(q1), alpha));
+                    sampled = {q.x, q.y, q.z, q.w};
+                } else {
+                    for (uint32_t component = 0; component < componentCount; ++component)
+                        sampled[component] = glm::mix(valueAt(keyA, component, 0), valueAt(keyB, component, 0), alpha);
+                }
+
+                if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Translation) && componentCount >= 3) {
+                    glm::vec3 translation(sampled[0], sampled[1], sampled[2]);
+                    if (!registry.get().all_of<ecs::HierarchyComponent>(track.target) ||
+                        registry.get().get<ecs::HierarchyComponent>(track.target).parent == entt::null)
+                        translation += player.rootTranslationOffset;
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target))
+                        registry.get().get<ecs::LocalTransformComponent>(track.target).position = translation;
+                    else if (registry.get().all_of<ecs::TransformComponent>(track.target))
+                        registry.get().get<ecs::TransformComponent>(track.target).position = translation;
+                } else if (rotation && componentCount >= 4) {
+                    glm::quat q(sampled[3], sampled[0], sampled[1], sampled[2]);
+                    if (glm::dot(q, q) > 1e-8f && std::isfinite(glm::dot(q, q))) q = glm::normalize(q);
+                    else q = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target)) {
+                        auto& transform = registry.get().get<ecs::LocalTransformComponent>(track.target);
+                        transform.orientation = q;
+                        transform.rotation = glm::degrees(glm::eulerAngles(q));
+                    } else if (registry.get().all_of<ecs::TransformComponent>(track.target)) {
+                        auto& transform = registry.get().get<ecs::TransformComponent>(track.target);
+                        transform.orientation = q;
+                        transform.rotation = glm::degrees(glm::eulerAngles(q));
+                    }
+                } else if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Scale) && componentCount >= 3) {
+                    const glm::vec3 scale(sampled[0], sampled[1], sampled[2]);
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target))
+                        registry.get().get<ecs::LocalTransformComponent>(track.target).scale = scale;
+                    else if (registry.get().all_of<ecs::TransformComponent>(track.target))
+                        registry.get().get<ecs::TransformComponent>(track.target).scale = scale;
+                } else if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Weights)) {
+                    auto& weights = registry.get().get_or_emplace<ecs::MorphWeightsComponent>(track.target);
+                    weights.weights = std::move(sampled);
+                }
+            }
+        }
+        registry.updateWorldTransforms();
     }
 
     static glm::vec4 parseColorJson(const nlohmann::json& j, const glm::vec4& fallback = glm::vec4(1.0f)) {
@@ -971,6 +1158,43 @@ namespace engine::core {
                     if (parentIt != restoredEntityMap.end() && parentIt->second != child)
                         m_registry->setParent(child, parentIt->second);
                 }
+
+                if (entJson.contains("morphWeights") && entJson["morphWeights"].is_array()) {
+                    auto& morph = m_registry->get().get_or_emplace<ecs::MorphWeightsComponent>(child);
+                    morph.weights = entJson["morphWeights"].get<std::vector<float>>();
+                }
+                if (entJson.contains("skin") && entJson["skin"].is_object()) {
+                    const auto& skinJson = entJson["skin"];
+                    auto& skin = m_registry->get().get_or_emplace<ecs::SkinComponent>(child);
+                    skin.skinAssetId = skinJson.value("skinAssetId", 0u);
+                    const uint32_t skeletonSavedId = skinJson.value("skeleton", 0u);
+                    if (skinJson.value("hasSkeleton", false)) {
+                        const auto skeletonIt = restoredEntityMap.find(skeletonSavedId);
+                        skin.skeleton = skeletonIt != restoredEntityMap.end()
+                            ? skeletonIt->second : static_cast<entt::entity>(entt::null);
+                    }
+                    skin.joints.clear();
+                    if (skinJson.contains("joints") && skinJson["joints"].is_array()) {
+                        for (const auto& jointJson : skinJson["joints"]) {
+                            const uint32_t jointSavedId = jointJson.get<uint32_t>();
+                            const auto jointIt = restoredEntityMap.find(jointSavedId);
+                            skin.joints.push_back(jointIt != restoredEntityMap.end()
+                                ? jointIt->second : static_cast<entt::entity>(entt::null));
+                        }
+                    }
+                    skin.inverseBindMatrices.clear();
+                    if (skinJson.contains("inverseBindMatrices") && skinJson["inverseBindMatrices"].is_array()) {
+                        for (const auto& matrixJson : skinJson["inverseBindMatrices"]) {
+                            if (!matrixJson.is_array() || matrixJson.size() != 16) continue;
+                            glm::mat4 matrix(1.0f);
+                            size_t valueIndex = 0;
+                            for (int column = 0; column < 4; ++column)
+                                for (int row = 0; row < 4; ++row)
+                                    matrix[column][row] = matrixJson[valueIndex++].get<float>();
+                            skin.inverseBindMatrices.push_back(matrix);
+                        }
+                    }
+                }
             }
             m_registry->updateWorldTransforms();
 
@@ -1135,7 +1359,22 @@ namespace engine::core {
                 float dt_real = std::chrono::duration<float>(current_now - lastTime).count();
                 lastTime = current_now;
                 if (!m_paused) {
-                    try { update(dt_real); } catch (const std::exception& e) { core::Logger::error(std::string("Update exception: ") + e.what()); }
+                    try {
+                        update(dt_real);
+                    } catch (const std::exception& e) {
+                        core::Logger::error(std::string("Update exception: ") + e.what());
+                    }
+                }
+                // Hierarchy and skin palettes must also refresh while the editor is paused,
+                // because gizmo edits and imported scene changes still modify local transforms.
+                if (m_registry) {
+                    try {
+                        updateAnimationPlayers(*m_registry, m_paused ? 0.0f : dt_real);
+                        updateSkinPalettes(*m_registry);
+                    }
+                    catch (const std::exception& e) {
+                        core::Logger::error(std::string("Animation/skin pose update exception: ") + e.what());
+                    }
                 }
                 if (!m_headless) {
                     try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); } catch(...) { core::Logger::error("Unknown render exception!"); }
@@ -1895,6 +2134,30 @@ function update(entities, dt, input, contacts) {
                 entJson["mesh"] = {
                     {"meshId", m.meshId},
                     {"materialId", m.materialId}
+                };
+            }
+            if (m_registry->get().all_of<ecs::MorphWeightsComponent>(entity)) {
+                entJson["morphWeights"] = m_registry->get().get<ecs::MorphWeightsComponent>(entity).weights;
+            }
+            if (m_registry->get().all_of<ecs::SkinComponent>(entity)) {
+                const auto& skin = m_registry->get().get<ecs::SkinComponent>(entity);
+                nlohmann::json joints = nlohmann::json::array();
+                for (entt::entity joint : skin.joints)
+                    joints.push_back(static_cast<uint32_t>(joint));
+                nlohmann::json inverseBindMatrices = nlohmann::json::array();
+                for (const glm::mat4& matrix : skin.inverseBindMatrices) {
+                    nlohmann::json values = nlohmann::json::array();
+                    for (int column = 0; column < 4; ++column)
+                        for (int row = 0; row < 4; ++row)
+                            values.push_back(matrix[column][row]);
+                    inverseBindMatrices.push_back(std::move(values));
+                }
+                entJson["skin"] = {
+                    {"skinAssetId", skin.skinAssetId},
+                    {"hasSkeleton", skin.skeleton != entt::null},
+                    {"skeleton", static_cast<uint32_t>(skin.skeleton)},
+                    {"joints", std::move(joints)},
+                    {"inverseBindMatrices", std::move(inverseBindMatrices)}
                 };
             }
             if (m_registry->get().all_of<ecs::RigidBodyComponent>(entity)) {

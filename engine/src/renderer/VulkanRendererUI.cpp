@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #ifdef USE_GLFW
 #include "imgui.h"
@@ -623,7 +624,9 @@ namespace engine::renderer {
                                     const std::string modelName = droppedPath.stem().string().empty()
                                         ? std::string("ImportedModel") : droppedPath.stem().string();
                                     const glm::vec3 placementOrigin = camPos + front * 5.0f;
-                                    std::vector<entt::entity> nodeEntities(importedNodes.size(), entt::null);
+                                    std::vector<entt::entity> nodeEntities(importedNodes.size());
+                                    std::fill(nodeEntities.begin(), nodeEntities.end(), entt::null);
+                                    std::unordered_map<size_t, entt::entity> sourceNodeEntities;
                                     entt::entity firstCreated = entt::null;
                                     size_t createdCount = 0;
 
@@ -633,6 +636,7 @@ namespace engine::renderer {
                                         const auto& node = importedNodes[nodeIndex];
                                         const entt::entity entity = registry.createEntity();
                                         nodeEntities[nodeIndex] = entity;
+                                        sourceNodeEntities.emplace(node.nodeIndex, entity);
                                         const std::string nodeName = node.name.empty()
                                             ? "Node_" + std::to_string(node.nodeIndex) : node.name;
                                         registry.get().emplace<ecs::TagComponent>(entity,
@@ -656,7 +660,10 @@ namespace engine::renderer {
                                         if (!node.meshIds.empty()) {
                                             const uint32_t meshId = node.meshIds.front();
                                             if (assetManager->getMesh(meshId)) {
-                                                registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{meshId});
+                                                ecs::MeshComponent meshComponent{};
+                                                meshComponent.meshId = meshId;
+                                                meshComponent.materialId = assetManager->getMesh(meshId)->materialId;
+                                                registry.get().emplace<ecs::MeshComponent>(entity, meshComponent);
                                                 ++createdCount;
                                             }
                                         }
@@ -668,6 +675,68 @@ namespace engine::renderer {
                                         const int64_t parentIndex = importedNodes[nodeIndex].parentNodeIndex;
                                         if (parentIndex >= 0 && static_cast<size_t>(parentIndex) < nodeEntities.size())
                                             registry.setParent(nodeEntities[nodeIndex], nodeEntities[static_cast<size_t>(parentIndex)]);
+                                    }
+
+                                    // Attach imported skin bindings and morph weights after all
+                                    // source-node entities exist, so joint references can be resolved.
+                                    const auto& importedSkins = assetManager->getLastImportedSkins();
+                                    for (size_t nodeIndex = 0; nodeIndex < importedNodes.size(); ++nodeIndex) {
+                                        const auto& node = importedNodes[nodeIndex];
+                                        const entt::entity entity = nodeEntities[nodeIndex];
+                                        if (node.skinId > 0 && node.skinId <= importedSkins.size()) {
+                                            const auto& sourceSkin = importedSkins[node.skinId - 1];
+                                            ecs::SkinComponent skinComponent{};
+                                            skinComponent.skinAssetId = sourceSkin.id;
+                                            skinComponent.inverseBindMatrices = sourceSkin.inverseBindMatrices;
+                                            skinComponent.jointMatrices.assign(sourceSkin.jointNodeIndices.size(), glm::mat4(1.0f));
+                                            if (skinComponent.inverseBindMatrices.size() != sourceSkin.jointNodeIndices.size()) {
+                                                skinComponent.inverseBindMatrices.resize(sourceSkin.jointNodeIndices.size(), glm::mat4(1.0f));
+                                            }
+                                            if (sourceSkin.skeletonNodeIndex >= 0) {
+                                                const auto skeletonIt = sourceNodeEntities.find(static_cast<size_t>(sourceSkin.skeletonNodeIndex));
+                                                if (skeletonIt != sourceNodeEntities.end())
+                                                    skinComponent.skeleton = skeletonIt->second;
+                                            }
+                                            for (size_t jointNodeIndex : sourceSkin.jointNodeIndices) {
+                                                const auto jointIt = sourceNodeEntities.find(jointNodeIndex);
+                                                skinComponent.joints.push_back(jointIt != sourceNodeEntities.end()
+                                                    ? jointIt->second : static_cast<entt::entity>(entt::null));
+                                            }
+                                            registry.get().emplace<ecs::SkinComponent>(entity, std::move(skinComponent));
+                                        }
+                                        if (!node.morphWeights.empty())
+                                            registry.get().emplace<ecs::MorphWeightsComponent>(entity,
+                                                ecs::MorphWeightsComponent{node.morphWeights});
+                                    }
+
+                                    // Bind imported animation channels to the ECS entities created above.
+                                    const auto& importedAnimations = assetManager->getLastImportedAnimations();
+                                    ecs::AnimationPlayerComponent animationPlayer{};
+                                    animationPlayer.rootTranslationOffset = placementOrigin;
+                                    for (const auto& sourceClip : importedAnimations) {
+                                        ecs::AnimationClipRuntime clip{};
+                                        clip.name = sourceClip.name;
+                                        clip.duration = sourceClip.duration;
+                                        for (const auto& sourceTrack : sourceClip.tracks) {
+                                            const auto targetIt = sourceNodeEntities.find(sourceTrack.nodeIndex);
+                                            if (targetIt == sourceNodeEntities.end()) continue;
+                                            ecs::AnimationTrackRuntime track{};
+                                            track.target = targetIt->second;
+                                            track.path = sourceTrack.path;
+                                            track.interpolation = sourceTrack.interpolation;
+                                            track.componentsPerKey = sourceTrack.componentsPerKey;
+                                            track.keyframeTimes = sourceTrack.keyframeTimes;
+                                            track.values = sourceTrack.values;
+                                            if (!track.keyframeTimes.empty() && track.componentsPerKey > 0)
+                                                clip.tracks.push_back(std::move(track));
+                                        }
+                                        if (!clip.tracks.empty()) animationPlayer.clips.push_back(std::move(clip));
+                                    }
+                                    if (!animationPlayer.clips.empty()) {
+                                        registry.get().emplace<ecs::AnimationPlayerComponent>(firstCreated,
+                                            std::move(animationPlayer));
+                                        core::Logger::info("Imported " + std::to_string(importedAnimations.size()) +
+                                            " glTF animation clip(s) for " + modelName);
                                     }
 
                                     // A glTF mesh may contain several primitives. The first
@@ -683,7 +752,16 @@ namespace engine::renderer {
                                                 ecs::TagComponent{node.name + "_Primitive_" + std::to_string(primitiveIndex + 1)});
                                             registry.get().emplace<ecs::TransformComponent>(primitiveEntity, ecs::TransformComponent{});
                                             registry.get().emplace<ecs::LocalTransformComponent>(primitiveEntity, ecs::LocalTransformComponent{});
-                                            registry.get().emplace<ecs::MeshComponent>(primitiveEntity, ecs::MeshComponent{meshId});
+                                            ecs::MeshComponent meshComponent{};
+                                            meshComponent.meshId = meshId;
+                                            meshComponent.materialId = assetManager->getMesh(meshId)->materialId;
+                                            registry.get().emplace<ecs::MeshComponent>(primitiveEntity, meshComponent);
+                                            if (registry.get().all_of<ecs::SkinComponent>(nodeEntities[nodeIndex]))
+                                                registry.get().emplace<ecs::SkinComponent>(primitiveEntity,
+                                                    registry.get().get<ecs::SkinComponent>(nodeEntities[nodeIndex]));
+                                            if (registry.get().all_of<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]))
+                                                registry.get().emplace<ecs::MorphWeightsComponent>(primitiveEntity,
+                                                    registry.get().get<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]));
                                             registry.setParent(primitiveEntity, nodeEntities[nodeIndex]);
                                             ++createdCount;
                                         }

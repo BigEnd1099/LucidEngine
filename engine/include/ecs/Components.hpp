@@ -37,6 +37,48 @@ namespace engine::ecs {
         bool visible{true};
     };
 
+    struct MorphWeightsComponent {
+        std::vector<float> weights;
+    };
+
+    struct AnimationTrackRuntime {
+        entt::entity target{entt::null};
+        uint8_t path{0};          // fastgltf AnimationPath
+        uint8_t interpolation{0}; // fastgltf AnimationInterpolation
+        uint32_t componentsPerKey{0};
+        std::vector<float> keyframeTimes;
+        std::vector<float> values; // CUBICSPLINE stores in/value/out triplets per key
+    };
+
+    struct AnimationClipRuntime {
+        std::string name;
+        float duration{0.0f};
+        std::vector<AnimationTrackRuntime> tracks;
+    };
+
+    struct AnimationPlayerComponent {
+        std::vector<AnimationClipRuntime> clips;
+        uint32_t activeClip{0};
+        float time{0.0f};
+        float speed{1.0f};
+        glm::vec3 rootTranslationOffset{0.0f};
+        bool playing{true};
+        bool loop{true};
+    };
+
+    struct SkinComponent {
+        uint32_t skinAssetId{0};
+        entt::entity skeleton{entt::null};
+        std::vector<entt::entity> joints;
+        std::vector<glm::mat4> inverseBindMatrices;
+
+        // Runtime palette: inverse mesh world * joint world transform * inverse bind.
+        // Kept on the ECS component so animation and rendering share one evaluated pose.
+        std::vector<glm::mat4> jointMatrices;
+        glm::mat4 inverseMeshTransform{1.0f};
+        bool paletteDirty{true};
+    };
+
     struct LODComponent {
         std::vector<uint32_t> lodMeshIds{0}; // Mesh IDs for LOD0, LOD1, LOD2...
         std::vector<float> lodDistances{15.0f, 40.0f}; // Distance thresholds

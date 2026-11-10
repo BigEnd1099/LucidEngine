@@ -23,6 +23,8 @@ namespace engine::renderer {
 
     struct DrawItem {
         core::MeshAsset* mesh{nullptr};
+        VkBuffer vertexBuffer{VK_NULL_HANDLE};
+        entt::entity entity{entt::null};
         PbrPushConstants pcs{};
         uint32_t materialId{0};
     };

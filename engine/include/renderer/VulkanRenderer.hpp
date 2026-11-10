@@ -221,6 +221,9 @@ namespace engine::renderer {
         bool m_standaloneGameMode{false};
         uint32_t m_frameCounter{0};
 
+        struct TransientVertexBuffer { VkBuffer buffer{VK_NULL_HANDLE}; VmaAllocation allocation{VK_NULL_HANDLE}; };
+        std::vector<TransientVertexBuffer> m_transientVertexBuffers;
+
         // Main PBR, Depth Prepass & G-Buffer Pipelines
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_graphicsPipeline{VK_NULL_HANDLE};

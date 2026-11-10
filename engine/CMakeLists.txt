@@ -207,6 +207,10 @@ target_include_directories(engine PRIVATE ${asio_SOURCE_DIR}/asio/include)
 target_include_directories(engine PRIVATE ${qjs_SOURCE_DIR})
 target_include_directories(engine PRIVATE ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_compile_definitions(engine PRIVATE ASIO_STANDALONE USE_GLFW)
+if(WIN32)
+    # ASIO/IXWebSocket use the Windows SDK target to select available APIs.
+    target_compile_definitions(engine PRIVATE _WIN32_WINNT=0x0A00)
+endif
 target_link_libraries(engine PRIVATE
     EnTT::EnTT
     glm::glm

@@ -10,6 +10,7 @@ namespace engine::renderer {
         glm::vec3 normal;
         glm::vec2 texCoord;
         glm::vec4 tangent;
+        glm::vec4 color{1.0f};
 
         static std::vector<VkVertexInputBindingDescription> getBindingDescription() {
             std::vector<VkVertexInputBindingDescription> bindingDescriptions(1);
@@ -20,7 +21,7 @@ namespace engine::renderer {
         }
 
         static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
-            std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
+            std::vector<VkVertexInputAttributeDescription> attributeDescriptions(5);
 
             // position
             attributeDescriptions[0].binding = 0;
@@ -46,15 +47,22 @@ namespace engine::renderer {
             attributeDescriptions[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
             attributeDescriptions[3].offset = offsetof(Vertex, tangent);
 
+            // vertex color (glTF COLOR_0)
+            attributeDescriptions[4].binding = 0;
+            attributeDescriptions[4].location = 4;
+            attributeDescriptions[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attributeDescriptions[4].offset = offsetof(Vertex, color);
+
             return attributeDescriptions;
         }
     };
 
     // The RT buffer-reference shader reads this exact packed layout via
     // VK_KHR_buffer_device_address; keep it in sync with RtVertex in pbr_rt.frag.
-    static_assert(sizeof(Vertex) == 48, "Vertex must be tightly packed to 48 bytes for RT buffer references");
+    static_assert(sizeof(Vertex) == 64, "Vertex must be tightly packed to 64 bytes for RT buffer references");
     static_assert(offsetof(Vertex, position) == 0, "Unexpected Vertex::position offset");
     static_assert(offsetof(Vertex, normal) == 12, "Unexpected Vertex::normal offset");
     static_assert(offsetof(Vertex, texCoord) == 24, "Unexpected Vertex::texCoord offset");
     static_assert(offsetof(Vertex, tangent) == 32, "Unexpected Vertex::tangent offset");
+    static_assert(offsetof(Vertex, color) == 48, "Unexpected Vertex::color offset");
 }
