@@ -305,7 +305,7 @@ namespace engine::network {
                     fps = json["params"].value("fps", 0);
                 }
                 queue.push([fps, client, id](core::Engine* eng) {
-                    eng->setTargetFps(std::max(0, fps));
+                    eng->setTargetFps(fps < 0 ? 0 : fps);
                     nlohmann::json res = {
                         {"jsonrpc", "2.0"},
                         {"id", id},
