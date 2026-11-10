@@ -72,15 +72,19 @@ inline bool setEditorLanguage(std::string_view locale) {
     return false;
 }
 
-// The English source text doubles as a stable migration key for existing UI calls.
-// New UI should use explicit translation keys as the localization system expands.
-inline const char* editorText(const char* english, const char* legacyPolish = nullptr) {
+// Prefer stable IDs so translation wording can evolve independently from source code.
+inline const char* editorText(const char* key, const char* english, const char* legacyPolish = nullptr) {
     const auto& translations = activeEditorTranslations();
-    const auto it = translations.find(english ? english : "");
+    const auto it = translations.find(key ? key : "");
     if (it != translations.end()) return it->second.c_str();
 
     if (activeEditorLocale() == "pl" && legacyPolish) return legacyPolish;
     return english ? english : "";
+}
+
+// Compatibility overload for panels that have not yet migrated to stable IDs.
+inline const char* editorText(const char* english, const char* legacyPolish = nullptr) {
+    return editorText(english, english, legacyPolish);
 }
 
 } // namespace engine::renderer
