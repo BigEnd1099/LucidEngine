@@ -20,6 +20,8 @@
 #include "ecs/TypeExporter.hpp"
 #include <chrono>
 #include <thread>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <filesystem>
 #include <fastgltf/core.hpp>
