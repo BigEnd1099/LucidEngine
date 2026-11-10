@@ -1452,7 +1452,7 @@ namespace engine::renderer {
         }
 
         if (m_timestampQueryPool)
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 8);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 6);
 
         // =========================================================================
         // PASS 4: 5-MIP JIMENEZ BLOOM PYRAMID (13-Tap Karis Downsample + 3x3 Tent Up)
@@ -1731,7 +1731,7 @@ namespace engine::renderer {
 #endif
 
         if (m_timestampQueryPool) {
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 6);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 8);
         }
         vkEndCommandBuffer(m_commandBuffer);
 
