@@ -13,6 +13,7 @@
 #endif
 
 #include "core/Engine.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "core/Logger.hpp"
 #include "ecs/TypeExporter.hpp"
@@ -1953,6 +1954,7 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::applyPreferences() {
+        renderer::setEditorLanguage(m_preferences.language);
         setTargetFps(m_preferences.targetFps);
         setVsyncEnabled(m_preferences.vsync);
         if (m_renderer) {
