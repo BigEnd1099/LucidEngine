@@ -316,6 +316,7 @@
     "ui.shortcut_focus": "Focus selected object",
     "ui.shortcut_delete": "Delete selected object",
     "ui.shortcut_duplicate": "Duplicate selected object",
-    "ui.shortcuts_note": "Viewport shortcuts are disabled while editing text or during simulation where applicable."
+    "ui.shortcuts_note": "Viewport shortcuts are disabled while editing text or during simulation where applicable.",
+    "ui.refresh_assets": "Refresh"
   }
 }
