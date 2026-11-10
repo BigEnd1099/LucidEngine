@@ -20,38 +20,48 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                 if (ImGui::Begin(editorText("script.studio_title", "Blueprints / QuickJS Script Studio"), &state.showScriptStudio)) {
                     static char scriptBuf[16384] = "";
                     static bool s_scriptInit = false;
-                    if (engine && (!s_scriptInit || scriptBuf[0] == '\0')) {
+                    static bool s_scriptDirty = false;
+                    if (engine && !s_scriptInit) {
                         s_scriptInit = true;
                         const std::string code = engine->getCurrentScript();
                         std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
+                        scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                        s_scriptDirty = false;
                     }
                     if (ImGui::Button(editorText("script.apply_run", " Apply & Run Script ")) && engine) {
                         engine->loadScript(scriptBuf);
                         engine->setCurrentScript(scriptBuf);
+                        s_scriptDirty = false;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.reload_from_scene", " Reload from Scene ")) && engine) {
                         const std::string code = engine->getCurrentScript();
                         std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                        s_scriptDirty = false;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.clear", " Clear "))) {
                         scriptBuf[0] = '\0';
+                        s_scriptDirty = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_rotation", " Template: Rotation "))) {
                         std::string tpl = "// QuickJS Live Script: Rotacja i animacja obiektu\nlet angle = 0;\nexport function update(dt) {\n    angle += dt * 45.0;\n    console.log('[QuickJS] Kat rotacji: ' + angle.toFixed(1));\n}\n";
                         std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                        s_scriptDirty = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_impulse", " Template: Impulse "))) {
                         std::string tpl = "// QuickJS Live Script: Impuls fizyczny Jolt\nexport function update(dt) {\n    console.log('[QuickJS] Impuls fizyczny zaaplikowany');\n}\n";
                         std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+                        s_scriptDirty = true;
                     }
-                    ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
+                    if (ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) s_scriptDirty = true;
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", editorText(s_scriptDirty ? "script.modified" : "script.synced", s_scriptDirty ? "Modified" : "Synced"));
                 }
                 ImGui::End();
             }
@@ -123,12 +133,19 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                             m_uiScale = curUiScale;
                             engine->setUiScale(curUiScale);
                         }
+                        auto applyUiScalePreset = [&](float scale) {
+                            pref.uiScale = scale;
+                            m_uiScale = scale;
+                            state.uiScale = scale;
+                            engine->setUiScale(scale);
+                            if (pref.autoSavePreferences) engine->saveUserPreferences();
+                        };
                         ImGui::SameLine();
-                        if (ImGui::Button("100%")) { pref.uiScale = 1.0f; m_uiScale = 1.0f; engine->setUiScale(1.0f); }
+                        if (ImGui::Button("100%")) applyUiScalePreset(1.0f);
                         ImGui::SameLine();
-                        if (ImGui::Button("125%")) { pref.uiScale = 1.25f; m_uiScale = 1.25f; engine->setUiScale(1.25f); }
+                        if (ImGui::Button("125%")) applyUiScalePreset(1.25f);
                         ImGui::SameLine();
-                        if (ImGui::Button("150%")) { pref.uiScale = 1.50f; m_uiScale = 1.50f; engine->setUiScale(1.50f); }
+                        if (ImGui::Button("150%")) applyUiScalePreset(1.50f);
 
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), editorText("ui.default_panel_visibility", "Default panel visibility:"));
