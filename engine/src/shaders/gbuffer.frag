@@ -4,8 +4,9 @@ layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec4 fragTangent;
-layout(location = 4) in vec4 currClipPos;
-layout(location = 5) in vec4 prevClipPos;
+layout(location = 4) in vec4 fragColor;
+layout(location = 5) in vec4 currClipPos;
+layout(location = 6) in vec4 prevClipPos;
 
 layout(location = 0) out vec4 outNormalRoughness; // xyz: normal, w: roughness
 layout(location = 1) out vec4 outAlbedoMetallic;  // rgb: albedo (linear), a: metallic
@@ -47,7 +48,7 @@ vec3 computeNormal(vec3 N) {
 
 void main() {
     vec4 albedoTex = texture(albedoMap, fragTexCoord);
-    vec3 albedoLinear = albedoTex.rgb * pcs.baseColorFactor.rgb;
+    vec3 albedoLinear = albedoTex.rgb * pcs.baseColorFactor.rgb * fragColor.rgb;
 
     vec3 N = normalize(fragNormal);
     vec3 finalNormal = computeNormal(N);
