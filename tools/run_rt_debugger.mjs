@@ -201,7 +201,21 @@ async function main() {
       (m.rtGiTraceMs?.average ?? 0) + ' | ' + (m.rtReflectionTraceMs?.average ?? 0) + ' | ' +
       (m.rtComputeTotalMs?.average ?? 0) + ' |');
   }
-  lines.push('', '## Methodology', '',
+  const cpuStageNames = [...new Set(results.flatMap(result =>
+    Object.keys(result.summary.cpuStages || {})))].sort();
+  lines.push('', '## CPU profiler scopes (sampled)', '',
+    '| Case | Scope | Average ms | P95 ms | Max ms |',
+    '|---|---|---:|---:|---:|');
+  for (const result of results) {
+    for (const stage of cpuStageNames) {
+      const stats = result.summary.cpuStages?.[stage];
+      if (!stats) continue;
+      lines.push('| ' + result.name + ' | ' + stage + ' | ' +
+        stats.averageMs + ' | ' + stats.p95Ms + ' | ' + stats.maxMs + ' |');
+    }
+  }
+  lines.push('', 'CPU scopes are sampled snapshots, not per-frame percentiles.',
+    '', '## Methodology', '',
     '- Reads existing renderer profiler snapshots through JSON-RPC; does not perform GPU readback.',
     '- The selected debug view is rendered live and may alter the visual output.',
     '- Percentiles are across polled snapshots, not per-frame percentiles.',
