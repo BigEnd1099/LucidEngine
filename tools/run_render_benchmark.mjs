@@ -312,7 +312,10 @@ function round(value, digits = 3) {
 async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[0]) {
   const actual = await setFeatures(features, profile.settings);
   const readback = actual?.quality || {};
-  const mismatches = Object.entries(profile.settings).filter(([key, expected]) => readback[key] !== expected);
+  const matches = (actualValue, expected) => typeof expected === 'number' && typeof actualValue === 'number'
+    ? Math.abs(actualValue - expected) < 1e-5
+    : actualValue === expected;
+  const mismatches = Object.entries(profile.settings).filter(([key, expected]) => !matches(readback[key], expected));
   if (mismatches.length) {
     throw new Error('Renderer quality readback mismatch for profile ' + profile.id + ': ' +
       mismatches.map(([key, expected]) => key + ' expected=' + expected + ' actual=' + readback[key]).join(', '));
