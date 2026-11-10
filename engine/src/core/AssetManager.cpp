@@ -36,6 +36,7 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTF(const std::string& path) {
+        m_lastImportedInstances.clear();
         try {
             fastgltf::Parser parser;
             auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
@@ -319,6 +320,7 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTFFromMemory(const std::vector<uint8_t>& data) {
+        m_lastImportedInstances.clear();
         if (data.empty()) return 0;
         try {
             fastgltf::Parser parser;
@@ -348,7 +350,9 @@ namespace engine::core {
             if (asset.meshes.empty()) return 0;
             // Import every mesh primitive. glTF meshes may contain multiple primitives,
             // each with its own material and index/vertex streams.
-            for (const auto& gltfMesh : asset.meshes) {
+            std::vector<std::vector<uint32_t>> importedMeshIds(asset.meshes.size());
+            for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex) {
+              const auto& gltfMesh = asset.meshes[meshIndex];
               for (const auto& primitive : gltfMesh.primitives) {
             if (primitive.type != fastgltf::PrimitiveType::Triangles) {
                 core::Logger::warn("AssetManager: skipping non-triangle glTF primitive");
@@ -544,8 +548,45 @@ namespace engine::core {
                 m_materials.push_back(std::move(materialAsset));
             }
             // Keep the mesh alive until its material assignment is complete.
+            importedMeshIds[meshIndex].push_back(meshAsset->id);
             m_meshes.push_back(std::move(meshAsset));
               }
+            }
+            // Instantiate only meshes referenced by nodes in the active scene when available.
+            // Node TRS is preserved; assets without nodes fall back to one identity instance per primitive.
+            auto appendNodeInstances = [&](const fastgltf::Node& node) {
+                if (!node.meshIndex.has_value() || node.meshIndex.value() >= importedMeshIds.size()) return;
+                glm::vec3 translation(0.0f), scale(1.0f);
+                glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+                if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
+                    translation = glm::vec3(static_cast<float>(trs->translation[0]), static_cast<float>(trs->translation[1]), static_cast<float>(trs->translation[2]));
+                    scale = glm::vec3(static_cast<float>(trs->scale[0]), static_cast<float>(trs->scale[1]), static_cast<float>(trs->scale[2]));
+                    rotation = glm::quat(static_cast<float>(trs->rotation[3]), static_cast<float>(trs->rotation[0]), static_cast<float>(trs->rotation[1]), static_cast<float>(trs->rotation[2]));
+                }
+                for (uint32_t id : importedMeshIds[node.meshIndex.value()]) {
+                    ImportedMeshInstance instance;
+                    instance.meshId = id;
+                    instance.name = node.name.empty() ? std::string("Mesh") : std::string(node.name);
+                    instance.translation = translation;
+                    instance.rotation = rotation;
+                    instance.scale = scale;
+                    m_lastImportedInstances.push_back(std::move(instance));
+                }
+            };
+            if (!asset.scenes.empty()) {
+                size_t sceneIndex = asset.defaultScene.value_or(0);
+                if (sceneIndex >= asset.scenes.size()) sceneIndex = 0;
+                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) {
+                    if (nodeIndex < asset.nodes.size()) appendNodeInstances(asset.nodes[nodeIndex]);
+                }
+            } else {
+                for (const auto& node : asset.nodes) appendNodeInstances(node);
+            }
+            if (m_lastImportedInstances.empty()) {
+                for (const auto& meshIds : importedMeshIds) for (uint32_t id : meshIds) {
+                    ImportedMeshInstance instance; instance.meshId = id; instance.name = "Mesh";
+                    m_lastImportedInstances.push_back(std::move(instance));
+                }
             }
             if (rootMeshId == 0) {
                 core::Logger::error("AssetManager: glTF contains no supported triangle primitives");
