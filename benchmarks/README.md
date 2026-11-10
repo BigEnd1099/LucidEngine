@@ -1,6 +1,6 @@
 # Lucid Engine render benchmark
 
-The benchmark runner starts a separate headless engine process on port **9011** (default), generates the deterministic **Atrium Benchmark** scene, toggles renderer features over JSON-RPC, and writes one-second-plus sampling windows to disk.
+The benchmark runner starts a separate headless engine process on port **9011** (default), generates the deterministic **Atrium Benchmark** scene, saves it as an editable project inside the run folder, toggles renderer features over JSON-RPC, and writes sampling windows to disk.
 
 ## Run
 
@@ -46,5 +46,6 @@ Every run creates `benchmark-results/run-<timestamp>/` containing:
 - `REPORT.json` — machine-readable summary
 - one JSON file per test case with raw samples
 - `atrium-benchmark.jpg` — scene capture
+- `AtriumBenchmark/` — saved editable project (`.uproject`, `project.json`, `game.json` and project folders)
 
 GPU subpass values are nested inside the AO + RT aggregate; do not add them to the parent stage. RT reflection algorithms and quality defaults are not modified by the benchmark harness.
