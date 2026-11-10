@@ -84,6 +84,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::MenuItem(editorText("ui.details", "Details"), nullptr, &state.showDetails);
                         ImGui::MenuItem(editorText("ui.content_drawer", "Content Drawer"), "Ctrl+Space", &state.showContentDrawer);
                         ImGui::MenuItem(editorText("ui.output_log", "Output Log"), nullptr, &state.showOutputLog);
+                        ImGui::MenuItem(editorText("ui.performance_profiler", "Performance Profiler"), nullptr, &m_showPerformanceProfiler);
                         ImGui::MenuItem(editorText("ui.blueprints_scripts", "Blueprints / Scripts"), nullptr, &state.showScriptStudio);
                         ImGui::Separator();
                         ImGui::MenuItem(editorText("ui.editor_preferences", "Editor Preferences..."), "Ctrl+,", &state.showPreferencesWindow);

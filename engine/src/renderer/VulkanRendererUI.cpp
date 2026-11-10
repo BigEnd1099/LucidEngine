@@ -12,6 +12,7 @@
 #include "core/Logger.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
+#include "core/Profiler.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -28,6 +29,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <array>
+#include <utility>
 
 #ifdef USE_GLFW
 #include "imgui.h"
@@ -118,6 +121,197 @@ namespace engine::renderer {
         if (lenSq < 1e-4f) return hypotf(p.x - a.x, p.y - a.y);
         const float t = std::clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq, 0.0f, 1.0f);
         return hypotf(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
+    }
+
+    void VulkanRenderer::drawPerformanceProfilerPanel(core::Engine* engine) {
+        if (!m_showPerformanceProfiler) return;
+
+        const nlohmann::json stats = core::Profiler::get().getStatsJson();
+        const double fps = static_cast<double>(ImGui::GetIO().Framerate);
+        const double loopFrameMs = stats.value("frameTimeMs", 0.0);
+        const double gpuFrameMs = stats.value("gpuTimeMs", 0.0);
+        const nlohmann::json engineStats = engine ? engine->getProfilerStats() : nlohmann::json::object();
+        const nlohmann::json metrics = stats.value("metrics", nlohmann::json::object());
+
+        double renderCpuMs = 0.0;
+        double updateCpuMs = 0.0;
+        double animationCpuMs = 0.0;
+        if (stats.contains("samples") && stats["samples"].is_object()) {
+            const auto& samples = stats["samples"];
+            if (samples.contains("Vulkan Render Thread"))
+                renderCpuMs = samples["Vulkan Render Thread"].value("lastMs", 0.0);
+            if (samples.contains("Simulation Update"))
+                updateCpuMs = samples["Simulation Update"].value("lastMs", 0.0);
+            if (samples.contains("Animation & Skinning"))
+                animationCpuMs = samples["Animation & Skinning"].value("lastMs", 0.0);
+        }
+
+        // Keep a compact rolling history. It is updated only while the panel is open,
+        // so the profiler itself adds virtually no work when hidden.
+        static constexpr size_t kHistorySize = 180;
+        static std::array<float, kHistorySize> cpuHistory{};
+        static std::array<float, kHistorySize> gpuHistory{};
+        static size_t historyCount = 0;
+        static uint64_t lastHistoryFrame = UINT64_MAX;
+        const uint64_t frameCounter = stats.value("frameCounter", uint64_t{0});
+        if (frameCounter != lastHistoryFrame) {
+            if (historyCount < kHistorySize) {
+                cpuHistory[historyCount] = static_cast<float>(renderCpuMs);
+                gpuHistory[historyCount] = static_cast<float>(gpuFrameMs);
+                ++historyCount;
+            } else {
+                std::move(cpuHistory.begin() + 1, cpuHistory.end(), cpuHistory.begin());
+                std::move(gpuHistory.begin() + 1, gpuHistory.end(), gpuHistory.begin());
+                cpuHistory.back() = static_cast<float>(renderCpuMs);
+                gpuHistory.back() = static_cast<float>(gpuFrameMs);
+            }
+            lastHistoryFrame = frameCounter;
+        }
+
+        const std::string windowTitle = std::string(editorText("ui.performance_profiler", "Performance Profiler")) + "###PerformanceProfiler";
+        ImGui::SetNextWindowSize(ImVec2(700.0f, 560.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(80.0f, 80.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin(windowTitle.c_str(), &m_showPerformanceProfiler, ImGuiWindowFlags_NoCollapse)) {
+            ImGui::TextDisabled("%s", editorText("ui.profiler_live_diagnostics", "LIVE RENDER DIAGNOSTICS"));
+            ImGui::SameLine();
+            ImGui::TextDisabled("|  Vulkan 1.3");
+
+            if (ImGui::BeginTable("##PerformanceSummary", 4,
+                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableNextRow();
+                auto metric = [](const char* label, double value, const char* unit, bool available = true) {
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", label);
+                    if (available) ImGui::Text("%.*f %s", 2, value, unit);
+                    else ImGui::TextDisabled("N/A");
+                };
+                metric(editorText("ui.profiler_frame_rate", "FRAME RATE"), fps, "FPS");
+                metric(editorText("ui.profiler_loop_frame", "LOOP FRAME"), loopFrameMs, "ms");
+                metric(editorText("ui.profiler_render_thread", "RENDER THREAD"), renderCpuMs, "ms", renderCpuMs > 0.0);
+                metric(editorText("ui.profiler_render_gpu", "RENDER GPU"), gpuFrameMs, "ms", m_timestampQueryPool != VK_NULL_HANDLE && gpuFrameMs > 0.0);
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText(editorText("ui.profiler_frame_time_history", "FRAME TIME HISTORY"));
+            ImGui::TextDisabled("%s: %zu | CPU: render thread incl. sync | GPU: full command buffer", editorText("ui.profiler_history_samples", "Samples"), historyCount);
+            if (historyCount > 1) {
+                float cpuPlotMax = 0.10f;
+                float gpuPlotMax = 0.10f;
+                for (size_t i = 0; i < historyCount; ++i) {
+                    cpuPlotMax = std::max(cpuPlotMax, cpuHistory[i]);
+                    gpuPlotMax = std::max(gpuPlotMax, gpuHistory[i]);
+                }
+                cpuPlotMax *= 1.15f;
+                gpuPlotMax *= 1.15f;
+                ImGui::PlotLines("CPU##RenderCpuHistory", cpuHistory.data(), static_cast<int>(historyCount),
+                    0, nullptr, 0.0f, cpuPlotMax, ImVec2(-1.0f, 72.0f));
+                if (m_timestampQueryPool) {
+                    ImGui::PlotLines("GPU##RenderGpuHistory", gpuHistory.data(), static_cast<int>(historyCount),
+                        0, nullptr, 0.0f, gpuPlotMax, ImVec2(-1.0f, 72.0f));
+                } else {
+                    ImGui::TextDisabled("%s", editorText("ui.profiler_gpu_not_supported", "GPU timestamp queries are unavailable on this queue."));
+                }
+            } else {
+                ImGui::TextDisabled("%s", editorText("ui.profiler_collecting_samples", "Collecting samples..."));
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText(editorText("ui.profiler_cpu_stages", "CPU STAGES"));
+            if (ImGui::BeginTable("##CpuStageTable", 3,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn(editorText("ui.profiler_stage", "Stage"), ImGuiTableColumnFlags_WidthStretch, 0.55f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_last", "Last"), ImGuiTableColumnFlags_WidthFixed, 0.20f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_average", "Average"), ImGuiTableColumnFlags_WidthFixed, 0.25f);
+                ImGui::TableHeadersRow();
+
+                struct StageSample { std::string name; double lastMs; double avgMs; };
+                std::vector<StageSample> stageSamples;
+                if (stats.contains("samples") && stats["samples"].is_object()) {
+                    for (auto it = stats["samples"].begin(); it != stats["samples"].end(); ++it) {
+                        const auto& sample = it.value();
+                        stageSamples.push_back({
+                            it.key(),
+                            sample.value("lastMs", 0.0),
+                            sample.value("avgMs", 0.0)
+                        });
+                    }
+                }
+                std::sort(stageSamples.begin(), stageSamples.end(),
+                    [](const StageSample& a, const StageSample& b) { return a.lastMs > b.lastMs; });
+
+                if (stageSamples.empty()) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", editorText("ui.profiler_no_cpu_scopes", "No CPU scopes recorded yet."));
+                } else {
+                    for (const auto& sample : stageSamples) {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(sample.name.c_str());
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%.3f ms", sample.lastMs);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%.3f ms", sample.avgMs);
+                    }
+                }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText(editorText("ui.profiler_gpu_passes", "GPU PASS BREAKDOWN"));
+            if (ImGui::BeginTable("##GpuPassTable", 2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn(editorText("ui.profiler_gpu_pass", "GPU stage"), ImGuiTableColumnFlags_WidthStretch, 0.70f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_gpu_time", "Time"), ImGuiTableColumnFlags_WidthFixed, 0.30f);
+                ImGui::TableHeadersRow();
+
+                const std::pair<const char*, const char*> gpuStages[] = {
+                    {"ui.profiler_gpu_scene_prep", "gpuScenePrepMs"},
+                    {"ui.profiler_gpu_shadows", "gpuShadowMs"},
+                    {"ui.profiler_gpu_geometry", "gpuGeometryMs"},
+                    {"ui.profiler_gpu_hdr", "gpuHdrMs"},
+                    {"ui.profiler_gpu_post", "gpuPostMs"},
+                    {"ui.profiler_gpu_ui", "gpuUiMs"}
+                };
+                for (const auto& stage : gpuStages) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(editorText(stage.first, stage.first));
+                    ImGui::TableNextColumn();
+                    if (m_timestampQueryPool && metrics.contains(stage.second))
+                        ImGui::Text("%.3f ms", metrics.value(stage.second, 0.0));
+                    else
+                        ImGui::TextDisabled("N/A");
+                }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
+            ImGui::Text("%s: %u x %u", editorText("ui.profiler_render_resolution", "Render resolution"), m_width, m_height);
+            ImGui::Text("%s: %s", editorText("ui.profiler_gpu_queries", "GPU timestamp queries"),
+                editorText(m_timestampQueryPool ? "ui.profiler_gpu_active" : "ui.profiler_gpu_not_supported",
+                    m_timestampQueryPool ? "Supported and active" : "Unavailable on selected graphics queue"));
+            ImGui::Text("%s: %llu   |   %s: %.0f   |   %s: %.0f",
+                editorText("ui.profiler_entities", "Scene entities"),
+                static_cast<unsigned long long>(engineStats.value("activeEntities", uint64_t{0})),
+                editorText("ui.profiler_draw_items", "Draw items"), metrics.value("drawItems", 0.0),
+                editorText("ui.profiler_rt_instances", "RT instances"), metrics.value("rtInstances", 0.0));
+            if (engineStats.contains("loadedCells")) {
+                ImGui::Text("%s: %llu / %llu", editorText("ui.profiler_world_cells", "World cells"),
+                    static_cast<unsigned long long>(engineStats.value("loadedCells", uint64_t{0})),
+                    static_cast<unsigned long long>(engineStats.value("totalCells", uint64_t{0})));
+            }
+            ImGui::Text("%s: %.3f ms   |   %s: %.3f ms",
+                editorText("ui.profiler_update_cpu", "Update CPU"),
+                updateCpuMs, editorText("ui.profiler_animation_cpu", "Animation / Skinning CPU"), animationCpuMs);
+            ImGui::TextDisabled("%s", editorText("ui.profiler_timing_note", "GPU time is the previous completed frame; CPU scopes are also one frame behind."));
+            ImGui::TextDisabled("%s", editorText("ui.profiler_loop_frame_note", "Loop frame includes frame pacing / sleep; it is not pure CPU execution time."));
+        }
+        ImGui::End();
     }
 
     void VulkanRenderer::renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine) {
@@ -1193,6 +1387,7 @@ namespace engine::renderer {
                 s_engineNotification, s_engineNotificationTimer
             };
             drawEditorPreferencesPanel(engine, preferencesUiState, screenW, screenH);
+            drawPerformanceProfilerPanel(engine);
 
             if (s_engineNotificationTimer > 0.0f) {
                 s_engineNotificationTimer -= ImGui::GetIO().DeltaTime;

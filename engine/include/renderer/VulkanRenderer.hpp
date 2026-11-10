@@ -153,6 +153,7 @@ namespace engine::renderer {
 
 #ifdef USE_GLFW
         void initImGui();
+        void drawPerformanceProfilerPanel(core::Engine* engine);
         void renderImGui(VkCommandBuffer cmd, VkImageView targetView, ecs::Registry& registry, core::AssetManager* assetManager, core::Engine* engine);
         void drawEditorCameraNavigation(core::Engine* engine, ecs::Registry& registry,
                                        EditorCameraNavigationState& state);
@@ -219,6 +220,7 @@ namespace engine::renderer {
         bool areSoftShadowsEnabled() const { return m_softShadows; }
         int m_antiAliasingMode{2};
         bool m_standaloneGameMode{false};
+        bool m_showPerformanceProfiler{false};
         uint32_t m_frameCounter{0};
 
         struct DeformedVertexCache {
