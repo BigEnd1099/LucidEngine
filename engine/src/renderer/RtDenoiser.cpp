@@ -462,7 +462,8 @@ namespace engine::renderer {
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiCheckerboard", params.giCheckerboard ? 1.0 : 0.0);
-        profiler.recordMetric("rtGiHistoryValid", m_giHistoryValid ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiHistoryValid",
+            (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
 
         // Reset query pool before recording timestamps
