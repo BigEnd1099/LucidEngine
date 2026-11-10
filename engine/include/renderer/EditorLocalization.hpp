@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace engine::renderer {
 
@@ -23,6 +24,11 @@ inline std::map<std::string, std::string>& activeEditorTranslations() {
 inline bool loadEditorLanguage(std::string_view locale) {
     namespace fs = std::filesystem;
     const std::string localeId(locale);
+    if (localeId.empty() || localeId.size() > 16) return false;
+    for (unsigned char ch : localeId) {
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) return false;
+    }
     const fs::path candidates[] = {
         fs::path("language") / (localeId + ".json"),
         fs::path("engine") / "language" / (localeId + ".json"),
