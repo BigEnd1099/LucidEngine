@@ -11,5 +11,6 @@ struct EditorViewportOverlayState {
     float& uiScale;
     EditorGizmoMode& gizmoMode;
     bool gizmoEnabled;
+    bool simulationSessionActive;
 };
 }

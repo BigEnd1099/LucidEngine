@@ -193,6 +193,7 @@ namespace engine::core {
 
     void Engine::playSimulation() {
         if (m_paused) {
+            const bool startingNewSession = !m_simulationSessionActive;
             // Ensure orientation is synchronized from rotation before capturing snapshot
             if (m_registry) {
                 auto view = m_registry->get().view<ecs::TransformComponent>();
@@ -204,11 +205,15 @@ namespace engine::core {
                 }
             }
 
-            // 1. Capture full scene snapshot for non-destructive restore on STOP
-            m_preSimulationSnapshot = getSnapshotJson();
-            m_hasPreSimulationSnapshot = true;
+            // Capture the edit baseline only once per Play session. Pause/resume must
+            // never replace the original snapshot used by STOP.
+            if (startingNewSession) {
+                m_preSimulationSnapshot = getSnapshotJson();
+                m_hasPreSimulationSnapshot = true;
+                m_simulationSessionActive = true;
+            }
 
-            // 2. Sync all editor transforms to Jolt bodies and clear residual velocities
+            // Sync editor transforms to Jolt bodies and clear residual velocities
             if (m_physicsContext && m_registry) {
                 auto& bi = m_physicsContext->getBodyInterface();
                 auto view = m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>();
@@ -248,8 +253,11 @@ namespace engine::core {
         m_paused = true;
         m_physicsAccumulator = 0.0f;
 
+        const bool hadActiveSession = m_simulationSessionActive;
+        m_simulationSessionActive = false;
+
         // Restore pre-simulation snapshot
-        if (m_hasPreSimulationSnapshot && !m_preSimulationSnapshot.empty()) {
+        if (hadActiveSession && m_hasPreSimulationSnapshot && !m_preSimulationSnapshot.empty()) {
             applySnapshotJson(m_preSimulationSnapshot.dump());
         }
 

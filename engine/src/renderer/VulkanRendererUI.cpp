@@ -502,25 +502,25 @@ namespace engine::renderer {
                 return true;
             };
 
-            const bool isSimulationRunning = (engine != nullptr && !engine->isPaused());
-            const bool gizmoEnabled = !isSimulationRunning;
+            const bool isSimulationSessionActive = (engine != nullptr && engine->isSimulationSessionActive());
+            const bool gizmoEnabled = !isSimulationSessionActive;
             if (!gizmoEnabled) s_draggingGizmoAxis = 0;
 
             if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
                 const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
-                if (ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
+                if (!isSimulationSessionActive && ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
                     saveCurrentGame(true);
-                } else if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
+                } else if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
                     saveCurrentGame(false);
                 }
-                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_O)) {
+                if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_O)) {
                     loadCurrentGame("");
                 }
                 if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Comma)) {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
                 }
-                if (!isSimulationRunning && !s_isRmbNavigating) {
+                if (!isSimulationSessionActive && !s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_E) || (!ctrlDown && ImGui::IsKeyPressed(ImGuiKey_R))) s_gizmoMode = EditorGizmoMode::ROTATE;
                     if (ImGui::IsKeyPressed(ImGuiKey_S) && !ctrlDown) s_gizmoMode = EditorGizmoMode::SCALE;
@@ -530,7 +530,7 @@ namespace engine::renderer {
                     const float frameDist = std::max(5.0f, glm::length(t.scale) * 3.5f);
                     if (engine) engine->setCamera(t.position - front * frameDist, camYaw, camPitch, camFov);
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                if (!isSimulationSessionActive && ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(selectedEnt));
                     else registry.get().destroy(selectedEnt);
                     selectedEnt = entt::null;
@@ -751,7 +751,8 @@ namespace engine::renderer {
 
             EditorViewportOverlayState viewportOverlayState{
                 s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
-                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode, gizmoEnabled
+                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode, gizmoEnabled,
+                isSimulationSessionActive
             };
             drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 

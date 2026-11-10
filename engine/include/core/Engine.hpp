@@ -116,6 +116,7 @@ namespace engine::core {
         void stopSimulation();
         void togglePause();
         bool isPaused() const { return m_paused; }
+        bool isSimulationSessionActive() const { return m_simulationSessionActive; }
         void broadcastSimulationState();
         void setStandaloneGameMode(bool enabled);
         bool isStandaloneGameMode() const { return m_standaloneGameMode; }
@@ -249,6 +250,7 @@ namespace engine::core {
         bool m_headless;
         bool m_standaloneGameMode{false};
         bool m_paused{true};
+        bool m_simulationSessionActive{false};
         int m_targetFps{0}; // 0 = unlimited, or 30, 60, 120, 240
         nlohmann::json m_preSimulationSnapshot = nlohmann::json::array();
         bool m_hasPreSimulationSnapshot{false};

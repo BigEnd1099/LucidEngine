@@ -25,6 +25,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.055f, 0.075f, 1.0f));
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * uiScale, 8.0f * uiScale));
                 ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                const bool simulationSessionActive = engine && engine->isSimulationSessionActive();
+                ImGui::BeginDisabled(simulationSessionActive);
 
                 static int s_activeToolMode = 1;
                 const VectorIconType dockIcons[6] = {
@@ -186,6 +188,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 spawnCard("Area Light",        "Karis Rectangular Emitter",        11, VectorIconType::Light,     IM_COL32(56, 189, 248, 255));
                 spawnCard("Fire VFX",          "Soft Gaussian HDR Particles",      8,  VectorIconType::Sparkles,  IM_COL32(251, 146, 60, 255));
                 ImGui::EndChild();
+                ImGui::EndDisabled();
 
                 ImGui::End();
                 ImGui::PopStyleColor();
