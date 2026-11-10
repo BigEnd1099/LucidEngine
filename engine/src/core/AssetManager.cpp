@@ -916,7 +916,8 @@ namespace engine::core {
                     }
 
                     const glm::mat4 world = parentTransform * local;
-                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
+                    if (!hasGpuInstances && node.meshIndex.has_value() &&
+                        node.meshIndex.value() < importedMeshIds.size()) {
                         glm::vec3 worldPosition(world[3]);
                         glm::vec3 worldScale(
                             glm::length(glm::vec3(world[0])),
@@ -926,10 +927,10 @@ namespace engine::core {
                         for (int axis = 0; axis < 3; ++axis)
                             if (worldScale[axis] > 1e-6f) rotationMatrix[axis] /= worldScale[axis];
                         const glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
-                        for (uint32_t id : importedNode.meshIds) {
+                        for (uint32_t id : instancedMeshIds) {
                             ImportedMeshInstance instance;
                             instance.meshId = id;
-                            instance.name = importedNode.name;
+                            instance.name = sourceNodeName;
                             instance.translation = worldPosition;
                             instance.rotation = worldRotation;
                             instance.scale = worldScale;
