@@ -60,9 +60,9 @@ namespace engine::renderer {
         // The frame fence (or headless queue-idle) guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
-            uint64_t timestamps[9]{};
+            uint64_t timestamps[11]{};
             const VkResult queryResult = vkGetQueryPoolResults(
-                m_context->getDevice(), m_timestampQueryPool, 0, 9,
+                m_context->getDevice(), m_timestampQueryPool, 0, 11,
                 sizeof(timestamps), timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT);
             if (queryResult == VK_SUCCESS) {
@@ -83,6 +83,8 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("gpuDepthMs", elapsedMs(2, 3));
                 core::Profiler::get().recordMetric("gpuGBufferMs", elapsedMs(3, 4));
                 core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
+                core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", elapsedMs(4, 9));
+                core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", elapsedMs(9, 10));
                 core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
                 core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
                 core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
@@ -114,7 +116,7 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (m_timestampQueryPool) {
-            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 9);
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 11);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
         }
 
@@ -966,8 +968,7 @@ namespace engine::renderer {
 
         // With no geometry and no screen-space/RT consumers, the depth and
         // G-buffer prepasses are redundant. The HDR pass clears depth itself.
-        const bool skipEmptySceneGeometryPasses = drawItems.empty() &&
-            !m_gtaoEnabled && !m_lightBounceEnabled && !isRayTracingEnabled();
+        const bool skipEmptySceneGeometryPasses = drawItems.empty() && rtInstances.empty();
 
         // =========================================================================
         // PASS 2A: DEPTH PREPASS (WypeĹ‚nienie Z-Bufora dla GTAO oraz Early-Z)
@@ -1129,7 +1130,7 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         }
 
-        if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline) {
+        if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty()) {
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1180,6 +1181,8 @@ namespace engine::renderer {
             vkCmdPushConstants(m_commandBuffer, m_gtaoPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(gtaoPcsData), &gtaoPcsData);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
+            if (m_timestampQueryPool)
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
 
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1211,6 +1214,8 @@ namespace engine::renderer {
             vkCmdPushConstants(m_commandBuffer, m_gtaoBlurPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(blurPcs), blurPcs);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             vkCmdEndRendering(m_commandBuffer);
+            if (m_timestampQueryPool)
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
 
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1238,6 +1243,10 @@ namespace engine::renderer {
             clearRi.pColorAttachments = &clearAo;
             vkCmdBeginRendering(m_commandBuffer, &clearRi);
             vkCmdEndRendering(m_commandBuffer);
+            if (m_timestampQueryPool) {
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
+            }
 
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
