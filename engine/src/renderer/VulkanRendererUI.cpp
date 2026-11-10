@@ -975,6 +975,9 @@ namespace engine::renderer {
                 }
             }
 
+            if (gizmoEnabled && s_draggingGizmoAxis > 0 && hasSelectedTransform)
+                registry.syncLocalTransformFromWorld(selectedEnt);
+
             EditorCameraNavigationState cameraNavigationState{
                 s_isRmbNavigating, s_isMmbPanning, s_isAltOrbiting, isHovered,
                 s_camFlySpeed, s_cameraSpeed, hasSelectedTransform,
