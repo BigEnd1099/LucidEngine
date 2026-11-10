@@ -122,7 +122,7 @@
     "ui.asset_filter_3d_models": "Modele 3D",
     "ui.asset_filter_scripts": "Skrypty JS",
     "ui.asset_location": "Lokalizacja: %s",
-    "ui.folder_tooltip": "Folder: %s\\nKliknij dwukrotnie, aby otworzyć",
+    "ui.folder_tooltip": "Folder: %s\\nKliknij, aby otworzyć",
     "ui.file_tooltip": "Plik: %s\\nRozmiar: %zu B",
     "ui.auto_scroll": "Automatyczne przewijanie",
     "ui.content_drawer_status": " Przeglądarka zasobów ",
@@ -297,6 +297,7 @@
     "ui.asset_read_error": "Nie można odczytać katalogu",
     "ui.asset_no_results": "Brak zasobów pasujących do wyszukiwania.",
     "script.modified": "Zmieniono",
-    "script.synced": "Zsynchronizowano"
+    "script.synced": "Zsynchronizowano",
+    "script.run_failed": "Uruchomienie nie powiodło się — sprawdź Output Log"
   }
 }
