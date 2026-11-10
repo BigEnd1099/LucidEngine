@@ -220,7 +220,10 @@ void main() {
 
             int singleLight = -1;
             float singleWeight = 1.0;
-            if (bounce >= 1 && useStochasticLights && numActiveLights > 0) {
+            if (useStochasticLights && numActiveLights > 0) {
+                // Uniform one-light sampling is an unbiased estimator of the full local-light sum.
+                // Apply it to the first reflection hit too: evaluating every local-light shadow ray
+                // for every primary reflection sample is the dominant avoidable ray-query multiplier.
                 singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
                 singleWeight = float(numActiveLights);
             }
