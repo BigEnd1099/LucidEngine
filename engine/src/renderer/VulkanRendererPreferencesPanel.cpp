@@ -52,6 +52,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     if (ImGui::Button(editorText("script.clear", " Clear "))) {
                         scriptBuf[0] = '\0';
                         s_scriptDirty = true;
+                        s_scriptLastRunOk = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_rotation", " Template: Rotation "))) {
@@ -59,6 +60,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = true;
+                        s_scriptLastRunOk = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_impulse", " Template: Impulse "))) {
@@ -66,6 +68,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = true;
+                        s_scriptLastRunOk = true;
                     }
                     ImGui::SameLine();
                     const char* scriptStatusKey = !s_scriptLastRunOk ? "script.run_failed" : (s_scriptDirty ? "script.modified" : "script.synced");
