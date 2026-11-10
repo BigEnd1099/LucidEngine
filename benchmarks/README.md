@@ -53,6 +53,6 @@ GPU subpass values are nested inside the AO + RT aggregate; do not add them to t
 
 RT pass timings retain inclusive stage values and also report dispatch-only execution plus GPU dependency-gap intervals around barriers. Dependency gaps are scheduling intervals, not direct measurements of barrier instruction cost.
 
-Reports include observational RT quality telemetry: GI sample count, internal GI resolution, GI and reflection bounce counts, temporal-history capacity/validity, SVGF state, checkerboard state, reflection roughness threshold, stochastic-light/LOD options and reflection resolution.
+Reports include observational RT quality telemetry: GI sample count, internal GI resolution, GI and reflection bounce counts, temporal-history capacity/validity, history invalidation by camera/light changes, SVGF state, checkerboard state, reflection roughness threshold, stochastic-light/LOD options and reflection resolution.
 
 RT reflection algorithms, shaders and quality defaults are not modified by the benchmark harness.
