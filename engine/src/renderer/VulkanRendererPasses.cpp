@@ -105,9 +105,8 @@ namespace engine::renderer {
             }
         }
 
-        // The previous frame has completed (fence on the window path, queue-idle
-        // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
-        // be released safely, before any new build commands are recorded.
+        // The previous frame has completed (window or headless fence). Scratch buffers
+        // from its BLAS/TLAS builds can now be released safely.
         m_accelerationStructure.releaseCompletedScratch();
         ++m_deformationFrameCounter;
         if ((m_deformationFrameCounter % 600u) == 0u) {
@@ -1876,11 +1875,25 @@ namespace engine::renderer {
             vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
             const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
             m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
+            if (submitResult != VK_SUCCESS) {
+                vkDestroyFence(m_context->getDevice(), m_headlessInFlightFence, nullptr);
+                VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+                fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+                if (vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS)
+                    throw std::runtime_error("failed to recover headless frame fence after queue submission failure");
+            }
         }
 #else
         vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
         const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
         m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
+        if (submitResult != VK_SUCCESS) {
+            vkDestroyFence(m_context->getDevice(), m_headlessInFlightFence, nullptr);
+            VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+            if (vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS)
+                throw std::runtime_error("failed to recover headless frame fence after queue submission failure");
+        }
 #endif
     }
 }
