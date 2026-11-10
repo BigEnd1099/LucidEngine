@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
     bool standaloneGame = false;
     bool enableRemote = true;
     bool launchStudio = false;
+    bool benchmarkMode = false;
     std::string projectPath = "";
     std::string playPreset = "";
     int wsPort = 9000;
@@ -62,6 +63,8 @@ int main(int argc, char** argv) {
             headless = true;
         } else if (arg == "--port" && i + 1 < argc) {
             wsPort = std::clamp(std::stoi(argv[++i]), 1, 65535);
+        } else if (arg == "--benchmark") {
+            benchmarkMode = true;
         } else if (arg == "--studio" || arg == "--web-ui") {
             launchStudio = true;
         } else if (arg == "--no-remote" || arg == "--local-only") {
@@ -100,7 +103,7 @@ int main(int argc, char** argv) {
 
     try {
         logCrash("STEP 1: Creating engine instance...");
-        engine::core::Engine eng(wsPort, headless, enableRemote);
+        engine::core::Engine eng(wsPort, headless, enableRemote, benchmarkMode);
         
         if (standaloneGame) {
             eng.setStandaloneGameMode(true);
