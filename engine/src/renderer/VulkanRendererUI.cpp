@@ -224,6 +224,18 @@ namespace engine::renderer {
         const double avgUpdateCpuMs = average([](const ProfilerWindowSample& s) { return s.updateCpuMs; });
         const double avgAnimationCpuMs = average([](const ProfilerWindowSample& s) { return s.animationCpuMs; });
         const double avgGpuFrameMs = average([](const ProfilerWindowSample& s) { return s.gpuFrameMs; });
+        auto averageCpuScope = [&](const std::string& name) -> double {
+            double sum = 0.0;
+            size_t count = 0;
+            for (const auto& sample : oneSecondSamples) {
+                const auto found = sample.cpuScopes.find(name);
+                if (found != sample.cpuScopes.end()) {
+                    sum += found->second;
+                    ++count;
+                }
+            }
+            return count > 0 ? sum / static_cast<double>(count) : 0.0;
+        };
 
         const char* gpuMetricNames[] = {
             "gpuScenePrepMs", "gpuShadowMs", "gpuDepthMs", "gpuGBufferMs",
@@ -284,6 +296,8 @@ namespace engine::renderer {
                 report << "Samples: " << windowSampleCount << "\n";
                 report << "Graphics API: Vulkan 1.3\n";
                 report << "Render resolution: " << m_width << " x " << m_height << "\n";
+                report << "Render scale: " << std::setprecision(0) << (m_resolutionScale * 100.0f) << "%\n";
+                report << std::setprecision(3);
                 report << std::fixed << std::setprecision(3);
                 report << "\n[FRAME]\n";
                 report << "Average editor FPS: " << avgFps << "\n";
@@ -292,10 +306,7 @@ namespace engine::renderer {
                 report << "Average GPU command buffer: " << avgGpuFrameMs << " ms\n";
                 report << "\n[CPU STAGES - 1s AVERAGE]\n";
                 for (const auto& [name, value] : cpuStats.items()) {
-                    const double stageAverage = average([&](const ProfilerWindowSample& s) {
-                        const auto it = s.cpuScopes.find(name);
-                        return it != s.cpuScopes.end() ? it->second : 0.0;
-                    });
+                    const double stageAverage = averageCpuScope(name);
                     report << name << ": " << stageAverage << " ms\n";
                 }
                 report << "\n[GPU STAGES - 1s AVERAGE]\n";
@@ -354,7 +365,7 @@ namespace engine::renderer {
                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
                 ImGui::TableSetupColumn(editorText("ui.profiler_stage", "Stage"), ImGuiTableColumnFlags_WidthStretch, 0.55f);
                 ImGui::TableSetupColumn(editorText("ui.profiler_last", "Last"), ImGuiTableColumnFlags_WidthFixed, 0.20f);
-                ImGui::TableSetupColumn(editorText("ui.profiler_average", "1s average"), ImGuiTableColumnFlags_WidthFixed, 0.25f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_avg_column", "1s average"), ImGuiTableColumnFlags_WidthFixed, 0.25f);
                 ImGui::TableHeadersRow();
 
                 struct StageSample { std::string name; double lastMs; double avgMs; };
@@ -363,10 +374,7 @@ namespace engine::renderer {
                     for (auto it = cpuStats.begin(); it != cpuStats.end(); ++it) {
                         const auto& sample = it.value();
                         const std::string name = it.key();
-                        const double oneSecondAvg = average([&](const ProfilerWindowSample& s) {
-                            const auto found = s.cpuScopes.find(name);
-                            return found != s.cpuScopes.end() ? found->second : 0.0;
-                        });
+                        const double oneSecondAvg = averageCpuScope(name);
                         stageSamples.push_back({name, sample.value("lastMs", 0.0), oneSecondAvg});
                     }
                 }
@@ -426,6 +434,14 @@ namespace engine::renderer {
             ImGui::Spacing();
             ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
             ImGui::Text("%s: %u x %u", editorText("ui.profiler_render_resolution", "Render resolution"), m_width, m_height);
+            ImGui::Text("%s: %.0f%%", editorText("ui.profiler_render_scale", "Render scale"), m_resolutionScale * 100.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("100%##ProfilerScale100")) setResolutionScale(1.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("75%##ProfilerScale75")) setResolutionScale(0.75f);
+            ImGui::SameLine();
+            if (ImGui::Button("50%##ProfilerScale50")) setResolutionScale(0.50f);
+            ImGui::TextDisabled("%s", editorText("ui.profiler_scale_test_hint", "Use these presets for a controlled resolution-scaling test."));
             ImGui::Text("%s: %s", editorText("ui.profiler_gpu_queries", "GPU timestamp queries"),
                 editorText(m_timestampQueryPool ? "ui.profiler_gpu_active" : "ui.profiler_gpu_not_supported",
                     m_timestampQueryPool ? "Supported and active" : "Unavailable on selected graphics queue"));
