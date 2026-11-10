@@ -18,7 +18,7 @@ The runner disables the FPS limiter and VSync for uncapped measurements. The ren
 ## Optional environment variables
 
 - `LUCID_BENCH_PORT` — remote port, default `9011`
-- `LUCID_BENCH_WIDTH` / `LUCID_BENCH_HEIGHT` — render resolution, defaults `2404 × 1866`
+- `LUCID_BENCH_WIDTH` / `LUCID_BENCH_HEIGHT` — render resolution, defaults `2560 × 1440` (1440p, 16:9)
 - `LUCID_BENCH_WARMUP_MS` — warm-up per case, default `1500`
 - `LUCID_BENCH_CAPTURE_MS` — sampling period per case, default `2000`
 
