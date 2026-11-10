@@ -106,24 +106,31 @@ namespace engine::ecs {
         }
 
         void updateWorldTransforms() {
-            std::unordered_set<entt::entity> visited;
+            // Hierarchy propagation is unnecessary for ordinary scenes. Avoid
+            // constructing a visited set and walking every Transform when no
+            // entity participates in a hierarchy.
+            const auto hierarchyView = m_registry.view<HierarchyComponent>();
+            if (hierarchyView.empty()) return;
+
+            m_worldTransformVisited.clear();
             auto view = m_registry.view<TransformComponent>();
+            m_worldTransformVisited.reserve(view.size());
             for (auto entity : view) {
                 if (!m_registry.all_of<HierarchyComponent>(entity) ||
                     m_registry.get<HierarchyComponent>(entity).parent == entt::null)
-                    updateWorldRecursive(entity, glm::mat4(1.0f), visited);
+                    updateWorldRecursive(entity, glm::mat4(1.0f), m_worldTransformVisited);
             }
             // Recover gracefully from malformed/orphaned hierarchy data.
             for (auto entity : view) {
-                if (!visited.contains(entity))
-                    updateWorldRecursive(entity, glm::mat4(1.0f), visited);
+                if (!m_worldTransformVisited.contains(entity))
+                    updateWorldRecursive(entity, glm::mat4(1.0f), m_worldTransformVisited);
             }
         }
 
         void destroyEntity(entt::entity entity) {
             if (!m_registry.valid(entity)) return;
             if (m_registry.all_of<HierarchyComponent>(entity)) {
-                const auto children = m_registry.get<HierarchyComponent>(entity).children;
+                const auto& children = m_registry.get<HierarchyComponent>(entity).children;
                 for (entt::entity child : children) {
                     if (!m_registry.valid(child)) continue;
                     detachFromParent(child);
@@ -139,6 +146,10 @@ namespace engine::ecs {
         void clear() { m_registry.clear(); }
 
     private:
+        // Retain hash buckets across frames instead of allocating a fresh set
+        // every time world transforms are propagated.
+        std::unordered_set<entt::entity> m_worldTransformVisited;
+
         void detachFromParent(entt::entity child) {
             if (!m_registry.valid(child) || !m_registry.all_of<HierarchyComponent>(child)) return;
             auto& hierarchy = m_registry.get<HierarchyComponent>(child);
