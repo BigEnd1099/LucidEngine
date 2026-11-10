@@ -44,8 +44,8 @@ async function assertPortFree() {
 }
 
 function startEngine() {
-  console.log('[BENCH] Starting isolated headless engine on port ' + PORT + '...');
-  engineProcess = spawn(EXE, ['--headless', '--port', String(PORT)], {
+  console.log('[BENCH] Starting windowed Vulkan engine on port ' + PORT + '...');
+  engineProcess = spawn(EXE, ['--port', String(PORT)], {
     cwd: ROOT,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -363,7 +363,7 @@ function writeSummary(results, sceneMeta) {
   }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
-    '- Samples are polled over JSON-RPC from the isolated headless renderer.',
+    '- Samples are polled over JSON-RPC from a dedicated windowed Vulkan renderer (swapchain + presentation enabled).',
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
     '- The harness does not alter RT reflection algorithms or quality defaults.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
@@ -382,7 +382,14 @@ async function main() {
   startEngine();
   await connectWebSocket();
   console.log('[BENCH] Connected. Configuring render resolution...');
+  await callRpc('engine.setTargetFps', { fps: 0 });
+  await callRpc('engine.setVsyncEnabled', { enabled: false });
   await callRpc('engine.setRenderResolution', { width: WIDTH, height: HEIGHT });
+  await sleep(1500); // allow the windowed renderer to recreate its offscreen targets
+  const initialStats = await callRpc('engine.getProfilerStats');
+  if (!initialStats || Number(initialStats.gpuTimeMs || 0) <= 0) {
+    throw new Error('GPU timestamps are not active after starting the windowed renderer. Refusing to produce an invalid benchmark.');
+  }
   await callRpc('engine.resetScene', { preset: 'empty' });
 
   const results = [];
