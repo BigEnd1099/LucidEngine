@@ -1,6 +1,6 @@
 # Lucid Engine render benchmark
 
-The benchmark runner starts a separate headless engine process on port **9011** (default), generates the deterministic **Atrium Benchmark** scene, saves it as an editable project inside the run folder, toggles renderer features over JSON-RPC, and writes sampling windows to disk.
+The benchmark runner starts a separate windowed engine process on port **9011** (default), generates the deterministic **Atrium Benchmark** scene, saves it as an editable project inside the run folder, toggles renderer features over JSON-RPC, and writes sampling windows to disk.
 
 ## Run
 
@@ -13,7 +13,7 @@ Or pass a custom engine executable path:
 
 `node tools/run_render_benchmark.mjs engine/build/Release/engine.exe`
 
-The runner does not attach to or terminate an already-open editor instance. It launches its own process using `--headless --port 9011`. If the port is occupied, close the process using it or set `LUCID_BENCH_PORT` to another free port.
+The runner disables the FPS limiter and VSync for uncapped measurements. It does not attach to or terminate an already-open editor instance. It launches its own normal windowed Vulkan process using `--port 9011` (no `--headless` flag), so the engine creates a GLFW window, swapchain and presents frames to the GPU. If the port is occupied, close the process using it or set `LUCID_BENCH_PORT` to another free port.
 
 ## Optional environment variables
 

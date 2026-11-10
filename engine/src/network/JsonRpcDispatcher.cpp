@@ -299,6 +299,34 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.setTargetFps") {
+                int fps = 0;
+                if (json.contains("params") && json["params"].is_object()) {
+                    fps = json["params"].value("fps", 0);
+                }
+                queue.push([fps, client, id](core::Engine* eng) {
+                    eng->setTargetFps(fps < 0 ? 0 : fps);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"targetFps", eng->getTargetFps()}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.setVsyncEnabled") {
+                bool enabled = false;
+                if (json.contains("params") && json["params"].is_object()) {
+                    enabled = json["params"].value("enabled", false);
+                }
+                queue.push([enabled, client, id](core::Engine* eng) {
+                    eng->setVsyncEnabled(enabled);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"vsync", eng->isVsyncEnabled()}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.setRenderResolution") {
                 uint32_t width = 1920;
                 uint32_t height = 1080;
