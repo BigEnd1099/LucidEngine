@@ -66,7 +66,13 @@ namespace engine::core {
         if (!j.is_object()) return;
 
         language = j.value("language", language);
-        if (language != "pl" && language != "en") language = "en";
+        if (language.empty() || language.size() > 16 ||
+            !std::all_of(language.begin(), language.end(), [](unsigned char ch) {
+                return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                       (ch >= '0' && ch <= '9') || ch == '-' || ch == '_';
+            })) {
+            language = "en";
+        }
 
         // Structured parsing
         if (j.contains("ui") && j["ui"].is_object()) {
