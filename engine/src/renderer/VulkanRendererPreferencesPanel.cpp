@@ -16,7 +16,9 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                                                 float screenW, float screenH) {
             if (state.showScriptStudio) {
                 ImGui::SetNextWindowSize(ImVec2(750 * state.uiScale, 520 * state.uiScale), ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(360 * state.uiScale, 240 * state.uiScale), ImVec2(screenW, screenH));
+                ImGui::SetNextWindowSizeConstraints(
+                    ImVec2(std::min(360.0f * state.uiScale, screenW), std::min(240.0f * state.uiScale, screenH)),
+                    ImVec2(screenW, screenH));
                 if (ImGui::Begin(editorText("script.studio_title", "Blueprints / QuickJS Script Studio"), &state.showScriptStudio)) {
                     static char scriptBuf[16384] = "";
                     static bool s_scriptInit = false;
@@ -79,7 +81,9 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
 
             if (state.showPreferencesWindow && engine) {
                 ImGui::SetNextWindowSize(ImVec2(820 * state.uiScale, 560 * state.uiScale), ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(500 * state.uiScale, 380 * state.uiScale), ImVec2(screenW, screenH));
+                ImGui::SetNextWindowSizeConstraints(
+                    ImVec2(std::min(500.0f * state.uiScale, screenW), std::min(380.0f * state.uiScale, screenH)),
+                    ImVec2(screenW, screenH));
                 if (ImGui::Begin(editorText("ui.editor_preferences_editorprefsdialog", "Editor Preferences###EditorPrefsDialog"), &state.showPreferencesWindow, ImGuiWindowFlags_NoCollapse)) {
                     auto& pref = engine->getPreferences();
 
