@@ -491,18 +491,39 @@ namespace engine::renderer {
                             const bool supportedModel = extension == ".glb" || extension == ".gltf";
                             const bool fileExists = std::filesystem::is_regular_file(droppedPath, dropError) && !dropError;
                             if (supportedModel && fileExists) {
-                                const uint32_t meshId = assetManager->loadGLTF(droppedPath.string());
-                                if (assetManager->getMesh(meshId)) {
-                                    const entt::entity newEntity = registry.createEntity();
-                                    const std::string actorName = droppedPath.stem().string().empty()
+                                const uint32_t firstMeshId = assetManager->loadGLTF(droppedPath.string());
+                                const auto& instances = assetManager->getLastImportedInstances();
+                                if (assetManager->getMesh(firstMeshId) && !instances.empty()) {
+                                    const std::string modelName = droppedPath.stem().string().empty()
                                         ? std::string("ImportedModel") : droppedPath.stem().string();
-                                    registry.get().emplace<ecs::TagComponent>(newEntity, ecs::TagComponent{actorName});
-                                    registry.get().emplace<ecs::TransformComponent>(
-                                        newEntity, ecs::TransformComponent{camPos + front * 5.0f, glm::vec3(0.0f), glm::vec3(1.0f)});
-                                    registry.get().emplace<ecs::MeshComponent>(newEntity, ecs::MeshComponent{meshId});
-                                    selectedEnt = newEntity;
-                                    if (engine) engine->setSelectedEntity(newEntity);
-                                    core::Logger::info("Imported model into viewport: " + droppedPath.string());
+                                    const glm::vec3 placementOrigin = camPos + front * 5.0f;
+                                    entt::entity firstCreated = entt::null;
+                                    size_t createdCount = 0;
+                                    for (const auto& instance : instances) {
+                                        if (!assetManager->getMesh(instance.meshId)) continue;
+                                        const entt::entity newEntity = registry.createEntity();
+                                        const std::string nodeName = instance.name.empty() || instance.name == "Mesh"
+                                            ? modelName + (instances.size() > 1 ? "_" + std::to_string(createdCount + 1) : "")
+                                            : modelName + "/" + instance.name;
+                                        registry.get().emplace<ecs::TagComponent>(newEntity, ecs::TagComponent{nodeName});
+                                        ecs::TransformComponent transform{};
+                                        transform.position = placementOrigin + instance.translation;
+                                        transform.rotation = glm::degrees(glm::eulerAngles(instance.rotation));
+                                        transform.scale = instance.scale;
+                                        transform.orientation = instance.rotation;
+                                        registry.get().emplace<ecs::TransformComponent>(newEntity, transform);
+                                        registry.get().emplace<ecs::MeshComponent>(newEntity, ecs::MeshComponent{instance.meshId});
+                                        if (firstCreated == entt::null) firstCreated = newEntity;
+                                        ++createdCount;
+                                    }
+                                    if (firstCreated != entt::null) {
+                                        selectedEnt = firstCreated;
+                                        if (engine) engine->setSelectedEntity(firstCreated);
+                                        core::Logger::info("Imported " + std::to_string(createdCount) +
+                                            " glTF mesh instance(s) into viewport: " + droppedPath.string());
+                                    } else {
+                                        core::Logger::error("Viewport drop produced no valid mesh instances: " + droppedPath.string());
+                                    }
                                 } else {
                                     core::Logger::error("Viewport drop failed to import model: " + droppedPath.string());
                                 }
