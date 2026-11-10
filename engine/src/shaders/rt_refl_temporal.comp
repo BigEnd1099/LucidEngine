@@ -26,20 +26,24 @@ layout(push_constant) uniform PC {
     uvec4 u;
 } pc;
 
-void main() {
-    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+shared uint rtLocalCounters[48];
+
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
+    histogramCounted = false;
+    ageBin = 0u;
     ivec2 isize = imageSize(imgRefl);
     if (any(greaterThanEqual(px, isize))) return;
     vec2 size = vec2(isize);
 
     ivec2 geomCurSize = imageSize(imgGeomCur);
     ivec2 geomPx = clamp(ivec2(((vec2(px) + 0.5) / size) * vec2(geomCurSize)), ivec2(0), geomCurSize - 1);
-    atomicAdd(rtDiag.counters[8], 1u);
+    atomicAdd(rtLocalCounters[8], 1u);
     vec4 geom = imageLoad(imgGeomCur, geomPx);
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0 || geom.z < 0.0) { // sky
-        atomicAdd(rtDiag.counters[10], 1u);
-        atomicAdd(rtDiag.counters[32], 1u); // zero-age / sky
+        atomicAdd(rtLocalCounters[10], 1u);
+        ageBin = 0u;
+        histogramCounted = true; // zero-age / sky
         imageStore(imgReflHistCur, px, vec4(0.0));
         imageStore(imgRefl, px, vec4(0.0));
         return;
@@ -47,8 +51,9 @@ void main() {
 
     vec4 raw = imageLoad(imgRefl, px);
     if (raw.a <= 0.0) {
-        atomicAdd(rtDiag.counters[10], 1u);
-        atomicAdd(rtDiag.counters[32], 1u); // zero-age / no reflection sample
+        atomicAdd(rtLocalCounters[10], 1u);
+        ageBin = 0u;
+        histogramCounted = true; // zero-age / no reflection sample
         // Sky or skipped roughness > 0.75
         imageStore(imgReflHistCur, px, vec4(0.0));
         imageStore(imgRefl, px, vec4(0.0));
@@ -75,13 +80,13 @@ void main() {
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtDiag.counters[11], 1u); continue; }
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[11], 1u); continue; }
             ivec2 geomPrevSize = imageSize(imgGeomPrev);
             ivec2 geomTp = clamp(ivec2(((vec2(tp) + 0.5) / size) * vec2(geomPrevSize)), ivec2(0), geomPrevSize - 1);
             vec4 g = imageLoad(imgGeomPrev, geomTp);
             if (g.z < 0.0) continue;
-            if (abs(g.z - pClip.w) > 0.03 * pClip.w + 0.01) { atomicAdd(rtDiag.counters[12], 1u); continue; }
-            if (dot(rtOctDecode(g.xy), N) < 0.85) { atomicAdd(rtDiag.counters[13], 1u); continue; }
+            if (abs(g.z - pClip.w) > 0.03 * pClip.w + 0.01) { atomicAdd(rtLocalCounters[12], 1u); continue; }
+            if (dot(rtOctDecode(g.xy), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist += w * imageLoad(imgReflHistPrev, tp);
             wSum += w;
@@ -96,12 +101,12 @@ void main() {
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
-            atomicAdd(rtDiag.counters[14], 1u);
+            atomicAdd(rtLocalCounters[14], 1u);
             // Re-use full history from previous frame when this pixel was active
             result = vec4((hist / wSum).rgb, 1.0);
             historyAge = hist.a / wSum;
         } else {
-            atomicAdd(rtDiag.counters[15], 1u);
+            atomicAdd(rtLocalCounters[15], 1u);
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors
             vec3 neighborSum = vec3(0.0);
             float weightSum = 0.0;
@@ -135,7 +140,7 @@ void main() {
         }
     } else {
         if (wSum > 0.05) {
-            atomicAdd(rtDiag.counters[9], 1u);
+            atomicAdd(rtLocalCounters[9], 1u);
             hist /= wSum;
 
             // 3x3 Neighborhood Clamping for specular reflections
@@ -173,7 +178,7 @@ void main() {
             result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
             historyAge = min(hist.a + sampleCount, maxHistory);
         } else {
-            atomicAdd(rtDiag.counters[10], 1u);
+            atomicAdd(rtLocalCounters[10], 1u);
             result = raw;
             historyAge = sampleCount;
         }
@@ -181,8 +186,26 @@ void main() {
 
     // Alpha of the private history image stores effective accumulated sample age.
     // The public reflection output keeps alpha=1 as its validity mask for PBR.
-    uint ageBin = min(uint(clamp(historyAge / maxHistory, 0.0, 0.999999) * 16.0), 15u);
-    atomicAdd(rtDiag.counters[32u + ageBin], 1u);
+    ageBin = min(uint(clamp(historyAge / maxHistory, 0.0, 0.999999) * 16.0), 15u);
+    histogramCounted = true;
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
     imageStore(imgRefl, px, vec4(result.rgb, 1.0));
+}
+
+void main() {
+    uint lane = gl_LocalInvocationIndex;
+    if (lane < 48u) rtLocalCounters[lane] = 0u;
+    barrier();
+
+    uint ageBin = 0u;
+    bool histogramCounted = false;
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    processPixel(px, ageBin, histogramCounted);
+    if (histogramCounted) atomicAdd(rtLocalCounters[32u + ageBin], 1u);
+
+    barrier();
+    if (lane < 48u) {
+        uint count = rtLocalCounters[lane];
+        if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
+    }
 }

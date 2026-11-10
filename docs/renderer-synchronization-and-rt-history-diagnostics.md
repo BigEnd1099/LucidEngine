@@ -22,13 +22,13 @@ The current renderer uses shared images and buffers across the complete frame gr
 
 A dedicated 48-counter storage buffer is bound at set 1 / binding 15. It is reset with `vkCmdFillBuffer`, followed by a transfer-to-compute barrier. GI and reflection temporal shaders update independent counters with atomics; the counters never reuse GI geometry alpha or the public reflection validity alpha.
 
-The buffer is persistently mapped in host-visible memory. `RtDenoiser::record()` consumes the previous frame's values only after the renderer's frame fence has completed, invalidating non-coherent memory when required. A compute-to-host buffer barrier closes the producer side. This avoids a blocking queue-idle call and a separate synchronous GPU readback request. Counter names are exported as profiler metrics:
+The buffer is persistently mapped in host-visible memory. `RtDenoiser::record()` consumes the previous frame's values only after the renderer's frame fence has completed, invalidating non-coherent memory when required. A compute-to-host buffer barrier closes the producer side. This avoids a blocking queue-idle call and a separate synchronous GPU readback request. Each temporal 8×8 workgroup aggregates its diagnostic events in a 48-entry shared-memory counter array. All invocations, including out-of-range edge lanes, participate in the initialization and flush barriers; only non-zero workgroup totals are atomically added to the global SSBO. This removes per-pixel global SSBO atomics without changing the exported counter meanings. Counter names are exported as profiler metrics:
 
 - GI: `rtGiPixels`, `rtGiHistoryAccepted`, `rtGiHistoryRejected`, `rtGiOutOfBounds`, `rtGiDepthRejected`, `rtGiNormalRejected`, `rtGiCheckerboardReuse`, `rtGiSpatialFallback`.
 - Reflections: the matching `rtReflection*` metrics.
 - History age: 16 normalized bins per effect (`rtGiHistoryAgeBin00..15` and `rtReflectionHistoryAgeBin00..15`). Bin 00 includes sky/no-sample pixels; remaining bins represent increasing fractions of configured maximum history age. Counts are per-pixel totals, not percentages.
 
-The counters are diagnostic instrumentation and atomics add GPU work; compare benchmark runs with the instrumentation change in mind. The current host-visible SSBO is a simple fence-safe first implementation, not an optimized device-local staging ring. A device-local counter buffer plus a multi-slot staging/readback ring remains a follow-up if profiling shows host-visible writes are costly.
+The counters remain diagnostic instrumentation. Shared-memory atomics and two workgroup barriers still have a cost, but global updates are now bounded by the number of non-zero counters per workgroup rather than the number of pixels. Compare identical benchmark captures before and after this optimization. The current host-visible SSBO is a simple fence-safe first implementation, not an optimized device-local staging ring. A device-local counter buffer plus a multi-slot staging/readback ring remains a follow-up if profiling shows host-visible writes are costly.
 
 ## Deliberately not enabled: multiple frames in flight
 
