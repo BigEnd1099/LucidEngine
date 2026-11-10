@@ -162,7 +162,7 @@ namespace engine::renderer {
             double drawItems{0.0};
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
-            std::array<double, 19> effectStages{};
+            std::array<double, 20> effectStages{};
             std::unordered_map<std::string, double> cpuScopes;
         };
         static std::deque<ProfilerWindowSample> oneSecondSamples;
@@ -194,7 +194,7 @@ namespace engine::renderer {
                 "rtGiTraceMs", "rtGiTemporalMs", "rtGiAtrous0Ms", "rtGiAtrous1Ms",
                 "rtReflectionTraceMs", "rtReflectionTemporalMs", "rtComputeTotalMs",
                 "rtGiTraceExecMs", "rtGiTraceSyncMs", "rtGiTemporalExecMs", "rtGiTemporalSyncMs",
-                "rtGiAtrous0ExecMs", "rtGiAtrous0SyncMs", "rtReflectionTraceExecMs",
+                "rtGiAtrous0ExecMs", "rtGiAtrous0SyncMs", "rtReflectionStartSyncMs", "rtReflectionTraceExecMs",
                 "rtReflectionTraceSyncMs", "rtReflectionTemporalExecMs", "rtReflectionTemporalSyncMs"
             };
             for (size_t i = 0; i < sample.effectStages.size(); ++i)
@@ -261,7 +261,7 @@ namespace engine::renderer {
         for (size_t i = 0; i < avgGpuStages.size(); ++i) {
             avgGpuStages[i] = average([i](const ProfilerWindowSample& s) { return s.gpuStages[i]; });
         }
-        std::array<double, 9> avgEffectStages{};
+        std::array<double, 20> avgEffectStages{};
         for (size_t i = 0; i < avgEffectStages.size(); ++i) {
             avgEffectStages[i] = average([i](const ProfilerWindowSample& s) { return s.effectStages[i]; });
         }
@@ -351,7 +351,7 @@ namespace engine::renderer {
                     "RT GI trace dispatch", "RT GI trace dependency gap",
                     "RT GI temporal dispatch", "RT GI temporal dependency gap",
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
-                    "RT reflections trace dispatch", "RT reflections trace dependency gap",
+                    "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
                     "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i)
@@ -511,7 +511,7 @@ namespace engine::renderer {
                     "RT GI trace dispatch", "RT GI trace dependency gap",
                     "RT GI temporal dispatch", "RT GI temporal dependency gap",
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
-                    "RT reflections trace dispatch", "RT reflections trace dependency gap",
+                    "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
                     "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i) {
