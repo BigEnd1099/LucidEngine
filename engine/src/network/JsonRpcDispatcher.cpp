@@ -793,6 +793,50 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.setRenderFeatures") {
+                nlohmann::json options = json.value("params", nlohmann::json::object());
+                queue.push([options, client, id](core::Engine* eng) {
+                    auto* renderer = eng->getRenderer();
+                    if (!renderer) {
+                        nlohmann::json error = {
+                            {"jsonrpc", "2.0"}, {"id", id},
+                            {"error", {{"code", -32000}, {"message", "Renderer is unavailable"}}}
+                        };
+                        eng->sendWsMessage(client, error.dump());
+                        return;
+                    }
+
+                    if (options.contains("gtao") && options["gtao"].is_boolean())
+                        renderer->setGtaoEnabled(options["gtao"].get<bool>());
+                    if (options.contains("ssgi") && options["ssgi"].is_boolean())
+                        renderer->setLightBounceEnabled(options["ssgi"].get<bool>());
+
+                    auto& rt = renderer->getRtSettings();
+                    if (options.contains("rtEnabled") && options["rtEnabled"].is_boolean())
+                        rt.enabled = options["rtEnabled"].get<bool>();
+                    if (options.contains("rtGi") && options["rtGi"].is_boolean())
+                        rt.giEnabled = options["rtGi"].get<bool>();
+                    if (options.contains("rtAo") && options["rtAo"].is_boolean())
+                        rt.aoEnabled = options["rtAo"].get<bool>();
+                    if (options.contains("rtReflections") && options["rtReflections"].is_boolean())
+                        rt.reflectionsEnabled = options["rtReflections"].get<bool>();
+
+                    // Each benchmark case starts with clean temporal accumulation.
+                    renderer->invalidateRtHistory();
+
+                    nlohmann::json result = {
+                        {"gtao", renderer->isGtaoEnabled()},
+                        {"ssgi", renderer->isLightBounceEnabled()},
+                        {"rtEnabled", rt.enabled},
+                        {"rtGi", rt.giEnabled},
+                        {"rtAo", rt.aoEnabled},
+                        {"rtReflections", rt.reflectionsEnabled}
+                    };
+                    nlohmann::json response = {
+                        {"jsonrpc", "2.0"}, {"id", id}, {"result", result}
+                    };
+                    eng->sendWsMessage(client, response.dump());
+                });
             } else {
                 core::Logger::warn("Unknown JSON-RPC method: " + method);
                 if (!id.is_null() && client) {

@@ -97,3 +97,6 @@ public/assets/aistudio/*
 
 
 switch_branch.bat
+
+# Local GPU benchmark captures and reports
+benchmark-results/
