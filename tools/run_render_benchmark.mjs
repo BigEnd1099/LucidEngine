@@ -363,7 +363,8 @@ function writeSummary(results, sceneMeta) {
   }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
-    '- Samples are polled over JSON-RPC from a dedicated windowed Vulkan renderer (swapchain + presentation enabled).',
+    '- Samples are polled over JSON-RPC from a dedicated maximized windowed Vulkan renderer (swapchain + presentation enabled).',
+    '- Benchmark mode hides editor UI and disables viewport-driven resolution changes; the offscreen render target stays fixed to the configured benchmark resolution.',
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
     '- The harness does not alter RT reflection algorithms or quality defaults.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
