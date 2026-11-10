@@ -66,6 +66,9 @@ void drawEditorBottomPanels(bool immersivePlay,
                 if (fs::is_directory("assets", pathError) && !pathError) s_currentBrowsePath = "assets";
                 else s_currentBrowsePath = ".";
             }
+            if (!s_selectedAssetPath.empty() && s_selectedAssetPath.parent_path() != s_currentBrowsePath) {
+                s_selectedAssetPath.clear();
+            }
 
             // Top breadcrumbs & navigation strip
             if (ImGui::Button(editorText("ui.navigate_parent", " .. [Up] ")) && s_currentBrowsePath.has_parent_path()) {
