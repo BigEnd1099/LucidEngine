@@ -288,8 +288,11 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     }
                     ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
                     if (ImGui::MenuItem("Reset Position")) {
-                        auto& transform = registry.get().get<ecs::TransformComponent>(entity);
-                        transform.position = glm::vec3(0.0f);
+                        if (auto* local = registry.get().try_get<ecs::LocalTransformComponent>(entity))
+                            local->position = glm::vec3(0.0f);
+                        else
+                            registry.get().get<ecs::TransformComponent>(entity).position = glm::vec3(0.0f);
+                        registry.updateWorldTransforms();
                         if (engine) engine->syncEntityTransformPhysics(entity);
                     }
                     if (ImGui::MenuItem("Duplicate Object [Ctrl+D]")) {
