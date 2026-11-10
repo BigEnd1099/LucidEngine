@@ -1373,7 +1373,7 @@ namespace engine::core {
                         updateSkinPalettes(*m_registry);
                     }
                     catch (const std::exception& e) {
-                        core::Logger::error(std::string("Skin palette update exception: ") + e.what());
+                        core::Logger::error(std::string("Animation/skin pose update exception: ") + e.what());
                     }
                 }
                 if (!m_headless) {
