@@ -5,7 +5,11 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <filesystem>
+#include <functional>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include "core/Logger.hpp"
 #include "utils/FileIO.hpp"
 
@@ -35,11 +39,31 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTF(const std::string& path) {
+        m_lastImportedInstances.clear();
         try {
-            auto data = utils::readFile(path);
-            return loadGLTFFromMemory(std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(data.data()), reinterpret_cast<const uint8_t*>(data.data()) + data.size()));
+            fastgltf::Parser parser;
+            auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
+            if (!buffer) {
+                core::Logger::error("AssetManager: unable to read glTF file: " + path);
+                return 0;
+            }
+
+            const auto directory = std::filesystem::path(path).parent_path();
+            const auto options = fastgltf::Options::DecomposeNodeMatrices |
+                                 fastgltf::Options::LoadExternalBuffers |
+                                 fastgltf::Options::LoadExternalImages |
+                                 fastgltf::Options::GenerateMeshIndices;
+            auto asset = parser.loadGltf(buffer.get(), directory, options);
+            if (asset.error() != fastgltf::Error::None) {
+                core::Logger::error("AssetManager: fastgltf failed to parse " + path);
+                return 0;
+            }
+            return loadGLTFAsset(asset.get());
         } catch (const std::exception& e) {
             core::Logger::error("AssetManager::loadGLTF failed for " + path + ": " + e.what());
+            return 0;
+        } catch (...) {
+            core::Logger::error("AssetManager::loadGLTF failed with an unknown exception: " + path);
             return 0;
         }
     }
@@ -299,110 +323,145 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTFFromMemory(const std::vector<uint8_t>& data) {
+        m_lastImportedInstances.clear();
         if (data.empty()) return 0;
         try {
             fastgltf::Parser parser;
             auto buffer = fastgltf::GltfDataBuffer::FromBytes(reinterpret_cast<const std::byte*>(data.data()), data.size());
             if (!buffer) return 0;
-
-            auto asset = parser.loadGltfBinary(buffer.get(), "", fastgltf::Options::DecomposeNodeMatrices);
-            
+            const auto options = fastgltf::Options::DecomposeNodeMatrices |
+                                 fastgltf::Options::GenerateMeshIndices;
+            auto asset = parser.loadGltf(buffer.get(), "", options);
             if (asset.error() != fastgltf::Error::None) {
-                core::Logger::error("fastgltf error while parsing GLB");
+                core::Logger::error("fastgltf failed to parse in-memory glTF data");
                 return 0;
             }
+            return loadGLTFAsset(asset.get());
+        } catch (const std::exception& e) {
+            core::Logger::error(std::string("GLTF parsing exception: ") + e.what());
+            return 0;
+        } catch (...) {
+            core::Logger::error("Unknown GLTF parsing exception");
+            return 0;
+        }
+    }
 
+    uint32_t AssetManager::loadGLTFAsset(fastgltf::Asset& asset) {
+        try {
             uint32_t rootMeshId = 0;
             
-            if (asset.get().meshes.empty()) return 0;
-            const auto& gltfMesh = asset.get().meshes[0];
-            if (gltfMesh.primitives.empty()) return 0;
-            const auto& primitive = gltfMesh.primitives[0];
+            if (asset.meshes.empty()) return 0;
+            // Import every mesh primitive. glTF meshes may contain multiple primitives,
+            // each with its own material and index/vertex streams.
+            std::vector<std::vector<uint32_t>> importedMeshIds(asset.meshes.size());
+            for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex) {
+              const auto& gltfMesh = asset.meshes[meshIndex];
+              for (const auto& primitive : gltfMesh.primitives) {
+            if (primitive.type != fastgltf::PrimitiveType::Triangles) {
+                core::Logger::warn("AssetManager: skipping non-triangle glTF primitive");
+                continue;
+            }
             
             auto posIt = primitive.findAttribute("POSITION");
             if (posIt == primitive.attributes.end()) {
-                core::Logger::error("GLB primitive has no POSITION attribute");
-                return 0;
+                core::Logger::warn("AssetManager: skipping primitive without POSITION attribute");
+                continue;
             }
 
-            if (posIt->accessorIndex >= asset.get().accessors.size()) return 0;
-            auto& positionAccessor = asset.get().accessors[posIt->accessorIndex];
-            if (positionAccessor.count == 0) return 0;
+            if (posIt->accessorIndex >= asset.accessors.size()) continue;
+            auto& positionAccessor = asset.accessors[posIt->accessorIndex];
+            if (positionAccessor.count == 0) continue;
 
             std::vector<renderer::Vertex> vertices(positionAccessor.count);
             std::vector<uint32_t> indices;
 
-            auto extractData = [&](const fastgltf::Accessor& accessor, auto&& callback) {
-                if (!accessor.bufferViewIndex.has_value()) return;
-                size_t bvIdx = accessor.bufferViewIndex.value();
-                if (bvIdx >= asset.get().bufferViews.size()) return;
-                auto& bufferView = asset.get().bufferViews[bvIdx];
-                if (bufferView.bufferIndex >= asset.get().buffers.size()) return;
-                auto& buf = asset.get().buffers[bufferView.bufferIndex];
-                
-                const uint8_t* bufferData = nullptr;
-                if (auto* vectorBuffer = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(vectorBuffer->bytes.data());
-                } else if (auto* arrayBuffer = std::get_if<fastgltf::sources::Array>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(arrayBuffer->bytes.data());
-                } else if (auto* byteViewBuffer = std::get_if<fastgltf::sources::ByteView>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(byteViewBuffer->bytes.data());
-                }
-                if (bufferData) {
-                     const uint8_t* accessorData = bufferData + bufferView.byteOffset + accessor.byteOffset;
-                     callback(accessorData, accessor.count);
-                }
-            };
-
-            extractData(positionAccessor, [&](const uint8_t* d, size_t count) {
-                const float* f = reinterpret_cast<const float*>(d);
-                for (size_t i = 0; i < count; ++i) {
-                    vertices[i].position = glm::vec3(f[i * 3 + 0], f[i * 3 + 1], f[i * 3 + 2]);
-                    vertices[i].normal = glm::vec3(0, 1, 0); // default
-                    vertices[i].texCoord = glm::vec2(0, 0);
-                }
-            });
-
-            if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.get().accessors.size()) {
-                    auto& normalAccessor = asset.get().accessors[it->accessorIndex];
-                    extractData(normalAccessor, [&](const uint8_t* d, size_t count) {
-                        const float* f = reinterpret_cast<const float*>(d);
-                        for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
-                            vertices[i].normal = glm::vec3(f[i * 3 + 0], f[i * 3 + 1], f[i * 3 + 2]);
-                        }
-                    });
-                }
-            }
-            
-            if (auto it = primitive.findAttribute("TEXCOORD_0"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.get().accessors.size()) {
-                    auto& uvAccessor = asset.get().accessors[it->accessorIndex];
-                    extractData(uvAccessor, [&](const uint8_t* d, size_t count) {
-                        const float* f = reinterpret_cast<const float*>(d);
-                        for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
-                            vertices[i].texCoord = glm::vec2(f[i * 2 + 0], f[i * 2 + 1]);
-                        }
-                    });
-                }
-            }
-
-            if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.get().accessors.size()) {
-                auto& idxAccessor = asset.get().accessors[primitive.indicesAccessor.value()];
-                extractData(idxAccessor, [&](const uint8_t* d, size_t count) {
-                    if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedShort) {
-                         const uint16_t* u16 = reinterpret_cast<const uint16_t*>(d);
-                         for (size_t i = 0; i < count; ++i) indices.push_back(u16[i]);
-                    } else if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedInt) {
-                         const uint32_t* u32 = reinterpret_cast<const uint32_t*>(d);
-                         for (size_t i = 0; i < count; ++i) indices.push_back(u32[i]);
-                    }
+            // fastgltf's typed iterator handles accessor byteStride, sparse overrides,
+            // component conversion and normalized integer attributes.
+            size_t positionIndex = 0;
+            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, positionAccessor,
+                [&](const fastgltf::math::fvec3& value) {
+                    if (positionIndex >= vertices.size()) return;
+                    vertices[positionIndex].position = glm::vec3(
+                        static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                    vertices[positionIndex].normal = glm::vec3(0.0f);
+                    vertices[positionIndex].texCoord = glm::vec2(0.0f);
+                    vertices[positionIndex].tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                    ++positionIndex;
                 });
-            } else {
-                for (size_t i = 0; i < vertices.size(); i++) indices.push_back(static_cast<uint32_t>(i));
+
+            bool hasNormals = false;
+            if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                hasNormals = true;
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec3& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].normal = glm::vec3(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                        }
+                        ++index;
+                    });
             }
 
-            if (vertices.empty() || indices.empty()) return 0;
+            if (auto it = primitive.findAttribute("TEXCOORD_0"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec2>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec2& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].texCoord = glm::vec2(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]));
+                        }
+                        ++index;
+                    });
+            }
+
+            if (auto it = primitive.findAttribute("TANGENT"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].tangent = glm::vec4(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                static_cast<float>(value[2]), static_cast<float>(value[3]));
+                        }
+                        ++index;
+                    });
+            }
+
+            if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
+                fastgltf::iterateAccessor<uint32_t>(asset, asset.accessors[primitive.indicesAccessor.value()],
+                    [&](uint32_t index) { indices.push_back(index); });
+            } else {
+                for (size_t i = 0; i < vertices.size(); ++i) indices.push_back(static_cast<uint32_t>(i));
+            }
+
+            if (vertices.empty() || indices.empty()) continue;
+            if (std::any_of(indices.begin(), indices.end(), [&](uint32_t index) { return index >= vertices.size(); })) {
+                core::Logger::warn("AssetManager: skipping primitive with out-of-range indices");
+                continue;
+            }
+            if (indices.size() % 3 != 0) {
+                core::Logger::warn("AssetManager: skipping triangle primitive with an invalid index count");
+                continue;
+            }
+            if (!hasNormals) {
+                for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+                    const uint32_t i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+                    const glm::vec3 edgeA = vertices[i1].position - vertices[i0].position;
+                    const glm::vec3 edgeB = vertices[i2].position - vertices[i0].position;
+                    const glm::vec3 faceNormal = glm::cross(edgeA, edgeB);
+                    vertices[i0].normal += faceNormal;
+                    vertices[i1].normal += faceNormal;
+                    vertices[i2].normal += faceNormal;
+                }
+                for (auto& vertex : vertices) {
+                    vertex.normal = glm::length(vertex.normal) > 1e-6f
+                        ? glm::normalize(vertex.normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+                }
+            }
 
             auto meshAsset = std::make_unique<MeshAsset>();
             meshAsset->id = m_nextMeshId++;
@@ -412,24 +471,23 @@ namespace engine::core {
             uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(), vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
             uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
-            m_meshes.push_back(std::move(meshAsset));
-            rootMeshId = m_nextMeshId - 1;
+            if (rootMeshId == 0) rootMeshId = meshAsset->id;
             
             // --- Load Textures from glTF ---
-            std::vector<uint32_t> textureIdMap(asset.get().textures.size(), 0);
-            for (size_t t = 0; t < asset.get().textures.size(); ++t) {
-                const auto& gltfTex = asset.get().textures[t];
-                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.get().images.size()) continue;
+            std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
+            for (size_t t = 0; t < asset.textures.size(); ++t) {
+                const auto& gltfTex = asset.textures[t];
+                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.images.size()) continue;
 
-                const auto& image = asset.get().images[gltfTex.imageIndex.value()];
+                const auto& image = asset.images[gltfTex.imageIndex.value()];
                 const uint8_t* rawBytes = nullptr;
                 size_t rawSize = 0;
 
                 if (auto* bv = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
-                    if (bv->bufferViewIndex < asset.get().bufferViews.size()) {
-                        const auto& bufferView = asset.get().bufferViews[bv->bufferViewIndex];
-                        if (bufferView.bufferIndex < asset.get().buffers.size()) {
-                            const auto& buf = asset.get().buffers[bufferView.bufferIndex];
+                    if (bv->bufferViewIndex < asset.bufferViews.size()) {
+                        const auto& bufferView = asset.bufferViews[bv->bufferViewIndex];
+                        if (bufferView.bufferIndex < asset.buffers.size()) {
+                            const auto& buf = asset.buffers[bufferView.bufferIndex];
                             const uint8_t* bufferStart = nullptr;
                             if (auto* vb = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
                                 bufferStart = reinterpret_cast<const uint8_t*>(vb->bytes.data());
@@ -472,8 +530,8 @@ namespace engine::core {
                 }
             }
 
-            if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.get().materials.size()) {
-                auto& mat = asset.get().materials[primitive.materialIndex.value()];
+            if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.materials.size()) {
+                auto& mat = asset.materials[primitive.materialIndex.value()];
                 auto materialAsset = std::make_unique<MaterialAsset>();
                 materialAsset->id = m_nextMaterialId++;
                 materialAsset->baseColorFactor = glm::vec4(
@@ -506,12 +564,96 @@ namespace engine::core {
                 meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
+            // Keep the mesh alive until its material assignment is complete.
+            importedMeshIds[meshIndex].push_back(meshAsset->id);
+            m_meshes.push_back(std::move(meshAsset));
+              }
+            }
+            // Instantiate only meshes referenced by nodes in the active scene when available.
+            // Node TRS is preserved; assets without nodes fall back to one identity instance per primitive.
+            auto appendNodeInstances = [&](const fastgltf::Node& node, const glm::mat4& worldTransform) {
+                if (!node.meshIndex.has_value() || node.meshIndex.value() >= importedMeshIds.size()) return;
+                glm::vec3 worldPosition(worldTransform[3]);
+                glm::vec3 worldScale(
+                    glm::length(glm::vec3(worldTransform[0])),
+                    glm::length(glm::vec3(worldTransform[1])),
+                    glm::length(glm::vec3(worldTransform[2])));
+                glm::mat3 rotationMatrix(worldTransform);
+                for (int axis = 0; axis < 3; ++axis) {
+                    const float axisScale = worldScale[axis];
+                    if (axisScale > 1e-6f) rotationMatrix[axis] /= axisScale;
+                }
+                glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
+                for (uint32_t id : importedMeshIds[node.meshIndex.value()]) {
+                    ImportedMeshInstance instance;
+                    instance.meshId = id;
+                    instance.name = node.name.empty() ? std::string("Mesh") : std::string(node.name);
+                    instance.translation = worldPosition;
+                    instance.rotation = worldRotation;
+                    instance.scale = worldScale;
+                    m_lastImportedInstances.push_back(std::move(instance));
+                }
+            };
+            std::function<void(size_t, const glm::mat4&)> visitNode =
+                [&](size_t nodeIndex, const glm::mat4& parentTransform) {
+                    if (nodeIndex >= asset.nodes.size()) return;
+                    const auto& node = asset.nodes[nodeIndex];
+                    glm::mat4 local(1.0f);
+                    if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
+                        const glm::vec3 translation(
+                            static_cast<float>(trs->translation[0]),
+                            static_cast<float>(trs->translation[1]),
+                            static_cast<float>(trs->translation[2]));
+                        const glm::vec3 scale(
+                            static_cast<float>(trs->scale[0]),
+                            static_cast<float>(trs->scale[1]),
+                            static_cast<float>(trs->scale[2]));
+                        const glm::quat rotation(
+                            static_cast<float>(trs->rotation[3]),
+                            static_cast<float>(trs->rotation[0]),
+                            static_cast<float>(trs->rotation[1]),
+                            static_cast<float>(trs->rotation[2]));
+                        local = glm::translate(glm::mat4(1.0f), translation) *
+                                glm::mat4_cast(rotation) *
+                                glm::scale(glm::mat4(1.0f), scale);
+                    } else if (const auto* matrix = std::get_if<fastgltf::math::fmat4x4>(&node.transform)) {
+                        for (int column = 0; column < 4; ++column) {
+                            for (int row = 0; row < 4; ++row) {
+                                local[column][row] = static_cast<float>((*matrix)[column][row]);
+                            }
+                        }
+                    }
+                    const glm::mat4 world = parentTransform * local;
+                    appendNodeInstances(node, world);
+                    for (size_t childIndex : node.children) visitNode(childIndex, world);
+                };
+            if (!asset.scenes.empty()) {
+                size_t sceneIndex = asset.defaultScene.value_or(0);
+                if (sceneIndex >= asset.scenes.size()) sceneIndex = 0;
+                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) visitNode(nodeIndex, glm::mat4(1.0f));
+            } else {
+                // Some exporters omit scene declarations; visit only hierarchy roots.
+                std::vector<bool> isChild(asset.nodes.size(), false);
+                for (const auto& node : asset.nodes) {
+                    for (size_t childIndex : node.children) if (childIndex < isChild.size()) isChild[childIndex] = true;
+                }
+                for (size_t i = 0; i < asset.nodes.size(); ++i) if (!isChild[i]) visitNode(i, glm::mat4(1.0f));
+            }
+            if (m_lastImportedInstances.empty()) {
+                for (const auto& meshIds : importedMeshIds) for (uint32_t id : meshIds) {
+                    ImportedMeshInstance instance; instance.meshId = id; instance.name = "Mesh";
+                    m_lastImportedInstances.push_back(std::move(instance));
+                }
+            }
+            if (rootMeshId == 0) {
+                core::Logger::error("AssetManager: glTF contains no supported triangle primitives");
+            }
             return rootMeshId;
         } catch (const std::exception& e) {
-            core::Logger::error(std::string("GLTF parsing exception: ") + e.what());
+            core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
             return 0;
         } catch (...) {
-            core::Logger::error("Unknown GLTF parsing exception");
+            core::Logger::error("Unknown GLTF asset import exception");
             return 0;
         }
     }

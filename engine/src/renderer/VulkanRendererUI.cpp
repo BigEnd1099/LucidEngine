@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <algorithm>
 #include <filesystem>
 #include <string>
@@ -307,7 +308,7 @@ namespace engine::renderer {
                 m_uiScale           = pref.uiScale;
             }
 
-            if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
+            if (!ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_F11)) {
                 s_immersivePlay = !s_immersivePlay;
             }
 
@@ -345,22 +346,27 @@ namespace engine::renderer {
             const float topToolbarH   = 36.0f * s_uiScale;
             const float topTotalH     = topTitleBarH + topLevelTabsH + topToolbarH;
 
-            const float minPanelW = 130.0f * s_uiScale;
-            const float maxPanelW = std::max(minPanelW, (screenW - 200.0f * s_uiScale) * 0.5f);
+            // Keep a usable viewport on narrow windows instead of forcing fixed minimum side panels.
+            const float minViewportW = std::min(180.0f * s_uiScale, screenW * 0.35f);
+            const float minPanelW = std::min(130.0f * s_uiScale,
+                std::max(24.0f * s_uiScale, (screenW - minViewportW) * 0.5f));
+            const float maxPanelW = std::max(minPanelW, (screenW - minViewportW) * 0.5f);
             s_userLeftPanelW  = std::clamp(s_userLeftPanelW, minPanelW, maxPanelW);
             s_userRightPanelW = std::clamp(s_userRightPanelW, minPanelW, maxPanelW);
 
             const float bottomStatusH = s_immersivePlay ? 0.0f : (24.0f * s_uiScale);
-            const float maxDrawerH    = std::max(80.0f * s_uiScale, screenH * 0.70f);
-            s_userDrawerH             = std::clamp(s_userDrawerH, 80.0f * s_uiScale, maxDrawerH);
+            const float minContentH = std::min(120.0f * s_uiScale, screenH * 0.25f);
+            const float maxDrawerH = std::max(0.0f,
+                std::min(screenH * 0.70f, screenH - topTotalH - bottomStatusH - minContentH));
+            s_userDrawerH = std::clamp(s_userDrawerH, std::min(80.0f * s_uiScale, maxDrawerH), maxDrawerH);
 
-            const float drawerH       = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? s_userDrawerH : 0.0f;
-            const float bottomTotalH  = bottomStatusH + drawerH;
+            const float drawerH = (!s_immersivePlay && (s_showContentDrawer || s_showOutputLog)) ? s_userDrawerH : 0.0f;
+            const float bottomTotalH = bottomStatusH + drawerH;
 
-            const float contentH        = std::max(120.0f, screenH - topTotalH - bottomTotalH);
-            const float leftPanelW      = (!s_immersivePlay && s_showPlaceActors) ? s_userLeftPanelW : 0.0f;
-            const float rightPanelW     = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_userRightPanelW : 0.0f;
-            const float centerViewportW = std::max(100.0f, screenW - leftPanelW - rightPanelW);
+            const float contentH = std::max(minContentH, screenH - topTotalH - bottomTotalH);
+            const float leftPanelW = (!s_immersivePlay && s_showPlaceActors) ? s_userLeftPanelW : 0.0f;
+            const float rightPanelW = (!s_immersivePlay && (s_showOutliner || s_showDetails)) ? s_userRightPanelW : 0.0f;
+            const float centerViewportW = std::max(minViewportW, screenW - leftPanelW - rightPanelW);
 
             const float minOutlinerH = 60.0f * s_uiScale;
             const float maxOutlinerH = std::max(minOutlinerH, contentH - 60.0f * s_uiScale);
@@ -384,7 +390,7 @@ namespace engine::renderer {
                 ImGuiID myId = ImGui::GetID(id);
                 const bool isDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 
-                if (hovered && s_activeSplitterId == 0 && isDown) {
+                if (hovered && s_activeSplitterId == 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                     s_activeSplitterId = myId;
                 }
                 if (s_activeSplitterId == myId && !isDown) {
@@ -580,16 +586,96 @@ namespace engine::renderer {
                 m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(
                     m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             }
-            if (m_viewportDescriptor != VK_NULL_HANDLE && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
+            const bool hasViewportImage = m_viewportDescriptor != VK_NULL_HANDLE &&
+                viewportPanelSize.x > 0 && viewportPanelSize.y > 0;
+            if (hasViewportImage) {
                 ImGui::Image((ImTextureID)m_viewportDescriptor, viewportPanelSize);
             }
 
             const ImVec2 vMin = ImGui::GetItemRectMin();
             const ImVec2 vSize = ImGui::GetItemRectSize();
-            const bool isHovered = ImGui::IsItemHovered();
+            const bool isHovered = hasViewportImage && ImGui::IsItemHovered();
             const bool isWindowFocused = ImGui::IsWindowFocused();
+
+            // Content Drawer -> Viewport: import glTF/GLB files as new scene actors.
+            bool isAssetDropHovered = false;
+            if (hasViewportImage && !(engine && engine->isSimulationSessionActive()) &&
+                assetManager && ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+                        "LUCID_ASSET_PATH", ImGuiDragDropFlags_AcceptBeforeDelivery)) {
+                    isAssetDropHovered = payload->Preview || payload->Delivery;
+                    if (payload->Delivery && payload->Data && payload->DataSize > 1) {
+                        const char* rawPath = static_cast<const char*>(payload->Data);
+                        const char* pathEnd = static_cast<const char*>(std::memchr(rawPath, '\0', static_cast<size_t>(payload->DataSize)));
+                        if (pathEnd) {
+                            const std::filesystem::path droppedPath(std::string(rawPath, pathEnd));
+                            std::string extension = droppedPath.extension().string();
+                            std::transform(extension.begin(), extension.end(), extension.begin(),
+                                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            std::error_code dropError;
+                            const bool supportedModel = extension == ".glb" || extension == ".gltf";
+                            const bool fileExists = std::filesystem::is_regular_file(droppedPath, dropError) && !dropError;
+                            if (supportedModel && fileExists) {
+                                const uint32_t firstMeshId = assetManager->loadGLTF(droppedPath.string());
+                                const auto& instances = assetManager->getLastImportedInstances();
+                                if (assetManager->getMesh(firstMeshId) && !instances.empty()) {
+                                    const std::string modelName = droppedPath.stem().string().empty()
+                                        ? std::string("ImportedModel") : droppedPath.stem().string();
+                                    const glm::vec3 placementOrigin = camPos + front * 5.0f;
+                                    entt::entity firstCreated = entt::null;
+                                    size_t createdCount = 0;
+                                    for (const auto& instance : instances) {
+                                        if (!assetManager->getMesh(instance.meshId)) continue;
+                                        const entt::entity newEntity = registry.createEntity();
+                                        const std::string nodeName = instance.name.empty() || instance.name == "Mesh"
+                                            ? modelName + (instances.size() > 1 ? "_" + std::to_string(createdCount + 1) : "")
+                                            : modelName + "/" + instance.name;
+                                        registry.get().emplace<ecs::TagComponent>(newEntity, ecs::TagComponent{nodeName});
+                                        ecs::TransformComponent transform{};
+                                        transform.position = placementOrigin + instance.translation;
+                                        transform.rotation = glm::degrees(glm::eulerAngles(instance.rotation));
+                                        transform.scale = instance.scale;
+                                        transform.orientation = instance.rotation;
+                                        registry.get().emplace<ecs::TransformComponent>(newEntity, transform);
+                                        registry.get().emplace<ecs::MeshComponent>(newEntity, ecs::MeshComponent{instance.meshId});
+                                        if (firstCreated == entt::null) firstCreated = newEntity;
+                                        ++createdCount;
+                                    }
+                                    if (firstCreated != entt::null) {
+                                        selectedEnt = firstCreated;
+                                        if (engine) engine->setSelectedEntity(firstCreated);
+                                        core::Logger::info("Imported " + std::to_string(createdCount) +
+                                            " glTF mesh instance(s) into viewport: " + droppedPath.string());
+                                    } else {
+                                        core::Logger::error("Viewport drop produced no valid mesh instances: " + droppedPath.string());
+                                    }
+                                } else {
+                                    core::Logger::error("Viewport drop failed to import model: " + droppedPath.string());
+                                }
+                            } else if (!supportedModel) {
+                                core::Logger::warn("Viewport drop supports .glb and .gltf models; import failed: " + droppedPath.string());
+                            } else {
+                                core::Logger::error("Viewport drop file is no longer available: " + droppedPath.string());
+                            }
+                        }
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
             const ImVec2 mousePos = ImGui::GetIO().MousePos;
             ImDrawList* drawList = ImGui::GetWindowDrawList();
+            if (isAssetDropHovered) {
+                drawList->AddRectFilled(vMin, ImVec2(vMin.x + vSize.x, vMin.y + vSize.y),
+                    IM_COL32(20, 115, 210, 42));
+                drawList->AddRect(vMin, ImVec2(vMin.x + vSize.x, vMin.y + vSize.y),
+                    IM_COL32(75, 175, 255, 230), 0.0f, 0, 3.0f);
+                const char* dropHint = editorText("ui.drop_model_into_viewport", "Drop model to create actor");
+                const ImVec2 hintSize = ImGui::CalcTextSize(dropHint);
+                drawList->AddText(ImVec2(vMin.x + (vSize.x - hintSize.x) * 0.5f,
+                                         vMin.y + (vSize.y - hintSize.y) * 0.5f),
+                                  IM_COL32(235, 245, 255, 255), dropHint);
+            }
 
             const float aspect = (m_viewportAspectRatio <= 0.1f) ? (16.0f / 9.0f) : m_viewportAspectRatio;
             glm::mat4 curProj = glm::perspective(glm::radians(camFov), aspect, 0.1f, 1000.0f);
@@ -632,7 +718,7 @@ namespace engine::renderer {
             const bool gizmoEnabled = !isSimulationSessionActive;
             if (!gizmoEnabled) s_draggingGizmoAxis = 0;
 
-            if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
+            if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive()) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
                 const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
                 if (!isSimulationSessionActive && ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
@@ -645,6 +731,13 @@ namespace engine::renderer {
                 }
                 if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Comma)) {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_F4)) {
+                    s_showScriptStudio = !s_showScriptStudio;
+                }
+                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Space)) {
+                    s_showContentDrawer = !s_showContentDrawer;
+                    if (s_showContentDrawer) s_showOutputLog = false;
                 }
                 if (!isSimulationSessionActive && !s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;

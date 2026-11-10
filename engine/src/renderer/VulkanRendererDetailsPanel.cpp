@@ -6,6 +6,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -30,11 +31,10 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("DetailsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 const bool simulationSessionActive = engine && engine->isSimulationSessionActive();
-                ImGui::BeginDisabled(simulationSessionActive);
 
                 // Equal-width inspector tabs with a persistent active state.
                 const float inspectorTabGap = 4.0f * uiScale;
-                const float inspectorTabWidth = (ImGui::GetContentRegionAvail().x - inspectorTabGap) * 0.5f;
+                const float inspectorTabWidth = std::max(1.0f, (ImGui::GetContentRegionAvail().x - inspectorTabGap) * 0.5f);
                 const ImVec4 tabActive = ImVec4(0.10f, 0.34f, 0.58f, 1.0f);
                 const ImVec4 tabInactive = ImVec4(0.085f, 0.095f, 0.125f, 1.0f);
                 ImGui::PushStyleColor(ImGuiCol_Button, m_detailsTab == 0 ? tabActive : tabInactive);
@@ -49,9 +49,19 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 if (ImGui::Button(editorText("ui.world_graphics", "World & Graphics"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 1;
                 ImGui::PopStyleColor(3);
                 ImGui::Separator();
+                if (simulationSessionActive) {
+                    ImGui::TextDisabled("%s", editorText("details.simulation_readonly", "Inspector is read-only while simulation is running."));
+                    ImGui::Separator();
+                }
+                ImGui::BeginDisabled(simulationSessionActive);
 
                 if (m_detailsTab == 0) {
-                    if (selectedEntity == entt::null || !registry.get().valid(selectedEntity)) {
+                    // Clear stale handles before any component access (e.g. after deleting an entity elsewhere).
+                    if (selectedEntity != entt::null && !registry.get().valid(selectedEntity)) {
+                        selectedEntity = entt::null;
+                        if (engine) engine->setSelectedEntity(entt::null);
+                    }
+                    if (selectedEntity == entt::null) {
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), editorText("ui.select_an_object_in_the_scene", "Select an object in the scene"));
                         ImGui::TextDisabled(editorText("ui.select_any_object_in_the_3d_viewport_or_the_outliner_above", "Select any object in the 3D viewport or the Outliner above,"));
@@ -78,8 +88,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         quickSpawnBtn("+ Kula Metaliczna", 3, glm::vec3(0.95f, 0.8f, 0.3f));
                         quickSpawnBtn("+ Kapsula / Postac", 5, glm::vec3(0.2f, 0.9f, 0.4f));
                         ImGui::Spacing();
-                        ImGui::TextDisabled("Mozesz takze przelaczyc sie na zakladke 'World & Graphics' u gory,");
-                        ImGui::TextDisabled("aby sterowac Niebem HDRI, Sloncem, Mgla i Ray Tracingiem.");
+                        ImGui::TextDisabled(editorText("details.world_hint_1", "You can also switch to the 'World & Graphics' tab above,"));
+                        ImGui::TextDisabled(editorText("details.world_hint_2", "to control the HDRI sky, Sun, Fog and Ray Tracing."));
                     } else {
                         std::string tagStr = registry.get().all_of<ecs::TagComponent>(selectedEntity)
                             ? registry.get().get<ecs::TagComponent>(selectedEntity).name
@@ -150,7 +160,27 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
                         ImGui::Separator();
 
-                        if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
+                        static char inspectorFilterBuffer[96] = "";
+                        ImGui::SetNextItemWidth(-1.0f);
+                        ImGui::InputTextWithHint("##InspectorComponentFilter",
+                            editorText("details.search_components", "Search components..."),
+                            inspectorFilterBuffer, sizeof(inspectorFilterBuffer));
+                        std::string inspectorFilter = inspectorFilterBuffer;
+                        std::transform(inspectorFilter.begin(), inspectorFilter.end(), inspectorFilter.begin(),
+                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                        auto componentMatches = [&](const char* english, const char* polish) {
+                            if (inspectorFilter.empty()) return true;
+                            std::string a = english ? english : "";
+                            std::string b = polish ? polish : "";
+                            std::transform(a.begin(), a.end(), a.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            std::transform(b.begin(), b.end(), b.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            return a.find(inspectorFilter) != std::string::npos || b.find(inspectorFilter) != std::string::npos;
+                        };
+                        bool inspectorHasVisibleComponent = false;
+
+                        if (registry.get().all_of<ecs::TransformComponent>(selectedEntity) &&
+                            componentMatches("Transform", "Transformacja")) {
+                            inspectorHasVisibleComponent = true;
                             auto& t = registry.get().get<ecs::TransformComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const bool pCh = drawEditorVec3Control("Location", t.position, 0.0f);
@@ -171,12 +201,13 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::LightComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::LightComponent>(selectedEntity) && componentMatches("Light", "Swiatlo")) {
+                            inspectorHasVisibleComponent = true;
                             auto& lc = registry.get().get<ecs::LightComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Light Component (PBR)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* lightTypes[] = { "point", "sun", "spot", "area" };
                                 int curType = (lc.type == "directional" || lc.type == "sun") ? 1 : (lc.type == "spot" ? 2 : (lc.type == "area" ? 3 : 0));
-                                if (ImGui::Combo("Light Type", &curType, "Point Light\0Directional (Sun)\0Spot Light\0Area Light (Rect)\0\0")) {
+                                if (ImGui::Combo(editorText("details.light_type", "Light Type"), &curType, "Point Light\0Directional (Sun)\0Spot Light\0Area Light (Rect)\0\0")) {
                                     lc.type = lightTypes[curType];
                                 }
                                 ImGui::ColorEdit3("Color", (float*)&lc.color);
@@ -191,14 +222,14 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
 
                                         ImGui::Spacing();
                                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Kierunek padania slonca (Sun Direction):");
-                                        if (ImGui::SliderFloat("Elevation (Pitch)", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Azimuth (Yaw)", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.elevation_pitch", "Elevation (Pitch)"), &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.azimuth_yaw", "Azimuth (Yaw)"), &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
 
                                         const float pitchRad = glm::radians(lt.rotation.x);
                                         const float yawRad   = glm::radians(lt.rotation.y);
                                         const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
                                         const glm::vec3 currentSunDir = -sunForward;
-                                        ImGui::TextDisabled("Wektor swiatla: (%.2f, %.2f, %.2f)", currentSunDir.x, currentSunDir.y, currentSunDir.z);
+                                        ImGui::TextDisabled(editorText("details.light_vector", "Light vector: (%.2f, %.2f, %.2f)"), currentSunDir.x, currentSunDir.y, currentSunDir.z);
 
                                         ImGui::Text(editorText("ui.time_of_day", "Time of day:"));
                                         if (ImGui::SmallButton(editorText("ui.noon", "Noon"))) {
@@ -220,16 +251,16 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                         ImGui::Spacing();
                                         if (engine) {
                                             auto env = engine->getEnvironmentSettings();
-                                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)", &env.sunEnabled)) {
+                                            if (ImGui::Checkbox(editorText("details.sun_enabled", "Sun Enabled"), &env.sunEnabled)) {
                                                 engine->setEnvironmentSettings(env);
                                             }
-                                            if (ImGui::Checkbox("Kierunek z pozycji 3D (Direction From Position)", &env.sunDirectionFromPosition)) {
+                                            if (ImGui::Checkbox(editorText("details.sun_direction_from_position", "Direction From Position"), &env.sunDirectionFromPosition)) {
                                                 engine->setEnvironmentSettings(env);
                                             }
                                             ImGui::SameLine();
                                             ImGui::TextDisabled("(?)");
                                             if (ImGui::IsItemHovered()) {
-                                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
+                                                ImGui::SetTooltip(editorText("details.sun_direction_tooltip", "When enabled: the sun disk in the sky is located exactly at the Sun object in 3D space.\nWhen disabled: the sun is infinitely distant and its direction comes from rotation (Pitch/Yaw)."));
                                             }
                                         }
 
@@ -252,14 +283,14 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     }
                                 } else if (curType == 2) { // Spot
                                     ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Inner Cone", &lc.innerConeAngle, 1.0f, 80.0f, "%.1f deg");
+                                    ImGui::SliderFloat(editorText("details.inner_cone", "Inner Cone"), &lc.innerConeAngle, 1.0f, 80.0f, "%.1f deg");
                                     if (lc.outerConeAngle <= lc.innerConeAngle) lc.outerConeAngle = lc.innerConeAngle + 0.5f;
-                                    ImGui::SliderFloat("Outer Cone", &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, "%.1f deg");
+                                    ImGui::SliderFloat(editorText("details.outer_cone", "Outer Cone"), &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, "%.1f deg");
                                     if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
                                         auto& lt = registry.get().get<ecs::TransformComponent>(selectedEntity);
                                         bool changed = false;
-                                        if (ImGui::SliderFloat("Spot Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Spot Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.spot_pitch", "Spot Pitch"), &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.spot_yaw", "Spot Yaw"), &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
                                         if (changed) {
                                             lt.orientation = glm::quat(glm::radians(lt.rotation));
                                             if (engine) engine->syncEntityTransformPhysics(selectedEntity);
@@ -267,13 +298,13 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     }
                                 } else if (curType == 3) { // Area
                                     ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat("Area Width X", &lc.areaSizeX, 0.2f, 20.0f, "%.2f m");
-                                    ImGui::SliderFloat("Area Height Y", &lc.areaSizeY, 0.2f, 20.0f, "%.2f m");
+                                    ImGui::SliderFloat(editorText("details.area_width", "Area Width X"), &lc.areaSizeX, 0.2f, 20.0f, "%.2f m");
+                                    ImGui::SliderFloat(editorText("details.area_height", "Area Height Y"), &lc.areaSizeY, 0.2f, 20.0f, "%.2f m");
                                     if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
                                         auto& lt = registry.get().get<ecs::TransformComponent>(selectedEntity);
                                         bool changed = false;
-                                        if (ImGui::SliderFloat("Area Pitch", &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat("Area Yaw", &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.area_pitch", "Area Pitch"), &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::SliderFloat(editorText("details.area_yaw", "Area Yaw"), &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
                                         if (changed) {
                                             lt.orientation = glm::quat(glm::radians(lt.rotation));
                                             if (engine) engine->syncEntityTransformPhysics(selectedEntity);
@@ -283,22 +314,25 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity) && componentMatches("Mesh", "Siatka")) {
+                            inspectorHasVisibleComponent = true;
                             auto& mc = registry.get().get<ecs::MeshComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Static Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* meshes[] = { "None", "Plane (Ground)", "Cube (1x1x1)", "Sphere (R=0.5)", "Cylinder", "Capsule" };
                                 int curMesh = std::clamp(static_cast<int>(mc.meshId), 0, 5);
-                                if (ImGui::Combo("Mesh Asset", &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
+                                if (ImGui::Combo(editorText("details.mesh_asset", "Mesh Asset"), &curMesh, meshes, IM_ARRAYSIZE(meshes))) {
                                     mc.meshId = static_cast<uint32_t>(curMesh);
                                 }
                             }
                         }
 
-                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL + Tekstury PBR)
-                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
-                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX & Textures)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL)
+                        if (registry.get().all_of<ecs::MeshComponent>(selectedEntity) &&
+                            componentMatches("Material", "Material PBR")) {
+                            inspectorHasVisibleComponent = true;
+                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 if (!registry.get().all_of<ecs::MaterialComponent>(selectedEntity)) {
-                                    if (ImGui::Button("+ Dodaj wlasny Material PBR")) {
+                                    if (ImGui::Button(editorText("details.add_custom_pbr", "+ Add Custom PBR Material"))) {
                                         ecs::MaterialComponent m{};
                                         m.baseColor = glm::vec4(0.85f, 0.85f, 0.90f, 1.0f);
                                         m.metallic = 0.0f;
@@ -309,8 +343,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 } else {
                                     auto& mat = registry.get().get<ecs::MaterialComponent>(selectedEntity);
                                     ImGui::ColorEdit3("Base Color (Albedo)", &mat.baseColor.x);
-                                    ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f, "%.2f");
-                                    ImGui::SliderFloat("Roughness", &mat.roughness, 0.045f, 1.0f, "%.3f");
+                                    ImGui::SliderFloat(editorText("details.metallic", "Metallic"), &mat.metallic, 0.0f, 1.0f, "%.2f");
+                                    ImGui::SliderFloat(editorText("details.roughness", "Roughness"), &mat.roughness, 0.045f, 1.0f, "%.3f");
                                     ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
 
                                     ImGui::Spacing();
@@ -412,91 +446,52 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity) && componentMatches("Physics", "Fizyka")) {
+                            inspectorHasVisibleComponent = true;
                             auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Jolt Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                bool shapeChanged = false;
-                                const char* shapeNames[] = { "Box (Szescian)", "Sphere (Kula)", "Capsule (Kapsula)" };
-                                int curShape = std::clamp(rb.shapeType, 0, 2);
-                                if (ImGui::Combo("Shape Type", &curShape, shapeNames, IM_ARRAYSIZE(shapeNames))) {
-                                    rb.shapeType = curShape;
-                                    shapeChanged = true;
-                                }
-
-                                if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
-                                    const auto& tc = registry.get().get<ecs::TransformComponent>(selectedEntity);
-                                    if (rb.shapeType == 0) {
-                                        glm::vec3 worldDim = rb.halfExtents * 2.0f * glm::abs(tc.scale);
-                                        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Hitbox: %.2f x %.2f x %.2f m", worldDim.x, worldDim.y, worldDim.z);
-                                        if (drawEditorVec3Control("Half Extents", rb.halfExtents, 0.5f)) shapeChanged = true;
-                                    } else if (rb.shapeType == 1) {
-                                        float baseR = (rb.halfExtents.x > 0.0f ? rb.halfExtents.x : 0.5f);
-                                        glm::vec3 rDim = baseR * 2.0f * glm::abs(tc.scale);
-                                        if (std::abs(tc.scale.x - tc.scale.y) < 0.01f && std::abs(tc.scale.x - tc.scale.z) < 0.01f) {
-                                            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Kula (R = %.2f m)", rDim.x * 0.5f);
-                                        } else {
-                                            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Elipsoida (Convex Hull): %.2f x %.2f x %.2f m", rDim.x, rDim.y, rDim.z);
-                                        }
-                                        if (ImGui::DragFloat("Base Radius", &rb.halfExtents.x, 0.05f, 0.05f, 50.0f, "%.2f m")) shapeChanged = true;
-                                    } else if (rb.shapeType == 2) {
-                                        float radS = std::max(std::abs(tc.scale.x), std::abs(tc.scale.z));
-                                        float hS = std::abs(tc.scale.y);
-                                        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Wymiary: R=%.2f m, H=%.2f m", rb.capsuleRadius * radS, (rb.capsuleHalfHeight + rb.capsuleRadius) * 2.0f * hS);
-                                        if (ImGui::DragFloat("Capsule Radius", &rb.capsuleRadius, 0.05f, 0.05f, 20.0f, "%.2f m")) shapeChanged = true;
-                                        if (ImGui::DragFloat("Capsule Half Height", &rb.capsuleHalfHeight, 0.05f, 0.05f, 50.0f, "%.2f m")) shapeChanged = true;
-                                    }
-                                }
-
-                                ImGui::Separator();
-                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f, "%.1f kg");
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("0.0 = Statyczny (nieporuszalny ground/sciana), > 0.0 = Dynamiczny (spadajacy)");
-                                ImGui::SliderFloat("Restitution (Sprezystosc)", &rb.restitution, 0.0f, 1.0f, "%.2f");
-                                ImGui::SliderFloat("Friction (Tarcie)", &rb.friction, 0.0f, 1.0f, "%.2f");
-                                ImGui::Checkbox("Is Sensor (Trigger)", &rb.isSensor);
-
-                                ImGui::TextDisabled("Blokady obrotu (Lock Rotation DOFs):");
-                                ImGui::Checkbox("Lock X##Rb", &rb.lockRotationX); ImGui::SameLine();
-                                ImGui::Checkbox("Lock Y##Rb", &rb.lockRotationY); ImGui::SameLine();
-                                ImGui::Checkbox("Lock Z##Rb", &rb.lockRotationZ);
-
-                                if (shapeChanged && engine) {
-                                    engine->syncEntityTransformPhysics(selectedEntity);
-                                }
+                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f);
+                                ImGui::SliderFloat(editorText("details.restitution", "Restitution"), &rb.restitution, 0.0f, 1.0f);
+                                ImGui::SliderFloat(editorText("details.friction", "Friction"), &rb.friction, 0.0f, 1.0f);
+                                ImGui::Checkbox(editorText("details.sensor_trigger", "Is Sensor (Trigger)"), &rb.isSensor);
                             }
                         }
 
-                        if (registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::ParticleEmitterComponent>(selectedEntity) && componentMatches("Particle", "Czasteczki")) {
+                            inspectorHasVisibleComponent = true;
                             auto& pe = registry.get().get<ecs::ParticleEmitterComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Particle Emitter (HDR VFX)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 const char* pTypes[] = { "fire", "sparks", "smoke", "portal", "explosion" };
                                 int curP = 0;
                                 for (int i = 0; i < 5; ++i) { if (pe.type == pTypes[i]) { curP = i; break; } }
-                                if (ImGui::Combo("Particle Type", &curP, "Fire\0Sparks\0Smoke\0Portal\0Explosion\0\0")) {
+                                if (ImGui::Combo(editorText("details.particle_type", "Particle Type"), &curP, "Fire\0Sparks\0Smoke\0Portal\0Explosion\0\0")) {
                                     pe.type = pTypes[curP];
                                 }
                                 ImGui::ColorEdit3("Particle Color", &pe.color.x);
                                 int pCount = static_cast<int>(pe.count);
                                 if (ImGui::SliderInt("Particle Count", &pCount, 10, 1000)) pe.count = static_cast<uint32_t>(pCount);
-                                ImGui::SliderFloat("Speed", &pe.speed, 0.1f, 20.0f, "%.1f m/s");
-                                ImGui::SliderFloat("Size", &pe.size, 0.05f, 2.0f, "%.2f m");
+                                ImGui::SliderFloat(editorText("details.speed", "Speed"), &pe.speed, 0.1f, 20.0f, "%.1f m/s");
+                                ImGui::SliderFloat(editorText("details.size", "Size"), &pe.size, 0.05f, 2.0f, "%.2f m");
                             }
                         }
 
-                        if (registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::CharacterMovementComponent>(selectedEntity) && componentMatches("Character", "Postac")) {
+                            inspectorHasVisibleComponent = true;
                             auto& cm = registry.get().get<ecs::CharacterMovementComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Character Movement (Sterowanie)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 ImGui::DragFloat("Max Walk Speed (m/s)", &cm.maxWalkSpeed, 0.2f, 1.0f, 50.0f, "%.1f m/s");
                                 ImGui::DragFloat("Jump Z Velocity (m/s)", &cm.jumpZVelocity, 0.2f, 0.0f, 30.0f, "%.1f m/s");
                                 ImGui::DragFloat("Gravity Scale", &cm.gravityScale, 0.05f, 0.0f, 10.0f, "%.2f");
                                 ImGui::DragFloat("Air Control (0..1)", &cm.airControl, 0.02f, 0.0f, 1.0f, "%.2f");
-                                ImGui::TextDisabled("Sterowanie: WASD = Ruch | Spacja = Skok | Shift = Sprint");
+                                ImGui::TextDisabled(editorText("details.controls_movement", "Controls: WASD = Move | Space = Jump | Shift = Sprint"));
                             }
                         }
 
-                        if (registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity)) {
+                        if (registry.get().all_of<ecs::CameraBoomComponent>(selectedEntity) && componentMatches("Camera", "Kamera")) {
+                            inspectorHasVisibleComponent = true;
                             auto& cb = registry.get().get<ecs::CameraBoomComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Camera Boom (Ramie Kamery)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                if (ImGui::Checkbox("Widok FPP (First Person)", &cb.isFirstPerson)) {
+                                if (ImGui::Checkbox(editorText("details.first_person_view", "First Person View (FPP)"), &cb.isFirstPerson)) {
                                     if (cb.isFirstPerson) {
                                         cb.targetArmLength = 0.0f;
                                         cb.socketOffsetY = 1.65f;
@@ -509,20 +504,23 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                         if (engine && !engine->isPaused()) engine->setCameraMode("thirdPerson");
                                     }
                                 }
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Przelacz widok z pierwszej osoby (FPP) lub zza plecow (TPP) [Klawisz V w grze]");
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("details.first_person_tooltip", "Switch between first-person (FPP) and third-person (TPP) view [V key in game]"));
 
                                 if (cb.isFirstPerson) {
                                     ImGui::DragFloat("Wysokosc oczu Y", &cb.socketOffsetY, 0.05f, 0.5f, 3.0f, "%.2f m");
-                                    ImGui::TextDisabled("Tryb FPP: kamera przywiazana bezposrednio do oczu gracza.");
+                                    ImGui::TextDisabled(editorText("details.first_person_hint", "FPP mode: camera is attached directly to the player's eyes."));
                                 } else {
                                     ImGui::DragFloat("Target Arm Length (m)", &cb.targetArmLength, 0.2f, 0.5f, 50.0f, "%.1f m");
                                     ImGui::DragFloat("Socket Offset Y", &cb.socketOffsetY, 0.1f, -5.0f, 10.0f, "%.1f m");
-                                    ImGui::Checkbox("Camera Lag (Plynne sledzenie)", &cb.cameraLag);
+                                    ImGui::Checkbox(editorText("details.camera_lag", "Camera Lag (Smooth Follow)"), &cb.cameraLag);
                                     if (cb.cameraLag) {
-                                        ImGui::SliderFloat("Lag Speed", &cb.lagSpeed, 1.0f, 30.0f, "%.1f");
+                                        ImGui::SliderFloat(editorText("details.lag_speed", "Lag Speed"), &cb.lagSpeed, 1.0f, 30.0f, "%.1f");
                                     }
                                 }
                             }
+                        }
+                        if (!inspectorFilter.empty() && !inspectorHasVisibleComponent) {
+                            ImGui::TextDisabled("%s", editorText("details.no_component_matches", "No components match this filter."));
                         }
                     }
                 } else {
@@ -530,56 +528,56 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                     if (ImGui::CollapsingHeader("Hardware Ray Tracing (Vulkan Ray Query)", ImGuiTreeNodeFlags_DefaultOpen)) {
                         const bool rtSupported = m_context && m_context->isRayTracingSupported();
                         if (!rtSupported) {
-                            ImGui::TextDisabled("Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features.");
+                            ImGui::TextDisabled(editorText("details.rt_unavailable", "Ray tracing unavailable: GPU/driver lacks required Vulkan KHR features."));
                         }
                         ImGui::BeginDisabled(!rtSupported);
-                        ImGui::Checkbox("Enable Hardware Ray Tracing", &m_rtSettings.enabled);
+                        ImGui::Checkbox(editorText("details.rt_enable", "Enable Hardware Ray Tracing"), &m_rtSettings.enabled);
                         ImGui::BeginDisabled(!m_rtSettings.enabled);
-                        ImGui::Checkbox("Ray-Traced Shadows (Sun + Point + Spot)", &m_rtSettings.shadowsEnabled);
-                        ImGui::Checkbox("Ray-Traced Ambient Occlusion", &m_rtSettings.aoEnabled);
-                        ImGui::Checkbox("Ray-Traced Reflections (Scene Geometry)", &m_rtSettings.reflectionsEnabled);
+                        ImGui::Checkbox(editorText("details.rt_shadows", "Ray-Traced Shadows (Sun + Point + Spot)"), &m_rtSettings.shadowsEnabled);
+                        ImGui::Checkbox(editorText("details.rt_ao", "Ray-Traced Ambient Occlusion"), &m_rtSettings.aoEnabled);
+                        ImGui::Checkbox(editorText("details.rt_reflections", "Ray-Traced Reflections (Scene Geometry)"), &m_rtSettings.reflectionsEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
                         ImGui::SliderInt("RT Reflection Samples", &m_rtSettings.reflectionSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Infinite Bounce (adaptive, max 16)", &m_rtSettings.reflectionInfiniteBounces);
+                        ImGui::Checkbox(editorText("details.rt_infinite_bounce", "Infinite Bounce (adaptive, max 16)"), &m_rtSettings.reflectionInfiniteBounces);
                         ImGui::BeginDisabled(m_rtSettings.reflectionInfiniteBounces);
                         ImGui::SliderInt("RT Reflection Bounces", &m_rtSettings.reflectionBounces, 2, 4, "%d");
                         ImGui::EndDisabled();
-                        ImGui::SliderFloat("Reflection Continuation Roughness", &m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f, "%.2f");
-                        ImGui::SliderFloat(m_rtSettings.reflectionInfiniteBounces ? "Russian Roulette Energy Threshold" : "Reflection Min Throughput", &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
+                        ImGui::SliderFloat(editorText("details.rt_reflection_roughness", "Reflection Continuation Roughness"), &m_rtSettings.reflectionMaxRoughness, 0.05f, 1.0f, "%.2f");
+                        ImGui::SliderFloat(m_rtSettings.reflectionInfiniteBounces ? editorText("details.rt_russian_roulette", "Russian Roulette Energy Threshold") : editorText("details.rt_min_throughput", "Reflection Min Throughput"), &m_rtSettings.reflectionMinThroughput, 0.01f, 0.25f, "%.3f");
                         if (m_rtSettings.reflectionInfiniteBounces)
-                            ImGui::TextDisabled("Adaptive path termination; hard safety limit: 16 surface hits.");
-                        ImGui::Checkbox("Roughness Checkerboard (Variant 1)", &m_rtSettings.reflectionCheckerboard);
+                            ImGui::TextDisabled(editorText("details.rt_adaptive_termination", "Adaptive path termination; hard safety limit: 16 surface hits."));
+                        ImGui::Checkbox(editorText("details.rt_roughness_checkerboard", "Roughness Checkerboard (Variant 1)"), &m_rtSettings.reflectionCheckerboard);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Smooth surfaces (roughness <= 0.25) traced at full 1:1; rough surfaces traced on alternating checkerboard and bilaterally reconstructed.");
-                        ImGui::Checkbox("Stochastic Lights on Bounces (Variant 2)", &m_rtSettings.reflectionStochasticLights);
+                            ImGui::SetTooltip(editorText("details.rt_roughness_tooltip", "Smooth surfaces (roughness <= 0.25) traced at full 1:1; rough surfaces traced on alternating checkerboard and bilaterally reconstructed."));
+                        ImGui::Checkbox(editorText("details.rt_stochastic_lights", "Stochastic Lights on Bounces (Variant 2)"), &m_rtSettings.reflectionStochasticLights);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all 8 lights, cutting shadow rays from 9 to 2.");
-                        ImGui::Checkbox("Bounce Depth Mip LOD Bias (Variant 3)", &m_rtSettings.reflectionLodBias);
+                            ImGui::SetTooltip(editorText("details.rt_stochastic_tooltip", "On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all 8 lights, cutting shadow rays from 9 to 2."));
+                        ImGui::Checkbox(editorText("details.rt_lod_bias", "Bounce Depth Mip LOD Bias (Variant 3)"), &m_rtSettings.reflectionLodBias);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Increases texture mip LOD with bounce depth (textureLod float(bounce)) to reduce GPU texture cache thrashing.");
-                        ImGui::Checkbox("Global Half-Res Reflections (Variant 4)", &m_rtSettings.reflectionHalfRes);
+                            ImGui::SetTooltip(editorText("details.rt_lod_tooltip", "Increases texture mip LOD with bounce depth (textureLod float(bounce)) to reduce GPU texture cache thrashing."));
+                        ImGui::Checkbox(editorText("details.rt_half_res", "Global Half-Res Reflections (Variant 4)"), &m_rtSettings.reflectionHalfRes);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Forces all reflections into half-resolution with edge-aware bilateral normal/depth reconstruction.");
+                            ImGui::SetTooltip(editorText("details.rt_half_res_tooltip", "Forces all reflections into half-resolution with edge-aware bilateral normal/depth reconstruction."));
                         ImGui::EndDisabled();
-                        ImGui::Checkbox("Ray-Traced Diffuse GI", &m_rtSettings.giEnabled);
+                        ImGui::Checkbox(editorText("details.rt_diffuse_gi", "Ray-Traced Diffuse GI"), &m_rtSettings.giEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);
-                        ImGui::SliderFloat("RT GI Intensity", &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
+                        ImGui::SliderFloat(editorText("details.rt_gi_intensity", "RT GI Intensity"), &m_rtSettings.giIntensity, 0.0f, 3.0f, "%.2f");
                         ImGui::SliderInt("RT Diffuse GI Bounces", &m_rtSettings.giBounces, 1, 15, "%d");
-                        ImGui::Checkbox("GI Checkerboard (Half-Rate Trace)", &m_rtSettings.giCheckerboard);
+                        ImGui::Checkbox(editorText("details.rt_gi_checkerboard", "GI Checkerboard (Half-Rate Trace)"), &m_rtSettings.giCheckerboard);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Traces GI on alternating checkerboard pixels, cutting ray tracing work by 50% and reconstructing via temporal history & bilateral filter.");
-                        ImGui::TextDisabled("Resolution: Half-Res Diffuse GI (4x compute speedup)");
+                            ImGui::SetTooltip(editorText("details.rt_gi_checkerboard_tooltip", "Traces GI on alternating checkerboard pixels, cutting ray tracing work by 50% and reconstructing via temporal history & bilateral filter."));
+                        ImGui::TextDisabled(editorText("details.rt_gi_resolution", "Resolution: Half-Res Diffuse GI (4x compute speedup)"));
                         ImGui::EndDisabled();
 
                         // GI + AO are traced in compute, then temporally accumulated and denoised.
                         ImGui::SeparatorText("RT Sampling & Denoising");
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
                         ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
-                        ImGui::Checkbox("Temporal + Spatial Denoiser", &m_rtSettings.denoiseEnabled);
+                        ImGui::Checkbox(editorText("details.rt_denoiser", "Temporal + Spatial Denoiser"), &m_rtSettings.denoiseEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
                         ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
-                        ImGui::SliderFloat("Spatial Filter Strength", &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
-                        ImGui::Checkbox("SVGF (Variance-Guided Filter)", &m_rtSettings.svgfEnabled);
+                        ImGui::SliderFloat(editorText("details.rt_spatial_strength", "Spatial Filter Strength"), &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::Checkbox(editorText("details.rt_svgf", "SVGF (Variance-Guided Filter)"), &m_rtSettings.svgfEnabled);
                         ImGui::EndDisabled();
 
                         // Debug Visualization Modes
@@ -595,7 +593,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "7: Luminance Variance (SVGF)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
-                        if (ImGui::Combo("RT Debug View", &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
+                        if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
                             m_rtSettings.debugMode = static_cast<RtDebugMode>(currentDebugMode);
                         }
 
@@ -637,7 +635,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "7: Sunrise (Wschod slonca)"
                         };
                         int currentHdri = m_selectedHdriIndex;
-                        if (ImGui::Combo("HDRI Environment", &currentHdri, hdriItems, IM_ARRAYSIZE(hdriItems))) {
+                        if (ImGui::Combo(editorText("details.hdri_environment", "HDRI Environment"), &currentHdri, hdriItems, IM_ARRAYSIZE(hdriItems))) {
                             g_pendingHdriIndex = currentHdri;
                             if (engine) {
                                 auto env = engine->getEnvironmentSettings();
@@ -705,7 +703,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
 
                         bool hdriEnvironmentEnabled = m_skyboxEnabled || m_iblEnabled;
-                        if (ImGui::Checkbox("HDRI Environment Enabled (Skybox + IBL)", &hdriEnvironmentEnabled)) {
+                        if (ImGui::Checkbox(editorText("details.hdri_enabled", "HDRI Environment Enabled (Skybox + IBL)"), &hdriEnvironmentEnabled)) {
                             m_skyboxEnabled = hdriEnvironmentEnabled;
                             m_iblEnabled = hdriEnvironmentEnabled;
                             if (engine) {
@@ -715,14 +713,14 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 engine->setEnvironmentSettings(env);
                             }
                         }
-                        if (ImGui::Checkbox("Render HDRI Skybox & Solar Disk", &m_skyboxEnabled)) {
+                        if (ImGui::Checkbox(editorText("details.hdri_skybox", "Render HDRI Skybox & Solar Disk"), &m_skyboxEnabled)) {
                             if (engine) {
                                 auto env = engine->getEnvironmentSettings();
                                 env.skyboxEnabled = m_skyboxEnabled;
                                 engine->setEnvironmentSettings(env);
                             }
                         }
-                        if (ImGui::Checkbox("Use HDRI for IBL (Diffuse Lighting + Reflections)", &m_iblEnabled)) {
+                        if (ImGui::Checkbox(editorText("details.hdri_ibl", "Use HDRI for IBL (Diffuse Lighting + Reflections)"), &m_iblEnabled)) {
                             if (engine) {
                                 auto env = engine->getEnvironmentSettings();
                                 env.iblEnabled = m_iblEnabled;
@@ -750,12 +748,12 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             ImGui::Spacing();
                             ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Slonce / Swiatlo kierunkowe (Directional Sun):");
 
-                            if (ImGui::Checkbox("Slonce aktywne (Sun Enabled)##World", &env.sunEnabled)) changed = true;
-                            if (ImGui::Checkbox("Kierunek z pozycji 3D##World", &env.sunDirectionFromPosition)) changed = true;
+                            if (ImGui::Checkbox(editorText("details.sun_enabled_world", "Sun Enabled##World"), &env.sunEnabled)) changed = true;
+                            if (ImGui::Checkbox(editorText("details.sun_direction_world", "Direction From Position##World"), &env.sunDirectionFromPosition)) changed = true;
                             ImGui::SameLine();
                             ImGui::TextDisabled("(?)");
                             if (ImGui::IsItemHovered()) {
-                                ImGui::SetTooltip("Gdy wlaczone: tarcza slonca na niebie znajduje sie dokladnie w miejscu obiektu Slonca w przestrzeni 3D.\nGdy wylaczone: slonce jest w nieskonczonosci, a kierunek wynika z rotacji (Pitch/Yaw).");
+                                ImGui::SetTooltip(editorText("details.sun_direction_tooltip", "When enabled: the sun disk in the sky is located exactly at the Sun object in 3D space.\nWhen disabled: the sun is infinitely distant and its direction comes from rotation (Pitch/Yaw)."));
                             }
 
                             if (sunEntity != entt::null) {
@@ -772,25 +770,25 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 }
 
                                 ImGui::Spacing();
-                                ImGui::Text("Kierunek padania:");
-                                if (ImGui::SliderFloat("Elevation (Pitch)##World", &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                if (ImGui::SliderFloat("Azimuth (Yaw)##World", &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                ImGui::Text(editorText("details.sun_direction_label", "Sun direction:"));
+                                if (ImGui::SliderFloat(editorText("details.elevation_world", "Elevation (Pitch)##World"), &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
+                                if (ImGui::SliderFloat(editorText("details.azimuth_world", "Azimuth (Yaw)##World"), &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
 
                                 const float pitchRad = glm::radians(sunLt.rotation.x);
                                 const float yawRad   = glm::radians(sunLt.rotation.y);
                                 const glm::vec3 sunForward = glm::normalize(glm::vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)));
                                 const glm::vec3 sunDir = -sunForward;
                                 env.sunDirection = sunDir;
-                                ImGui::TextDisabled("Wektor slonca: (%.2f, %.2f, %.2f)", sunDir.x, sunDir.y, sunDir.z);
+                                ImGui::TextDisabled(editorText("details.sun_vector", "Sun vector: (%.2f, %.2f, %.2f)"), sunDir.x, sunDir.y, sunDir.z);
 
                                 ImGui::Text(editorText("ui.time_of_day", "Time of day:"));
-                                if (ImGui::SmallButton("Poludnie##World")) { sunLt.rotation.x = -75.0f; sunLt.rotation.y = 0.0f; changed = true; }
+                                if (ImGui::SmallButton(editorText("details.noon", "Noon##World"))) { sunLt.rotation.x = -75.0f; sunLt.rotation.y = 0.0f; changed = true; }
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("Poranek##World")) { sunLt.rotation.x = -20.0f; sunLt.rotation.y = 80.0f; changed = true; }
+                                if (ImGui::SmallButton(editorText("details.morning", "Morning##World"))) { sunLt.rotation.x = -20.0f; sunLt.rotation.y = 80.0f; changed = true; }
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("Zlota godzina##World")) { sunLt.rotation.x = -12.0f; sunLt.rotation.y = 240.0f; changed = true; }
+                                if (ImGui::SmallButton(editorText("details.golden_hour", "Golden hour##World"))) { sunLt.rotation.x = -12.0f; sunLt.rotation.y = 240.0f; changed = true; }
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("Zachod##World")) { sunLt.rotation.x = -3.0f; sunLt.rotation.y = 265.0f; changed = true; }
+                                if (ImGui::SmallButton(editorText("details.sunset", "Sunset##World"))) { sunLt.rotation.x = -3.0f; sunLt.rotation.y = 265.0f; changed = true; }
 
                                 ImGui::Spacing();
                                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Pozycja slonca 3D:");
@@ -818,45 +816,45 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                     }
 
                     if (ImGui::CollapsingHeader("ACES Tonemapping & 5-Mip Jimenez Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::SliderFloat("Exposure (EV)", &m_exposure, 0.15f, 4.0f, "%.2f");
-                        ImGui::Checkbox("5-Mip Jimenez Bloom (Karis Average)", &m_bloomEnabled);
+                        ImGui::SliderFloat(editorText("details.exposure_ev", "Exposure (EV)"), &m_exposure, 0.15f, 4.0f, "%.2f");
+                        ImGui::Checkbox(editorText("details.bloom", "5-Mip Jimenez Bloom (Karis Average)"), &m_bloomEnabled);
                         if (m_bloomEnabled) {
-                            ImGui::SliderFloat("Bloom Intensity", &m_bloomIntensity, 0.0f, 3.0f, "%.2f");
-                            ImGui::SliderFloat("Bloom Threshold", &m_bloomThreshold, 0.2f, 5.0f, "%.2f");
+                            ImGui::SliderFloat(editorText("details.bloom_intensity", "Bloom Intensity"), &m_bloomIntensity, 0.0f, 3.0f, "%.2f");
+                            ImGui::SliderFloat(editorText("details.bloom_threshold", "Bloom Threshold"), &m_bloomThreshold, 0.2f, 5.0f, "%.2f");
                         }
                     }
 
                     if (ImGui::CollapsingHeader("Indirect Diffuse GI (SSGI & Ground Bounce)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GI & Bounce Active (Globalne oswietlenie)", &m_lightBounceEnabled);
+                        ImGui::Checkbox(editorText("details.gi_bounce_active", "GI & Bounce Active (Global Illumination)"), &m_lightBounceEnabled);
                         if (m_lightBounceEnabled) {
-                            ImGui::SliderFloat("Bounce Intensity", &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
-                            ImGui::SliderFloat("Ground Albedo", &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
+                            ImGui::SliderFloat(editorText("details.bounce_intensity", "Bounce Intensity"), &m_lightBounceIntensity, 0.0f, 2.0f, "%.2f");
+                            ImGui::SliderFloat(editorText("details.ground_albedo", "Ground Albedo"), &m_lightBounceGroundReflectance, 0.0f, 1.0f, "%.2f");
                             ImGui::ColorEdit3("Ground Color (sRGB)", &m_lightBounceGroundColor.x);
-                            ImGui::TextDisabled("SSGI: Color bleed od kazdego elementu i tekstury");
-                            ImGui::TextDisabled("Ground Bounce: Odbicie podloza z cieniem slonca i 1/PI");
+                            ImGui::TextDisabled(editorText("details.ssgi_description", "SSGI: Color bleed from every object and texture"));
+                            ImGui::TextDisabled(editorText("details.ground_bounce_description", "Ground Bounce: Ground reflection with sun shadow and 1/PI"));
                         }
                     }
 
                     if (ImGui::CollapsingHeader("Multi-Bounce GTAO (Depth Prepass)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("GTAO Active", &m_gtaoEnabled);
+                        ImGui::Checkbox(editorText("details.gtao_active", "GTAO Active"), &m_gtaoEnabled);
                         if (m_gtaoEnabled) {
-                            ImGui::SliderFloat("AO World Radius", &m_gtaoRadius, 0.1f, 3.0f, "%.2f m");
-                            ImGui::SliderFloat("AO Power", &m_gtaoIntensity, 0.2f, 4.0f, "%.2f");
+                            ImGui::SliderFloat(editorText("details.ao_world_radius", "AO World Radius"), &m_gtaoRadius, 0.1f, 3.0f, "%.2f m");
+                            ImGui::SliderFloat(editorText("details.ao_power", "AO Power"), &m_gtaoIntensity, 0.2f, 4.0f, "%.2f");
                         }
                     }
 
                     if (ImGui::CollapsingHeader("Exponential Height Fog (Mie Phase)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Height Fog Active", &m_fogEnabled);
+                        ImGui::Checkbox(editorText("details.height_fog_active", "Height Fog Active"), &m_fogEnabled);
                         if (m_fogEnabled) {
-                            ImGui::SliderFloat("Fog Density", &m_fogDensity, 0.001f, 0.10f, "%.4f");
-                            ImGui::SliderFloat("Height Falloff", &m_fogHeightFalloff, 0.01f, 0.50f, "%.3f");
+                            ImGui::SliderFloat(editorText("details.fog_density", "Fog Density"), &m_fogDensity, 0.001f, 0.10f, "%.4f");
+                            ImGui::SliderFloat(editorText("details.height_falloff", "Height Falloff"), &m_fogHeightFalloff, 0.01f, 0.50f, "%.3f");
                             ImGui::ColorEdit3("Fog Inscatter Color", &m_fogColor.x);
                         }
                     }
 
                     if (ImGui::CollapsingHeader("Shadows (4096px 4-Cascade Vogel PCF)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::Checkbox("Soft Shadows", &m_softShadows);
-                        ImGui::SliderFloat("CSM Distance", &m_shadowDistance, 25.0f, 200.0f, "%.1f m");
+                        ImGui::Checkbox(editorText("details.soft_shadows", "Soft Shadows"), &m_softShadows);
+                        ImGui::SliderFloat(editorText("details.csm_distance", "CSM Distance"), &m_shadowDistance, 25.0f, 200.0f, "%.1f m");
                     }
 
                     if (ImGui::CollapsingHeader("FXAA 3.11 & Resolution Scaling", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -866,7 +864,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "2: FXAA 3.11 Quality (Subpixel)",
                             "3: FXAA 3.11 Ultra"
                         };
-                        ImGui::Combo("AA Preset", &m_antiAliasingMode, aaModes, IM_ARRAYSIZE(aaModes));
+                        ImGui::Combo(editorText("details.aa_preset", "AA Preset"), &m_antiAliasingMode, aaModes, IM_ARRAYSIZE(aaModes));
 
                         const char* resPresets[] = {
                             "0: Auto 1:1 Viewport",
@@ -875,7 +873,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "3: 1080p FHD (1920x1080)",
                             "4: 720p HD (1280x720)"
                         };
-                        if (ImGui::Combo("Resolution Mode", &m_resolutionPresetIndex, resPresets, IM_ARRAYSIZE(resPresets))) {
+                        if (ImGui::Combo(editorText("details.resolution_mode", "Resolution Mode"), &m_resolutionPresetIndex, resPresets, IM_ARRAYSIZE(resPresets))) {
                             if (m_resolutionPresetIndex == 0) m_autoViewportResolution = true;
                             else {
                                 m_autoViewportResolution = false;
@@ -887,7 +885,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         }
 
                         float resSc = m_resolutionScale;
-                        if (ImGui::SliderFloat("Resolution Scale (Skala renderu)", &resSc, 0.25f, 2.00f, "%.2fx")) {
+                        if (ImGui::SliderFloat(editorText("details.resolution_scale", "Resolution Scale"), &resSc, 0.25f, 2.00f, "%.2fx")) {
                             setResolutionScale(resSc);
                             if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) {
                                 requestResolution(
@@ -903,7 +901,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         if (ImGui::Button("75%##ResSc")) { setResolutionScale(0.75f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 0.75f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 0.75f) + 1u) & ~1u); }
                         ImGui::SameLine();
                         if (ImGui::Button("100%##ResSc")) { setResolutionScale(1.00f); if (m_autoViewportResolution && viewportPanelSize.x > 10.0f) requestResolution((static_cast<uint32_t>(viewportPanelSize.x * 1.00f) + 1u) & ~1u, (static_cast<uint32_t>(viewportPanelSize.y * 1.00f) + 1u) & ~1u); }
-                        ImGui::SliderFloat("UI Scale", &m_uiScale, 0.75f, 1.65f, "%.2fx");
+                        ImGui::SliderFloat(editorText("details.ui_scale", "UI Scale"), &m_uiScale, 0.75f, 1.65f, "%.2fx");
                     }
                 }
 

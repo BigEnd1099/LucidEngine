@@ -1141,8 +1141,20 @@ namespace engine::core {
     
     bool Engine::loadScript(const std::string& code) {
         core::Logger::info("Loading new script into QuickJS...");
+        if (!m_scriptContext) {
+            core::Logger::error("Cannot load script: QuickJS context is unavailable.");
+            return false;
+        }
+
+        // Commit the editor's current script only after QuickJS accepts the new source.
+        // A syntax/runtime evaluation failure must not replace the last known-good script.
+        if (!m_scriptContext->evaluate(code)) {
+            core::Logger::error("QuickJS script evaluation failed; keeping the previous script source.");
+            return false;
+        }
+
         m_currentScriptCode = code;
-        return m_scriptContext->evaluate(code);
+        return true;
     }
 
     uint32_t Engine::spawnEntityFromJson(const nlohmann::json& components) {
@@ -2953,11 +2965,18 @@ function update(entities, dt, input, contacts) {
 
     bool Engine::liveReloadScript(const std::string& scriptCode) {
         core::Logger::info("Live Coding: Hot-reloading script...");
-        m_currentScriptCode = scriptCode;
-        if (m_scriptContext) {
-            return m_scriptContext->evaluate(scriptCode, "live_reload.js");
+        if (!m_scriptContext) {
+            core::Logger::error("Live Coding failed: QuickJS context is unavailable.");
+            return false;
         }
-        return false;
+
+        if (!m_scriptContext->evaluate(scriptCode, "live_reload.js")) {
+            core::Logger::error("Live Coding failed; keeping the previous script source.");
+            return false;
+        }
+
+        m_currentScriptCode = scriptCode;
+        return true;
     }
 
     void Engine::queueSubTickInput(uint32_t buttonMask, float yaw, float pitch) {

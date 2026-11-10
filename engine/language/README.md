@@ -1,15 +1,15 @@
 # Editor language catalogs
 
-Lucid Engine editor UI translations are stored as UTF-8 JSON files in this directory.
+Lucid Engine editor translations are stored as UTF-8 JSON catalogs in this directory. The editor loads the selected locale at runtime; English is the canonical source language and fallback.
 
-## Files
+## Catalogs
 
-- `en.json` — canonical English catalog and fallback.
-- `pl.json` — Polish translation.
+- `en.json` — English catalog and fallback.
+- `pl.json` — Polish catalog.
 
-## Format
+## Structure
 
-Each catalog contains locale metadata and a `translations` object:
+Each catalog contains locale metadata and a `translations` object keyed by stable identifiers:
 
 ```json
 {
@@ -17,14 +17,16 @@ Each catalog contains locale metadata and a `translations` object:
   "name": "Polski",
   "fallback": "en",
   "translations": {
-    "File": "Plik",
-    "Editor Preferences...": "Preferencje edytora..."
+    "ui.file": "Plik",
+    "ui.editor_preferences": "Preferencje edytora..."
   }
 }
 ```
 
-Each UI string uses a stable key (for example, `ui.file`) that is independent of the displayed wording. Keep the same keys in every catalog; English is the canonical source language. This allows translations to change without changing C++ code.
+Use stable, namespaced keys such as `ui.*`, `settings.*`, `script.*`, and `details.*`. Keys must be identical across all locale catalogs. Never use translated wording as a key: changing a translation must not require editing C++.
 
-If a key is missing, the UI falls back to its English source string (or the legacy Polish fallback while older panel code is being migrated). If a locale file cannot be loaded, the editor falls back to English.
+C++ UI code should use `editorText("stable.key", "English fallback")`. If a key is absent from the selected catalog, the English fallback passed by the call site is displayed. If the selected catalog cannot be loaded, the localization system attempts to load `en.json`.
 
-CMake copies this directory beside the engine executable during the post-build step. Keep the directory name `language` and the locale filename format `<locale>.json`.
+## Runtime deployment
+
+CMake copies the complete `language` directory beside the engine executable as part of the normal build. Keep the directory name `language` and use the locale ID as the filename, for example `fr.json` for French.

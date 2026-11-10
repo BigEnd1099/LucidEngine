@@ -4,6 +4,7 @@
 #include <memory>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <fastgltf/core.hpp>
 #include "renderer/Vertex.hpp"
 #include "renderer/VulkanContext.hpp"
 
@@ -26,6 +27,14 @@ namespace engine::core {
         uint32_t albedoTextureId{0};
         uint32_t normalTextureId{0};
         uint32_t ormTextureId{0};
+    };
+
+    struct ImportedMeshInstance {
+        uint32_t meshId{0};
+        std::string name;
+        glm::vec3 translation{0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::vec3 scale{1.0f};
     };
 
     struct MeshAsset {
@@ -58,16 +67,19 @@ namespace engine::core {
         MaterialAsset* getMaterial(uint32_t id);
         TextureAsset* getTexture(uint32_t id);
         uint32_t getTextureCount() const { return m_nextTextureId - 1; }
+        const std::vector<ImportedMeshInstance>& getLastImportedInstances() const { return m_lastImportedInstances; }
 
         // Uploads buffer data to GPU (creates staging buffer, copies, then destroys staging)
         void uploadBuffer(VkBuffer& dstBuffer, VmaAllocation& dstAlloc, const void* data, size_t size, VkBufferUsageFlags usage);
         void uploadTexture(VkImage& dstImage, VmaAllocation& dstAlloc, VkImageView& dstView, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips);
 
     private:
+        uint32_t loadGLTFAsset(fastgltf::Asset& asset);
         renderer::VulkanContext* m_context;
         std::vector<std::unique_ptr<MeshAsset>> m_meshes;
         std::vector<std::unique_ptr<MaterialAsset>> m_materials;
         std::vector<std::unique_ptr<TextureAsset>> m_textures;
+        std::vector<ImportedMeshInstance> m_lastImportedInstances;
         uint32_t m_nextMeshId{1};
         uint32_t m_nextMaterialId{1};
         uint32_t m_nextTextureId{1};
