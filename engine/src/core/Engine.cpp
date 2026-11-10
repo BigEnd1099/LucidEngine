@@ -122,6 +122,136 @@ namespace engine::core {
         }
     }
 
+    // Sample glTF animation tracks and apply the pose to local ECS transforms/morph weights.
+    static void updateAnimationPlayers(ecs::Registry& registry, float deltaTime) {
+        const auto view = registry.get().view<ecs::AnimationPlayerComponent>();
+        for (const entt::entity playerEntity : view) {
+            auto& player = view.get<ecs::AnimationPlayerComponent>(playerEntity);
+            if (player.clips.empty() || player.activeClip >= player.clips.size()) continue;
+            const auto& clip = player.clips[player.activeClip];
+            if (clip.tracks.empty()) continue;
+
+            if (player.playing && std::isfinite(deltaTime) && deltaTime > 0.0f) {
+                player.time += deltaTime * player.speed;
+            }
+            if (clip.duration > 1e-6f) {
+                if (player.loop) {
+                    player.time = std::fmod(player.time, clip.duration);
+                    if (player.time < 0.0f) player.time += clip.duration;
+                } else {
+                    player.time = std::clamp(player.time, 0.0f, clip.duration);
+                    if (player.time >= clip.duration) player.playing = false;
+                }
+            } else {
+                player.time = 0.0f;
+            }
+
+            for (const auto& track : clip.tracks) {
+                if (track.target == entt::null || !registry.get().valid(track.target) ||
+                    track.keyframeTimes.empty() || track.componentsPerKey == 0) continue;
+
+                const size_t keyCount = track.keyframeTimes.size();
+                const uint32_t componentCount = track.componentsPerKey;
+                const bool cubic = track.interpolation ==
+                    static_cast<uint8_t>(fastgltf::AnimationInterpolation::CubicSpline);
+                const size_t expectedValues = keyCount * componentCount * (cubic ? 3u : 1u);
+                if (track.values.size() < expectedValues) continue;
+
+                size_t keyA = 0;
+                size_t keyB = 0;
+                float alpha = 0.0f;
+                const float sampleTime = player.time;
+                auto upper = std::upper_bound(track.keyframeTimes.begin(), track.keyframeTimes.end(), sampleTime);
+                if (upper == track.keyframeTimes.begin()) {
+                    keyA = keyB = 0;
+                } else if (upper == track.keyframeTimes.end()) {
+                    keyA = keyB = keyCount - 1;
+                } else {
+                    keyB = static_cast<size_t>(upper - track.keyframeTimes.begin());
+                    keyA = keyB - 1;
+                    const float t0 = track.keyframeTimes[keyA];
+                    const float t1 = track.keyframeTimes[keyB];
+                    alpha = (t1 > t0) ? std::clamp((sampleTime - t0) / (t1 - t0), 0.0f, 1.0f) : 0.0f;
+                }
+
+                const bool step = track.interpolation ==
+                    static_cast<uint8_t>(fastgltf::AnimationInterpolation::Step);
+                const bool rotation = track.path ==
+                    static_cast<uint8_t>(fastgltf::AnimationPath::Rotation);
+                auto valueAt = [&](size_t key, uint32_t component, uint32_t cubicPart) -> float {
+                    const size_t base = cubic ? (key * 3u + cubicPart) * componentCount : key * componentCount;
+                    return track.values[base + component];
+                };
+
+                std::vector<float> sampled(componentCount, 0.0f);
+                if (keyA == keyB || step) {
+                    for (uint32_t component = 0; component < componentCount; ++component)
+                        sampled[component] = valueAt(keyA, component, cubic ? 1u : 0u);
+                } else if (cubic) {
+                    const float t = alpha;
+                    const float t2 = t * t;
+                    const float t3 = t2 * t;
+                    const float dt = track.keyframeTimes[keyB] - track.keyframeTimes[keyA];
+                    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+                    const float h10 = t3 - 2.0f * t2 + t;
+                    const float h01 = -2.0f * t3 + 3.0f * t2;
+                    const float h11 = t3 - t2;
+                    for (uint32_t component = 0; component < componentCount; ++component) {
+                        const float p0 = valueAt(keyA, component, 1u);
+                        const float m0 = valueAt(keyA, component, 2u);
+                        const float p1 = valueAt(keyB, component, 1u);
+                        const float m1 = valueAt(keyB, component, 0u);
+                        sampled[component] = h00 * p0 + h10 * dt * m0 + h01 * p1 + h11 * dt * m1;
+                    }
+                } else if (rotation && componentCount == 4) {
+                    const glm::quat q0(valueAt(keyA, 3, 0), valueAt(keyA, 0, 0),
+                                       valueAt(keyA, 1, 0), valueAt(keyA, 2, 0));
+                    const glm::quat q1(valueAt(keyB, 3, 0), valueAt(keyB, 0, 0),
+                                       valueAt(keyB, 1, 0), valueAt(keyB, 2, 0));
+                    const glm::quat q = glm::normalize(glm::slerp(glm::normalize(q0), glm::normalize(q1), alpha));
+                    sampled = {q.x, q.y, q.z, q.w};
+                } else {
+                    for (uint32_t component = 0; component < componentCount; ++component)
+                        sampled[component] = glm::mix(valueAt(keyA, component, 0), valueAt(keyB, component, 0), alpha);
+                }
+
+                if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Translation) && componentCount >= 3) {
+                    glm::vec3 translation(sampled[0], sampled[1], sampled[2]);
+                    if (!registry.get().all_of<ecs::HierarchyComponent>(track.target) ||
+                        registry.get().get<ecs::HierarchyComponent>(track.target).parent == entt::null)
+                        translation += player.rootTranslationOffset;
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target))
+                        registry.get().get<ecs::LocalTransformComponent>(track.target).position = translation;
+                    else if (registry.get().all_of<ecs::TransformComponent>(track.target))
+                        registry.get().get<ecs::TransformComponent>(track.target).position = translation;
+                } else if (rotation && componentCount >= 4) {
+                    glm::quat q(sampled[3], sampled[0], sampled[1], sampled[2]);
+                    if (glm::dot(q, q) > 1e-8f && std::isfinite(glm::dot(q, q))) q = glm::normalize(q);
+                    else q = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target)) {
+                        auto& transform = registry.get().get<ecs::LocalTransformComponent>(track.target);
+                        transform.orientation = q;
+                        transform.rotation = glm::degrees(glm::eulerAngles(q));
+                    } else if (registry.get().all_of<ecs::TransformComponent>(track.target)) {
+                        auto& transform = registry.get().get<ecs::TransformComponent>(track.target);
+                        transform.orientation = q;
+                        transform.rotation = glm::degrees(glm::eulerAngles(q));
+                    }
+                } else if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Scale) && componentCount >= 3) {
+                    const glm::vec3 scale(sampled[0], sampled[1], sampled[2]);
+                    if (registry.get().all_of<ecs::LocalTransformComponent>(track.target))
+                        registry.get().get<ecs::LocalTransformComponent>(track.target).scale = scale;
+                    else if (registry.get().all_of<ecs::TransformComponent>(track.target))
+                        registry.get().get<ecs::TransformComponent>(track.target).scale = scale;
+                } else if (track.path == static_cast<uint8_t>(fastgltf::AnimationPath::Weights)) {
+                    auto& weights = registry.get().get_or_emplace<ecs::MorphWeightsComponent>(track.target);
+                    weights.weights = std::move(sampled);
+                }
+            }
+        }
+        registry.updateWorldTransforms();
+    }
+
     static glm::vec4 parseColorJson(const nlohmann::json& j, const glm::vec4& fallback = glm::vec4(1.0f)) {
         if (j.is_string()) {
             std::string s = j.get<std::string>();
@@ -1238,7 +1368,10 @@ namespace engine::core {
                 // Hierarchy and skin palettes must also refresh while the editor is paused,
                 // because gizmo edits and imported scene changes still modify local transforms.
                 if (m_registry) {
-                    try { updateSkinPalettes(*m_registry); }
+                    try {
+                        updateAnimationPlayers(*m_registry, m_paused ? 0.0f : dt_real);
+                        updateSkinPalettes(*m_registry);
+                    }
                     catch (const std::exception& e) {
                         core::Logger::error(std::string("Skin palette update exception: ") + e.what());
                     }
