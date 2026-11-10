@@ -381,5 +381,8 @@
   "ui.profiler_mesh_entities": "Mesh entities",
   "ui.profiler_gpu_depth": "Depth prepass",
   "ui.profiler_gpu_gbuffer": "G-buffer",
-  "ui.profiler_gpu_ao_rt": "AO + RT"
+  "ui.profiler_gpu_ao_rt": "AO + RT",
+  "ui.profiler_avg_column": "1s average",
+  "ui.profiler_render_scale": "Render scale",
+  "ui.profiler_scale_test_hint": "Use these presets for a controlled resolution-scaling test."
 }
