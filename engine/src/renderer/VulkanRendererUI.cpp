@@ -247,15 +247,15 @@ namespace engine::renderer {
             ImGui::SameLine();
             ImGui::TextDisabled("|  Vulkan 1.3");
 
+            auto metric = [](const char* label, double value, const char* unit, bool available = true) {
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", label);
+                if (available) ImGui::Text("%.*f %s", 2, value, unit);
+                else ImGui::TextDisabled("N/A");
+            };
             if (ImGui::BeginTable("##PerformanceSummary", 4,
                 ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
                 ImGui::TableNextRow();
-                auto metric = [](const char* label, double value, const char* unit, bool available = true) {
-                    ImGui::TableNextColumn();
-                    ImGui::TextDisabled("%s", label);
-                    if (available) ImGui::Text("%.*f %s", 2, value, unit);
-                    else ImGui::TextDisabled("N/A");
-                };
                 metric(editorText("ui.profiler_frame_rate", "FRAME RATE"), fps, "FPS");
                 metric(editorText("ui.profiler_loop_frame", "LOOP FRAME"), loopFrameMs, "ms");
                 metric(editorText("ui.profiler_render_thread", "RENDER THREAD"), renderCpuMs, "ms", renderCpuMs > 0.0);
