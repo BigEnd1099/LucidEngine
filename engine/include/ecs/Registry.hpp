@@ -38,6 +38,16 @@ namespace engine::ecs {
             return true;
         }
 
+        bool reparentEntity(entt::entity child, entt::entity parent) {
+            if (!m_registry.valid(child) ||
+                !m_registry.all_of<TransformComponent, LocalTransformComponent>(child)) return false;
+            const TransformComponent worldBefore = m_registry.get<TransformComponent>(child);
+            if (!setParent(child, parent)) return false;
+            m_registry.get<TransformComponent>(child) = worldBefore;
+            syncLocalTransformFromWorld(child);
+            return true;
+        }
+
         bool clearParent(entt::entity child) {
             if (!m_registry.valid(child)) return false;
             detachFromParent(child);
