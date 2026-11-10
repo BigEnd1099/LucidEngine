@@ -298,6 +298,24 @@
     "ui.asset_no_results": "Brak zasobów pasujących do wyszukiwania.",
     "script.modified": "Zmieniono",
     "script.synced": "Zsynchronizowano",
-    "script.run_failed": "Uruchomienie nie powiodło się — sprawdź Output Log"
+    "script.run_failed": "Uruchomienie nie powiodło się — sprawdź Output Log",
+    "ui.help": "Pomoc",
+    "ui.keyboard_shortcuts": "Skróty klawiszowe",
+    "ui.shortcuts_project_windows": "Projekt i okna",
+    "ui.shortcut_save": "Zapisz projekt",
+    "ui.shortcut_save_as": "Zapisz projekt jako",
+    "ui.shortcut_open": "Otwórz projekt",
+    "ui.shortcut_preferences": "Otwórz preferencje edytora",
+    "ui.shortcut_content_drawer": "Pokaż/ukryj Content Drawer",
+    "ui.shortcut_script_studio": "Pokaż/ukryj QuickJS Script Studio",
+    "ui.shortcut_immersive": "Przełącz widok immersyjny",
+    "ui.shortcuts_viewport": "Viewport i zaznaczanie",
+    "ui.shortcut_translate": "Przesuwanie gizma",
+    "ui.shortcut_rotate": "Obracanie gizma",
+    "ui.shortcut_scale": "Skalowanie gizma",
+    "ui.shortcut_focus": "Skup kamerę na obiekcie",
+    "ui.shortcut_delete": "Usuń zaznaczony obiekt",
+    "ui.shortcut_duplicate": "Duplikuj zaznaczony obiekt",
+    "ui.shortcuts_note": "Skróty viewportu są blokowane podczas edycji tekstu oraz w trakcie symulacji, gdy ma to zastosowanie."
   }
 }
