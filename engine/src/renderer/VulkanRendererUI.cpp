@@ -759,9 +759,6 @@ namespace engine::renderer {
                                             if (registry.get().all_of<ecs::SkinComponent>(nodeEntities[nodeIndex]))
                                                 registry.get().emplace<ecs::SkinComponent>(primitiveEntity,
                                                     registry.get().get<ecs::SkinComponent>(nodeEntities[nodeIndex]));
-                                            if (registry.get().all_of<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]))
-                                                registry.get().emplace<ecs::MorphWeightsComponent>(primitiveEntity,
-                                                    registry.get().get<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]));
                                             registry.setParent(primitiveEntity, nodeEntities[nodeIndex]);
                                             ++createdCount;
                                         }
