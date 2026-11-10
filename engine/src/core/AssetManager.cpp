@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <glm/gtc/constants.hpp>
 #include "core/Logger.hpp"
 #include "utils/FileIO.hpp"
@@ -573,14 +574,23 @@ namespace engine::core {
                     m_lastImportedInstances.push_back(std::move(instance));
                 }
             };
+            std::function<void(size_t)> visitNode = [&](size_t nodeIndex) {
+                if (nodeIndex >= asset.nodes.size()) return;
+                const auto& node = asset.nodes[nodeIndex];
+                appendNodeInstances(node);
+                for (size_t childIndex : node.children) visitNode(childIndex);
+            };
             if (!asset.scenes.empty()) {
                 size_t sceneIndex = asset.defaultScene.value_or(0);
                 if (sceneIndex >= asset.scenes.size()) sceneIndex = 0;
-                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) {
-                    if (nodeIndex < asset.nodes.size()) appendNodeInstances(asset.nodes[nodeIndex]);
-                }
+                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) visitNode(nodeIndex);
             } else {
-                for (const auto& node : asset.nodes) appendNodeInstances(node);
+                // Some exporters omit scene declarations; visit only hierarchy roots.
+                std::vector<bool> isChild(asset.nodes.size(), false);
+                for (const auto& node : asset.nodes) {
+                    for (size_t childIndex : node.children) if (childIndex < isChild.size()) isChild[childIndex] = true;
+                }
+                for (size_t i = 0; i < asset.nodes.size(); ++i) if (!isChild[i]) visitNode(i);
             }
             if (m_lastImportedInstances.empty()) {
                 for (const auto& meshIds : importedMeshIds) for (uint32_t id : meshIds) {
