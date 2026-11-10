@@ -57,8 +57,8 @@ namespace engine::renderer {
         }
 #endif
 
-        // The frame fence (or headless queue-idle) guarantees the previous timestamp
-        // pair is available. Never stall here: consume it only when Vulkan reports ready.
+        // The frame fence (or headless queue-idle) guarantees the previous timestamp set
+        // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
             uint64_t timestamps[9]{};
             const VkResult queryResult = vkGetQueryPoolResults(
