@@ -1,4 +1,3 @@
-#define GLM_ENABLE_EXPERIMENTAL
 #include "animation/System/MotionMatching.hpp"
 #include "ecs/Components.hpp"
 #include "core/Logger.hpp"
