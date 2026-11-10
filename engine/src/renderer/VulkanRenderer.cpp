@@ -74,10 +74,11 @@ namespace engine::renderer {
         if (m_context && m_context->getDevice()) {
             VkDevice dev = m_context->getDevice();
             vkDeviceWaitIdle(dev);
-            for (const auto& transient : m_transientVertexBuffers) {
-                if (transient.buffer) vmaDestroyBuffer(m_context->getAllocator(), transient.buffer, transient.allocation);
+            for (auto& entry : m_deformedVertexCache) {
+                auto& cached = entry.second;
+                if (cached.buffer) vmaDestroyBuffer(m_context->getAllocator(), cached.buffer, cached.allocation);
             }
-            m_transientVertexBuffers.clear();
+            m_deformedVertexCache.clear();
 
             m_rtDenoiser.cleanup();
             m_accelerationStructure.cleanup();
