@@ -13,7 +13,7 @@ Or pass a custom engine executable path:
 
 `node tools/run_render_benchmark.mjs engine/build/Release/engine.exe`
 
-The runner disables the FPS limiter and VSync for uncapped measurements. It does not attach to or terminate an already-open editor instance. It launches its own normal windowed Vulkan process using `--port 9011` (no `--headless` flag), so the engine creates a GLFW window, swapchain and presents frames to the GPU. If the port is occupied, close the process using it or set `LUCID_BENCH_PORT` to another free port.
+The runner disables the FPS limiter and VSync for uncapped measurements. The render target remains fixed to `LUCID_BENCH_WIDTH` × `LUCID_BENCH_HEIGHT`; maximizing the window does not change those dimensions. It does not attach to or terminate an already-open editor instance. It launches its own normal windowed Vulkan process using `--benchmark --port 9011` (no `--headless` flag), so the engine creates a maximized GLFW window, swapchain and presents frames to the GPU. Benchmark mode shows only the scene viewport; editor panels and viewport auto-resize are disabled. If the port is occupied, close the process using it or set `LUCID_BENCH_PORT` to another free port.
 
 ## Optional environment variables
 
