@@ -4,6 +4,7 @@
 #include <memory>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <fastgltf/core.hpp>
 #include "renderer/Vertex.hpp"
 #include "renderer/VulkanContext.hpp"
 
@@ -58,6 +59,7 @@ namespace engine::core {
         void uploadTexture(VkImage& dstImage, VmaAllocation& dstAlloc, VkImageView& dstView, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips);
 
     private:
+        uint32_t loadGLTFAsset(fastgltf::Asset& asset);
         renderer::VulkanContext* m_context;
         std::vector<std::unique_ptr<MeshAsset>> m_meshes;
         std::vector<std::unique_ptr<MaterialAsset>> m_materials;
