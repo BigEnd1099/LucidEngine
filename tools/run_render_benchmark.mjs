@@ -311,6 +311,12 @@ function round(value, digits = 3) {
 
 async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[0]) {
   const actual = await setFeatures(features, profile.settings);
+  const readback = actual?.quality || {};
+  const mismatches = Object.entries(profile.settings).filter(([key, expected]) => readback[key] !== expected);
+  if (mismatches.length) {
+    throw new Error('Renderer quality readback mismatch for profile ' + profile.id + ': ' +
+      mismatches.map(([key, expected]) => key + ' expected=' + expected + ' actual=' + readback[key]).join(', '));
+  }
   console.log('\n[TEST] ' + name + ' | GTAO=' + actual.gtao + ' SSGI=' + actual.ssgi +
     ' RTGI=' + actual.rtGi + ' RTAO=' + actual.rtAo + ' RTRefl=' + actual.rtReflections);
   await sleep(WARMUP_MS);
