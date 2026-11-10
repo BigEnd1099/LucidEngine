@@ -618,37 +618,86 @@ namespace engine::renderer {
                             const bool fileExists = std::filesystem::is_regular_file(droppedPath, dropError) && !dropError;
                             if (supportedModel && fileExists) {
                                 const uint32_t firstMeshId = assetManager->loadGLTF(droppedPath.string());
-                                const auto& instances = assetManager->getLastImportedInstances();
-                                if (assetManager->getMesh(firstMeshId) && !instances.empty()) {
+                                const auto& importedNodes = assetManager->getLastImportedNodes();
+                                if (assetManager->getMesh(firstMeshId) && !importedNodes.empty()) {
                                     const std::string modelName = droppedPath.stem().string().empty()
                                         ? std::string("ImportedModel") : droppedPath.stem().string();
                                     const glm::vec3 placementOrigin = camPos + front * 5.0f;
+                                    std::vector<entt::entity> nodeEntities(importedNodes.size(), entt::null);
                                     entt::entity firstCreated = entt::null;
                                     size_t createdCount = 0;
-                                    for (const auto& instance : instances) {
-                                        if (!assetManager->getMesh(instance.meshId)) continue;
-                                        const entt::entity newEntity = registry.createEntity();
-                                        const std::string nodeName = instance.name.empty() || instance.name == "Mesh"
-                                            ? modelName + (instances.size() > 1 ? "_" + std::to_string(createdCount + 1) : "")
-                                            : modelName + "/" + instance.name;
-                                        registry.get().emplace<ecs::TagComponent>(newEntity, ecs::TagComponent{nodeName});
-                                        ecs::TransformComponent transform{};
-                                        transform.position = placementOrigin + instance.translation;
-                                        transform.rotation = glm::degrees(glm::eulerAngles(instance.rotation));
-                                        transform.scale = instance.scale;
-                                        transform.orientation = instance.rotation;
-                                        registry.get().emplace<ecs::TransformComponent>(newEntity, transform);
-                                        registry.get().emplace<ecs::MeshComponent>(newEntity, ecs::MeshComponent{instance.meshId});
-                                        if (firstCreated == entt::null) firstCreated = newEntity;
-                                        ++createdCount;
+
+                                    // Create one ECS entity for every glTF node, even nodes
+                                    // that only group children and do not contain a mesh.
+                                    for (size_t nodeIndex = 0; nodeIndex < importedNodes.size(); ++nodeIndex) {
+                                        const auto& node = importedNodes[nodeIndex];
+                                        const entt::entity entity = registry.createEntity();
+                                        nodeEntities[nodeIndex] = entity;
+                                        const std::string nodeName = node.name.empty()
+                                            ? "Node_" + std::to_string(node.nodeIndex) : node.name;
+                                        registry.get().emplace<ecs::TagComponent>(entity,
+                                            ecs::TagComponent{modelName + "/" + nodeName});
+
+                                        ecs::LocalTransformComponent local{};
+                                        local.position = node.translation;
+                                        if (node.parentNodeIndex < 0) local.position += placementOrigin;
+                                        local.rotation = glm::degrees(glm::eulerAngles(node.rotation));
+                                        local.orientation = node.rotation;
+                                        local.scale = node.scale;
+                                        registry.get().emplace<ecs::LocalTransformComponent>(entity, local);
+
+                                        ecs::TransformComponent world{};
+                                        world.position = local.position;
+                                        world.rotation = local.rotation;
+                                        world.orientation = local.orientation;
+                                        world.scale = local.scale;
+                                        registry.get().emplace<ecs::TransformComponent>(entity, world);
+
+                                        if (!node.meshIds.empty()) {
+                                            const uint32_t meshId = node.meshIds.front();
+                                            if (assetManager->getMesh(meshId)) {
+                                                registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{meshId});
+                                                ++createdCount;
+                                            }
+                                        }
+                                        if (firstCreated == entt::null) firstCreated = entity;
                                     }
+
+                                    // Connect the exact imported parent-child relationships.
+                                    for (size_t nodeIndex = 0; nodeIndex < importedNodes.size(); ++nodeIndex) {
+                                        const int64_t parentIndex = importedNodes[nodeIndex].parentNodeIndex;
+                                        if (parentIndex >= 0 && static_cast<size_t>(parentIndex) < nodeEntities.size())
+                                            registry.setParent(nodeEntities[nodeIndex], nodeEntities[static_cast<size_t>(parentIndex)]);
+                                    }
+
+                                    // A glTF mesh may contain several primitives. The first
+                                    // primitive lives on the node; additional primitives get
+                                    // identity child entities so no geometry is discarded.
+                                    for (size_t nodeIndex = 0; nodeIndex < importedNodes.size(); ++nodeIndex) {
+                                        const auto& node = importedNodes[nodeIndex];
+                                        for (size_t primitiveIndex = 1; primitiveIndex < node.meshIds.size(); ++primitiveIndex) {
+                                            const uint32_t meshId = node.meshIds[primitiveIndex];
+                                            if (!assetManager->getMesh(meshId)) continue;
+                                            const entt::entity primitiveEntity = registry.createEntity();
+                                            registry.get().emplace<ecs::TagComponent>(primitiveEntity,
+                                                ecs::TagComponent{node.name + "_Primitive_" + std::to_string(primitiveIndex + 1)});
+                                            registry.get().emplace<ecs::TransformComponent>(primitiveEntity, ecs::TransformComponent{});
+                                            registry.get().emplace<ecs::LocalTransformComponent>(primitiveEntity, ecs::LocalTransformComponent{});
+                                            registry.get().emplace<ecs::MeshComponent>(primitiveEntity, ecs::MeshComponent{meshId});
+                                            registry.setParent(primitiveEntity, nodeEntities[nodeIndex]);
+                                            ++createdCount;
+                                        }
+                                    }
+
+                                    registry.updateWorldTransforms();
                                     if (firstCreated != entt::null) {
                                         selectedEnt = firstCreated;
                                         if (engine) engine->setSelectedEntity(firstCreated);
-                                        core::Logger::info("Imported " + std::to_string(createdCount) +
-                                            " glTF mesh instance(s) into viewport: " + droppedPath.string());
+                                        core::Logger::info("Imported " + std::to_string(importedNodes.size()) +
+                                            " glTF scene node(s) and " + std::to_string(createdCount) +
+                                            " mesh primitive(s) into viewport: " + droppedPath.string());
                                     } else {
-                                        core::Logger::error("Viewport drop produced no valid mesh instances: " + droppedPath.string());
+                                        core::Logger::error("Viewport drop produced no valid scene nodes: " + droppedPath.string());
                                     }
                                 } else {
                                     core::Logger::error("Viewport drop failed to import model: " + droppedPath.string());
