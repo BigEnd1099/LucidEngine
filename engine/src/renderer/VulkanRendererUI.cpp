@@ -182,7 +182,7 @@ namespace engine::renderer {
                 m_uiScale           = pref.uiScale;
             }
 
-            if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
+            if (!ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_F11)) {
                 s_immersivePlay = !s_immersivePlay;
             }
 
@@ -507,7 +507,7 @@ namespace engine::renderer {
             const bool gizmoEnabled = !isSimulationSessionActive;
             if (!gizmoEnabled) s_draggingGizmoAxis = 0;
 
-            if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
+            if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive()) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
                 const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
                 if (!isSimulationSessionActive && ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
@@ -520,6 +520,13 @@ namespace engine::renderer {
                 }
                 if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Comma)) {
                     s_showPreferencesWindow = !s_showPreferencesWindow;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_F4)) {
+                    s_showScriptStudio = !s_showScriptStudio;
+                }
+                if (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Space)) {
+                    s_showContentDrawer = !s_showContentDrawer;
+                    if (s_showContentDrawer) s_showOutputLog = false;
                 }
                 if (!isSimulationSessionActive && !s_isRmbNavigating) {
                     if (ImGui::IsKeyPressed(ImGuiKey_W) || ImGui::IsKeyPressed(ImGuiKey_G)) s_gizmoMode = EditorGizmoMode::TRANSLATE;
