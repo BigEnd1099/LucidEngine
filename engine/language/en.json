@@ -122,7 +122,7 @@
     "ui.asset_filter_3d_models": "3D Models",
     "ui.asset_filter_scripts": "JS Scripts",
     "ui.asset_location": "Location: %s",
-    "ui.folder_tooltip": "Folder: %s\\nDouble-click to open",
+    "ui.folder_tooltip": "Folder: %s\\nClick to open",
     "ui.file_tooltip": "File: %s\\nSize: %zu B",
     "ui.auto_scroll": "Auto-scroll",
     "ui.content_drawer_status": " Content Drawer ",
@@ -297,6 +297,7 @@
     "ui.asset_read_error": "Cannot read directory",
     "ui.asset_no_results": "No assets match this search.",
     "script.modified": "Modified",
-    "script.synced": "Synced"
+    "script.synced": "Synced",
+    "script.run_failed": "Run failed - check Output Log"
   }
 }
