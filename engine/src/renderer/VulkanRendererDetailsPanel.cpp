@@ -634,8 +634,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
 
                                 ImGui::Spacing();
                                 ImGui::Text(editorText("details.sun_direction_label", "Sun direction:"));
-                                if (ImGui::SliderFloat("Elevation (Pitch)##World", &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                if (ImGui::SliderFloat("Azimuth (Yaw)##World", &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                if (ImGui::SliderFloat(editorText("details.elevation_world", "Elevation (Pitch)##World"), &sunLt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
+                                if (ImGui::SliderFloat(editorText("details.azimuth_world", "Azimuth (Yaw)##World"), &sunLt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
 
                                 const float pitchRad = glm::radians(sunLt.rotation.x);
                                 const float yawRad   = glm::radians(sunLt.rotation.y);
