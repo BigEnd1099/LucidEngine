@@ -88,6 +88,7 @@ void drawEditorBottomPanels(bool immersivePlay,
             static fs::path s_cachedBrowsePath;
             static std::vector<fs::directory_entry> s_cachedEntries;
             static std::string s_cachedBrowseError;
+            static fs::path s_selectedAssetPath;
             static bool s_refreshAssets = true;
             if (s_cachedBrowsePath != s_currentBrowsePath) s_refreshAssets = true;
             if (ImGui::SmallButton(editorText("ui.refresh_assets", "Refresh"))) s_refreshAssets = true;
@@ -116,7 +117,8 @@ void drawEditorBottomPanels(bool immersivePlay,
             ImGui::Separator();
 
             // Grid of files & folders
-            ImGui::BeginChild("AssetGridScroll", ImVec2(0, 0), false);
+            // Reserve a compact metadata footer so selecting an asset never requires opening it.
+            ImGui::BeginChild("AssetGridScroll", ImVec2(0, -58.0f * uiScale), false);
             const float itemWidth = 120.0f * uiScale;
             const float itemHeight = 65.0f * uiScale;
             const float panelWidth = ImGui::GetContentRegionAvail().x;
@@ -195,11 +197,18 @@ void drawEditorBottomPanels(bool immersivePlay,
                 if (ImGui::Button(btnLabel.c_str(), ImVec2(itemWidth, itemHeight))) {
                     if (isDirectory) {
                         s_currentBrowsePath = entry.path();
+                        s_selectedAssetPath.clear();
+                    } else {
+                        s_selectedAssetPath = entry.path();
                     }
                 }
 
-                // Draw icon & title inside card
+                // Draw selection outline without changing the button's hit target.
                 ImDrawList* dl = ImGui::GetWindowDrawList();
+                if (!isDirectory && s_selectedAssetPath == entry.path()) {
+                    dl->AddRect(cardPos, ImVec2(cardPos.x + itemWidth, cardPos.y + itemHeight),
+                                IM_COL32(65, 165, 255, 255), 5.0f, 0, 2.0f);
+                }
                 drawEditorVectorIcon(dl, ImVec2(cardPos.x + itemWidth * 0.5f, cardPos.y + 20.0f * uiScale), 7.0f * uiScale, cardIcon, iconColor);
 
                 std::string displayLabel = filename;
@@ -231,6 +240,37 @@ void drawEditorBottomPanels(bool immersivePlay,
             if (!s_cachedBrowseError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s: %s", editorText("ui.asset_read_error", "Cannot read directory"), s_cachedBrowseError.c_str());
             if (visibleAssetCount == 0 && s_cachedBrowseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
             ImGui::EndChild();
+
+            ImGui::Separator();
+            if (!s_selectedAssetPath.empty()) {
+                std::error_code selectedError;
+                const bool selectedExists = fs::is_regular_file(s_selectedAssetPath, selectedError) && !selectedError;
+                if (selectedExists) {
+                    const std::string selectedName = s_selectedAssetPath.filename().string();
+                    const std::string selectedExtension = s_selectedAssetPath.extension().string();
+                    selectedError.clear();
+                    const auto selectedSize = fs::file_size(s_selectedAssetPath, selectedError);
+                    ImGui::Text("%s", selectedName.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", selectedExtension.empty() ? editorText("ui.asset_unknown_type", "Unknown type") : selectedExtension.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton(editorText("ui.copy_asset_path", "Copy Path"))) {
+                        ImGui::SetClipboardText(s_selectedAssetPath.string().c_str());
+                    }
+                    ImGui::SameLine();
+                    if (selectedError) {
+                        ImGui::TextDisabled("%s", editorText("ui.asset_size_unavailable", "Size unavailable"));
+                    } else {
+                        ImGui::TextDisabled("%s: %llu B", editorText("ui.asset_size", "Size"), static_cast<unsigned long long>(selectedSize));
+                    }
+                    ImGui::TextDisabled("%s", s_selectedAssetPath.string().c_str());
+                } else {
+                    s_selectedAssetPath.clear();
+                    ImGui::TextDisabled("%s", editorText("ui.asset_select_hint", "Select a file to inspect its metadata."));
+                }
+            } else {
+                ImGui::TextDisabled("%s", editorText("ui.asset_select_hint", "Select a file to inspect its metadata."));
+            }
         } else {
             static bool s_autoScroll = true;
             ImGui::Checkbox(editorText("ui.auto_scroll", "Auto-scroll"), &s_autoScroll);
