@@ -318,9 +318,9 @@
     "ui.shortcut_duplicate": "Duplicate selected object",
     "ui.shortcuts_note": "Viewport shortcuts are disabled while editing text or during simulation where applicable.",
     "ui.refresh_assets": "Refresh",
-    "details.simulation_readonly": "Inspector is read-only while simulation is running.",,
+    "details.simulation_readonly": "Inspector is read-only while simulation is running.",
     "details.search_components": "Search components...",
-    "details.no_component_matches": "No components match this filter."
+    "details.no_component_matches": "No components match this filter.",
     "script.discard_message": "This script has unapplied changes. Discard them and close Script Studio?",
     "script.discard": "Discard",
     "script.keep_editing": "Keep Editing",
