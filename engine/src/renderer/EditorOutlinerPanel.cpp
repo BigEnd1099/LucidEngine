@@ -229,6 +229,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                         if (engine) engine->setCamera(tc.position - cameraForward * std::max(5.0f, glm::length(tc.scale) * 3.5f), cameraYaw, cameraPitch, cameraFov);
                     }
                 }
+                ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
                 if (ImGui::MenuItem("Zresetuj pozycje (0, 0, 0)")) {
                     if (registry.get().all_of<ecs::TransformComponent>(entity)) {
                         auto& tc = registry.get().get<ecs::TransformComponent>(entity);
@@ -241,6 +242,8 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     if (engine) engine->setSelectedEntity(selectedEntity);
                 }
                 ImGui::Separator();
+                ImGui::EndDisabled();
+                ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
                 if (ImGui::MenuItem("Usun obiekt [Delete]")) {
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(entity)); else registry.get().destroy(entity);
                     if (selectedEntity == entity) selectedEntity = entt::null;
@@ -249,6 +252,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     ImGui::PopID();
                     break;
                 }
+                ImGui::EndDisabled();
                 ImGui::EndPopup();
             }
             ImGui::PopID();
