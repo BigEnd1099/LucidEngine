@@ -346,9 +346,14 @@ namespace engine::core {
             uint32_t rootMeshId = 0;
             
             if (asset.meshes.empty()) return 0;
-            const auto& gltfMesh = asset.meshes[0];
-            if (gltfMesh.primitives.empty()) return 0;
-            const auto& primitive = gltfMesh.primitives[0];
+            // Import every mesh primitive. glTF meshes may contain multiple primitives,
+            // each with its own material and index/vertex streams.
+            for (const auto& gltfMesh : asset.meshes) {
+              for (const auto& primitive : gltfMesh.primitives) {
+            if (primitive.type != fastgltf::PrimitiveType::Triangles) {
+                core::Logger::warn("AssetManager: skipping non-triangle glTF primitive");
+                continue;
+            }
             
             auto posIt = primitive.findAttribute("POSITION");
             if (posIt == primitive.attributes.end()) {
@@ -427,6 +432,8 @@ namespace engine::core {
                     } else if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedInt) {
                          const uint32_t* u32 = reinterpret_cast<const uint32_t*>(d);
                          for (size_t i = 0; i < count; ++i) indices.push_back(u32[i]);
+                    } else if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedByte) {
+                         for (size_t i = 0; i < count; ++i) indices.push_back(d[i]);
                     }
                 });
             } else {
@@ -443,7 +450,7 @@ namespace engine::core {
             uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(), vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
             uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
-            rootMeshId = meshAsset->id;
+            if (rootMeshId == 0) rootMeshId = meshAsset->id;
             
             // --- Load Textures from glTF ---
             std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
@@ -538,6 +545,11 @@ namespace engine::core {
             }
             // Keep the mesh alive until its material assignment is complete.
             m_meshes.push_back(std::move(meshAsset));
+              }
+            }
+            if (rootMeshId == 0) {
+                core::Logger::error("AssetManager: glTF contains no supported triangle primitives");
+            }
             return rootMeshId;
         } catch (const std::exception& e) {
             core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
