@@ -136,6 +136,19 @@ async function spawnEntity(data) {
   return result.entityId;
 }
 
+async function setBenchmarkEnvironment(enabled) {
+  await callRpc('engine.setEnvironment', {
+    hdriEnabled: enabled,
+    skyboxEnabled: enabled,
+    iblEnabled: enabled,
+    ambientColor: enabled ? '#263449' : '#000000',
+    ambientIntensity: enabled ? 0.7 : 0.0,
+    sunEnabled: enabled,
+    sunIntensity: enabled ? 2.2 : 0.0,
+    fogEnabled: false
+  });
+}
+
 async function createAtriumBenchmarkScene() {
   console.log('[SCENE] Building Atrium Benchmark scene...');
   // Use a truly empty registry. The engine's 'empty' preset intentionally creates a ground plane and sun.
@@ -232,10 +245,7 @@ async function createAtriumBenchmarkScene() {
     if ((i + 1) % 25 === 0) console.log('[SCENE] Spawned ' + (i + 1) + '/' + spawnJobs.length + ' entities...');
   }
 
-  await callRpc('engine.setEnvironment', {
-    hdriEnabled: true, skyboxEnabled: true, iblEnabled: true,
-    ambientIntensity: 0.7, sunEnabled: true, sunIntensity: 2.2, fogEnabled: false
-  });
+  await setBenchmarkEnvironment(true);
   await callRpc('engine.setCamera', {
     x: 0, y: 8.0, z: 34, yaw: -90, pitch: -11, fov: 62
   });
@@ -399,6 +409,8 @@ async function main() {
     throw new Error('GPU timestamps are not active after starting the windowed renderer. Refusing to produce an invalid benchmark.');
   }
   await callRpc('engine.resetScene', { preset: 'clean' });
+  // True-empty baseline: no demo scene, fallback sun, HDRI/IBL or ambient fill.
+  await setBenchmarkEnvironment(false);
 
   const results = [];
   const emptyOff = await captureScenario('empty_all_off',
@@ -415,6 +427,15 @@ async function main() {
     throw new Error('Empty-scene all-flags-on baseline is contaminated: expected 0 geometry instances.');
   }
   results.push(emptyFlagsOn);
+
+  // Environment-only isolates HDRI/IBL and sun cost without any scene geometry.
+  await setBenchmarkEnvironment(true);
+  const environmentOnly = await captureScenario('empty_environment_only',
+    { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
+  if (environmentOnly.averages.drawItems !== 0 || environmentOnly.averages.rtInstances !== 0) {
+    throw new Error('Environment-only baseline is contaminated: expected 0 draw items and 0 RT instances.');
+  }
+  results.push(environmentOnly);
 
   const sceneMeta = await createAtriumBenchmarkScene();
   await setFeatures({ gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: false });
