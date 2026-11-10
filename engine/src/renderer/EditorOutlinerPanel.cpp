@@ -128,6 +128,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         // Hotkey [Ctrl+D] Duplikuj zaznaczony obiekt
         if (!(engine && engine->isSimulationSessionActive()) &&
             ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+            !ImGui::GetIO().WantTextInput &&
             ImGui::IsKeyPressed(ImGuiKey_D) && ImGui::GetIO().KeyCtrl &&
             selectedEntity != entt::null && registry.get().valid(selectedEntity)) {
             selectedEntity = duplicateEntity(selectedEntity);
