@@ -113,6 +113,7 @@ namespace engine::core {
         uint32_t vertexCount{0};
         uint32_t materialId{0};
         bool hasSkinInfluences{false};
+        std::vector<renderer::Vertex> vertices; // CPU base pose used by runtime deformation
         std::vector<SkinVertexInfluence> skinInfluences;
         std::vector<ImportedMorphTarget> morphTargets;
     };
