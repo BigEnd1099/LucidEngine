@@ -50,6 +50,10 @@ function startEngine() {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
+  engineProcess.on('error', err => {
+    childExited = true;
+    stderrTail = (stderrTail + err.message).slice(-12000);
+  });
   engineProcess.stdout.on('data', chunk => process.stdout.write('[ENGINE] ' + chunk));
   engineProcess.stderr.on('data', chunk => {
     stderrTail = (stderrTail + chunk.toString()).slice(-12000);
