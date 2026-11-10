@@ -67,6 +67,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     if (ImGui::Combo("Language / Język", &languageIndex, languageOptions, 2)) {
                         pref.language = languageIndex == 1 ? "pl" : "en";
                         setEditorLanguage(pref.language);
+                        if (pref.autoSavePreferences) engine->saveUserPreferences();
                     }
                     ImGui::SameLine();
                     ImGui::TextDisabled(editorText("Changes are applied immediately.", "Zmiana języka działa od razu."));
