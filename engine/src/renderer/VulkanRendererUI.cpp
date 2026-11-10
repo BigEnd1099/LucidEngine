@@ -656,7 +656,10 @@ namespace engine::renderer {
                                         if (!node.meshIds.empty()) {
                                             const uint32_t meshId = node.meshIds.front();
                                             if (assetManager->getMesh(meshId)) {
-                                                registry.get().emplace<ecs::MeshComponent>(entity, ecs::MeshComponent{meshId});
+                                                ecs::MeshComponent meshComponent{};
+                                                meshComponent.meshId = meshId;
+                                                meshComponent.materialId = assetManager->getMesh(meshId)->materialId;
+                                                registry.get().emplace<ecs::MeshComponent>(entity, meshComponent);
                                                 ++createdCount;
                                             }
                                         }
@@ -683,7 +686,10 @@ namespace engine::renderer {
                                                 ecs::TagComponent{node.name + "_Primitive_" + std::to_string(primitiveIndex + 1)});
                                             registry.get().emplace<ecs::TransformComponent>(primitiveEntity, ecs::TransformComponent{});
                                             registry.get().emplace<ecs::LocalTransformComponent>(primitiveEntity, ecs::LocalTransformComponent{});
-                                            registry.get().emplace<ecs::MeshComponent>(primitiveEntity, ecs::MeshComponent{meshId});
+                                            ecs::MeshComponent meshComponent{};
+                                            meshComponent.meshId = meshId;
+                                            meshComponent.materialId = assetManager->getMesh(meshId)->materialId;
+                                            registry.get().emplace<ecs::MeshComponent>(primitiveEntity, meshComponent);
                                             registry.setParent(primitiveEntity, nodeEntities[nodeIndex]);
                                             ++createdCount;
                                         }
