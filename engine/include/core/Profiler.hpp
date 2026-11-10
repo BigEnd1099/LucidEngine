@@ -29,10 +29,10 @@ namespace engine::core {
         class ScopedSample {
         public:
             explicit ScopedSample(const std::string& name)
-                : m_name(name), m_start(Clock::now()) {}
+                : m_name(name), m_start(std::chrono::steady_clock::now()) {}
             ~ScopedSample() {
                 const double elapsedMs =
-                    std::chrono::duration<double, std::milli>(Clock::now() - m_start).count();
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_start).count();
                 Profiler::get().recordSampleDuration(m_name, elapsedMs);
             }
             ScopedSample(const ScopedSample&) = delete;
@@ -43,7 +43,7 @@ namespace engine::core {
         private:
             using Clock = std::chrono::steady_clock;
             std::string m_name;
-            Clock::time_point m_start;
+            std::chrono::steady_clock::time_point m_start;
         };
 
     private:
