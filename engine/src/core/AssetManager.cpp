@@ -364,13 +364,13 @@ namespace engine::core {
             
             auto posIt = primitive.findAttribute("POSITION");
             if (posIt == primitive.attributes.end()) {
-                core::Logger::error("GLB primitive has no POSITION attribute");
-                return 0;
+                core::Logger::warn("AssetManager: skipping primitive without POSITION attribute");
+                continue;
             }
 
-            if (posIt->accessorIndex >= asset.accessors.size()) return 0;
+            if (posIt->accessorIndex >= asset.accessors.size()) continue;
             auto& positionAccessor = asset.accessors[posIt->accessorIndex];
-            if (positionAccessor.count == 0) return 0;
+            if (positionAccessor.count == 0) continue;
 
             std::vector<renderer::Vertex> vertices(positionAccessor.count);
             std::vector<uint32_t> indices;
@@ -421,7 +421,15 @@ namespace engine::core {
                 for (size_t i = 0; i < vertices.size(); ++i) indices.push_back(static_cast<uint32_t>(i));
             }
 
-            if (vertices.empty() || indices.empty()) return 0;
+            if (vertices.empty() || indices.empty()) continue;
+            if (std::any_of(indices.begin(), indices.end(), [&](uint32_t index) { return index >= vertices.size(); })) {
+                core::Logger::warn("AssetManager: skipping primitive with out-of-range indices");
+                continue;
+            }
+            if (indices.size() % 3 != 0) {
+                core::Logger::warn("AssetManager: skipping triangle primitive with an invalid index count");
+                continue;
+            }
 
             auto meshAsset = std::make_unique<MeshAsset>();
             meshAsset->id = m_nextMeshId++;
