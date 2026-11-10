@@ -47,7 +47,7 @@ vec3 computeNormal(vec3 N) {
 
 void main() {
     vec4 albedoTex = texture(albedoMap, fragTexCoord);
-    vec3 albedoLinear = pow(max(albedoTex.rgb, vec3(0.0)), vec3(2.2)) * pcs.baseColorFactor.rgb;
+    vec3 albedoLinear = albedoTex.rgb * pcs.baseColorFactor.rgb;
 
     vec3 N = normalize(fragNormal);
     vec3 finalNormal = computeNormal(N);
