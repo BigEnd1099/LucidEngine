@@ -127,6 +127,7 @@ namespace engine::core {
     // Sample glTF animation tracks and apply the pose to local ECS transforms/morph weights.
     static void updateAnimationPlayers(ecs::Registry& registry, float deltaTime) {
         auto view = registry.get().view<ecs::AnimationPlayerComponent>();
+        if (view.empty()) return;
         for (const entt::entity playerEntity : view) {
             auto& player = view.get<ecs::AnimationPlayerComponent>(playerEntity);
             if (player.clips.empty() || player.activeClip >= player.clips.size()) continue;
@@ -642,16 +643,22 @@ namespace engine::core {
 
     void Engine::update(float dt) {
         LUCID_PROFILE_SCOPE("FrameUpdate");
-        float clampedDt = std::min(dt, 0.1f);
-        m_physicsAccumulator += clampedDt;
-
+        const float clampedDt = std::min(dt, 0.1f);
         {
             LUCID_PROFILE_SCOPE("Physics");
-            if (m_physicsSystem && m_registry) {
+            const bool hasPhysicsBodies = m_registry &&
+                !m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>().empty();
+            if (m_physicsSystem && hasPhysicsBodies) {
+                m_physicsAccumulator += clampedDt;
                 while (m_physicsAccumulator >= FIXED_TIMESTEP) {
                     m_physicsSystem->update(m_registry.get(), FIXED_TIMESTEP);
                     m_physicsAccumulator -= FIXED_TIMESTEP;
                 }
+            } else {
+                // Do not accumulate simulation time while there is nothing for
+                // the ECS physics system to simulate; this also avoids a catch-up
+                // burst when a body is added after a long idle period.
+                m_physicsAccumulator = 0.0f;
             }
         }
 
@@ -1308,8 +1315,13 @@ namespace engine::core {
                     }
 
                     if (!m_paused) {
+                        // Reuse the input-state object directly instead of creating
+                        // and copying a temporary JSON object every frame.
+                        auto& keys = m_inputState["keys"];
+                        if (!keys.is_object()) keys = nlohmann::json::object();
+                        else keys.clear();
+
                         // Native Gameplay Controls in GLFW Desktop Window
-                        nlohmann::json keys = nlohmann::json::object();
                         if (!imguiWantsTextInput) {
                             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS) {
                                 keys["KeyA"] = true;
@@ -1337,7 +1349,6 @@ namespace engine::core {
                                 keys["ShiftLeft"] = true;
                             }
                         }
-                        m_inputState["keys"] = keys;
                     }
                 }
 #endif
