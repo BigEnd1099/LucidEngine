@@ -328,6 +328,8 @@
     "ui.copy_asset_path": "Kopiuj ścieżkę",
     "ui.asset_size_unavailable": "Rozmiar niedostępny",
     "ui.asset_size": "Rozmiar",
-    "ui.asset_select_hint": "Wybierz plik, aby zobaczyć jego metadane."
+    "ui.asset_select_hint": "Wybierz plik, aby zobaczyć jego metadane.",
+    "ui.drop_model_into_viewport": "Upuść model w widoku 3D, aby utworzyć obiekt",
+    "ui.drag_model_tooltip": "Przeciągnij model glTF do widoku 3D."
   }
 }
