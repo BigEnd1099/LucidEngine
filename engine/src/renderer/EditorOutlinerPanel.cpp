@@ -1,4 +1,5 @@
 #include "renderer/EditorOutlinerPanel.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "renderer/EditorUiStyle.hpp"
 #include "ecs/Components.hpp"
 #include "core/Engine.hpp"
@@ -38,7 +39,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
         drawEditorVectorIcon(odl, ImVec2(oHdrPos.x + 8.0f * uiScale, oHdrPos.y + 9.0f * uiScale), 5.5f * uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * uiScale);
-        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Hierarchia Sceny");
+        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("Scene Outliner", "Hierarchia sceny"));
 
         auto viewAll = registry.get().view<ecs::TransformComponent>();
         ImGui::SameLine(ImGui::GetWindowWidth() - 95.0f * uiScale);
@@ -67,17 +68,17 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         const bool hasFilter = (outlinerFilter[0] != '\0');
         const float searchExtraW = (hasFilter ? 84.0f : 62.0f) * uiScale;
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - searchExtraW);
-        ImGui::InputTextWithHint("##OutlinerSearch", "Filtruj scene...", outlinerFilter, sizeof(outlinerFilter));
+        ImGui::InputTextWithHint("##OutlinerSearch", editorText("Search scene...", "Filtruj scenę..."), outlinerFilter, sizeof(outlinerFilter));
         if (hasFilter) {
             ImGui::SameLine();
             if (ImGui::SmallButton("x##ClearOutlinerFilter")) {
                 outlinerFilter[0] = '\0';
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wyczysc filtr");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Clear filter", "Wyczyść filtr"));
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-        if (ImGui::Button("+ Spawn", ImVec2(58.0f * uiScale, 0))) {
+        if (ImGui::Button(editorText("+ Spawn", "+ Dodaj"), ImVec2(58.0f * uiScale, 0))) {
             auto newEnt = registry.createEntity();
             glm::vec3 sp = cameraPosition + cameraForward * 6.0f;
             if (sp.y < 0.5f) sp.y = 0.5f;
@@ -268,8 +269,8 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         }
         if (visibleEntityCount == 0) {
             ImGui::Spacing();
-            ImGui::TextDisabled(view.empty() ? "Scene is empty." : "No entities match the current filters.");
-            if (!view.empty() && hasFilter && ImGui::SmallButton("Clear search filter")) {
+            ImGui::TextDisabled(view.empty() ? editorText("Scene is empty.", "Scena jest pusta.") : editorText("No entities match the current filters.", "Brak obiektów pasujących do filtrów."));
+            if (!view.empty() && hasFilter && ImGui::SmallButton(editorText("Clear search filter", "Wyczyść filtr"))) {
                 outlinerFilter[0] = 0;
             }
         }
