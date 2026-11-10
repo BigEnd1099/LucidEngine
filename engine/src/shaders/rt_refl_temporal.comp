@@ -18,7 +18,7 @@ layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
 layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
 layout(set = 1, binding = 11, rgba16f) uniform image2D imgReflHistPrev;
 layout(set = 1, binding = 12) uniform sampler2D uMotion;
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[16]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
 
 layout(push_constant) uniform PC {
     mat4 prevViewProj;
@@ -39,6 +39,7 @@ void main() {
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0 || geom.z < 0.0) { // sky
         atomicAdd(rtDiag.counters[10], 1u);
+        atomicAdd(rtDiag.counters[32], 1u); // zero-age / sky
         imageStore(imgReflHistCur, px, vec4(0.0));
         imageStore(imgRefl, px, vec4(0.0));
         return;
@@ -47,6 +48,7 @@ void main() {
     vec4 raw = imageLoad(imgRefl, px);
     if (raw.a <= 0.0) {
         atomicAdd(rtDiag.counters[10], 1u);
+        atomicAdd(rtDiag.counters[32], 1u); // zero-age / no reflection sample
         // Sky or skipped roughness > 0.75
         imageStore(imgReflHistCur, px, vec4(0.0));
         imageStore(imgRefl, px, vec4(0.0));
@@ -179,6 +181,8 @@ void main() {
 
     // Alpha of the private history image stores effective accumulated sample age.
     // The public reflection output keeps alpha=1 as its validity mask for PBR.
+    uint ageBin = min(uint(clamp(historyAge / maxHistory, 0.0, 0.999999) * 16.0), 15u);
+    atomicAdd(rtDiag.counters[32u + ageBin], 1u);
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
     imageStore(imgRefl, px, vec4(result.rgb, 1.0));
 }
