@@ -15,6 +15,7 @@
 #include "core/Engine.hpp"
 #include "renderer/EditorLocalization.hpp"
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include "core/Logger.hpp"
 #include "ecs/TypeExporter.hpp"
 #include <chrono>
@@ -63,6 +64,62 @@ namespace engine::core {
             }
         }
         return out;
+    }
+
+    // Build a world matrix from the evaluated TransformComponent. In this ECS,
+    // TransformComponent stores world-space values while LocalTransformComponent
+    // stores authored values relative to the parent.
+    static glm::mat4 makeSkinWorldMatrix(const ecs::TransformComponent& transform) {
+        glm::quat orientation = transform.orientation;
+        const float orientationLength2 = glm::dot(orientation, orientation);
+        if (!std::isfinite(orientationLength2) || orientationLength2 < 1e-8f)
+            orientation = glm::quat(glm::radians(transform.rotation));
+        else
+            orientation = glm::normalize(orientation);
+
+        return glm::translate(glm::mat4(1.0f), transform.position) *
+               glm::mat4_cast(orientation) *
+               glm::scale(glm::mat4(1.0f), transform.scale);
+    }
+
+    // Evaluate the glTF skin palette after hierarchy propagation and gameplay updates.
+    // glTF column-vector convention: inverse(meshWorld) * jointWorld * inverseBind.
+    static void updateSkinPalettes(ecs::Registry& registry) {
+        registry.updateWorldTransforms();
+        auto view = registry.get().view<ecs::SkinComponent, ecs::TransformComponent>();
+        for (const entt::entity entity : view) {
+            auto& skin = view.get<ecs::SkinComponent>(entity);
+            const auto& meshTransform = view.get<ecs::TransformComponent>(entity);
+            const glm::mat4 meshWorld = makeSkinWorldMatrix(meshTransform);
+            const float determinant = glm::determinant(meshWorld);
+            if (!std::isfinite(determinant) || std::abs(determinant) < 1e-10f) {
+                skin.paletteDirty = true;
+                continue;
+            }
+
+            skin.inverseMeshTransform = glm::inverse(meshWorld);
+            const size_t jointCount = skin.joints.size();
+            if (skin.jointMatrices.size() != jointCount)
+                skin.jointMatrices.resize(jointCount, glm::mat4(1.0f));
+            if (skin.inverseBindMatrices.size() < jointCount)
+                skin.inverseBindMatrices.resize(jointCount, glm::mat4(1.0f));
+
+            for (size_t jointIndex = 0; jointIndex < jointCount; ++jointIndex) {
+                const entt::entity jointEntity = skin.joints[jointIndex];
+                if (jointEntity == entt::null || !registry.get().valid(jointEntity) ||
+                    !registry.get().all_of<ecs::TransformComponent>(jointEntity)) {
+                    skin.jointMatrices[jointIndex] = glm::mat4(1.0f);
+                    continue;
+                }
+
+                const auto& jointTransform = registry.get().get<ecs::TransformComponent>(jointEntity);
+                skin.jointMatrices[jointIndex] =
+                    skin.inverseMeshTransform *
+                    makeSkinWorldMatrix(jointTransform) *
+                    skin.inverseBindMatrices[jointIndex];
+            }
+            skin.paletteDirty = false;
+        }
     }
 
     static glm::vec4 parseColorJson(const nlohmann::json& j, const glm::vec4& fallback = glm::vec4(1.0f)) {
@@ -1172,7 +1229,12 @@ namespace engine::core {
                 float dt_real = std::chrono::duration<float>(current_now - lastTime).count();
                 lastTime = current_now;
                 if (!m_paused) {
-                    try { update(dt_real); } catch (const std::exception& e) { core::Logger::error(std::string("Update exception: ") + e.what()); }
+                    try {
+                        update(dt_real);
+                        if (m_registry) updateSkinPalettes(*m_registry);
+                    } catch (const std::exception& e) {
+                        core::Logger::error(std::string("Update exception: ") + e.what());
+                    }
                 }
                 if (!m_headless) {
                     try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); } catch(...) { core::Logger::error("Unknown render exception!"); }
