@@ -695,7 +695,7 @@ namespace engine::renderer {
                                             for (size_t jointNodeIndex : sourceSkin.jointNodeIndices) {
                                                 const auto jointIt = sourceNodeEntities.find(jointNodeIndex);
                                                 skinComponent.joints.push_back(jointIt != sourceNodeEntities.end()
-                                                    ? jointIt->second : entt::null);
+                                                    ? jointIt->second : static_cast<entt::entity>(entt::null));
                                             }
                                             registry.get().emplace<ecs::SkinComponent>(entity, std::move(skinComponent));
                                         }
