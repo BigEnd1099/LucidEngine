@@ -11,7 +11,7 @@
 namespace engine::renderer {
     class VulkanContext {
     public:
-        VulkanContext(bool headless);
+        VulkanContext(bool headless, bool benchmarkMode = false);
         ~VulkanContext();
 
         void init();
@@ -65,6 +65,7 @@ namespace engine::renderer {
 #endif
 
         bool m_headless{true};
+        bool m_benchmarkMode{false};
         bool m_rayTracingSupported{false};
         bool m_vsyncEnabled{true};
         float m_maxSamplerAnisotropy{1.0f};
