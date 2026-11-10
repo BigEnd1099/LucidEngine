@@ -8,7 +8,8 @@
 
 namespace engine::renderer {
 
-    VulkanContext::VulkanContext(bool headless) : m_headless(headless) {}
+    VulkanContext::VulkanContext(bool headless, bool benchmarkMode)
+        : m_headless(headless), m_benchmarkMode(benchmarkMode) {}
 
     VulkanContext::~VulkanContext() {
         cleanup();
@@ -21,7 +22,8 @@ namespace engine::renderer {
                 throw std::runtime_error("glfwInit failed!");
             }
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-            glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+            glfwWindowHint(GLFW_RESIZABLE, benchmarkMode ? GLFW_FALSE : GLFW_TRUE);
+            if (m_benchmarkMode) glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
             m_window = glfwCreateWindow(1920, 1080, "LUCID Engine | Lucid Studio 2026", nullptr, nullptr);
             if (!m_window) {
                 throw std::runtime_error("glfwCreateWindow failed!");
