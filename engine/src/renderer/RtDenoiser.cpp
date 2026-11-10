@@ -138,8 +138,12 @@ namespace engine::renderer {
                             &m_diagnosticsBuffer, &m_diagnosticsAllocation, &diagnosticsAllocationInfo) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create diagnostics buffer");
         m_diagnosticsMapped = static_cast<uint32_t*>(diagnosticsAllocationInfo.pMappedData);
-        m_diagnosticsCoherent = (diagnosticsAllocationInfo.memoryType >= 0) &&
-            ((m_context->getPhysicalDeviceMemoryProperties().memoryTypes[diagnosticsAllocationInfo.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0);
+        VkPhysicalDeviceMemoryProperties diagnosticsMemoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(m_context->getPhysicalDevice(), &diagnosticsMemoryProperties);
+        m_diagnosticsCoherent = diagnosticsAllocationInfo.memoryType < diagnosticsMemoryProperties.memoryTypeCount &&
+            ((diagnosticsMemoryProperties.memoryTypes[diagnosticsAllocationInfo.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0);
+        if (!m_diagnosticsMapped)
+            throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
 
         const auto& props = m_context->getPhysicalDeviceProperties();
