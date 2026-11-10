@@ -29,7 +29,7 @@ namespace engine::renderer {
     static const std::string kEmptyTag;
 
     void VulkanRenderer::render(ecs::Registry& registry, core::AssetManager* assetManager, glm::mat4 viewMatrix, core::Engine* engine) {
-        core::Profiler::ScopedSample renderCpuSample("Vulkan Render CPU");
+        core::Profiler::ScopedSample renderCpuSample("Vulkan Render Thread");
         if (g_pendingRenderWidth > 0 && g_pendingRenderHeight > 0) {
             setRenderResolution(g_pendingRenderWidth, g_pendingRenderHeight);
             g_pendingRenderWidth = 0;
