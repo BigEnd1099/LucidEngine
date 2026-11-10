@@ -4,6 +4,7 @@
 #include "renderer/Vertex.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
+#include "core/Profiler.hpp"
 #include "ecs/Components.hpp"
 
 #include <glm/glm.hpp>
@@ -55,6 +56,29 @@ namespace engine::renderer {
         }
 #endif
 
+        // The frame fence (or headless queue-idle) guarantees the previous timestamp
+        // pair is available. Never stall here: consume it only when Vulkan reports ready.
+        if (m_timestampQueryPool && m_timestampQueryPending) {
+            uint64_t timestamps[2]{};
+            const VkResult queryResult = vkGetQueryPoolResults(
+                m_context->getDevice(), m_timestampQueryPool, 0, 2,
+                sizeof(timestamps), timestamps, sizeof(uint64_t),
+                VK_QUERY_RESULT_64_BIT);
+            if (queryResult == VK_SUCCESS) {
+                const uint32_t validBits = m_context->getTimestampValidBits();
+                const uint64_t mask = validBits >= 64
+                    ? UINT64_MAX
+                    : ((uint64_t{1} << validBits) - 1u);
+                const uint64_t elapsedTicks = (timestamps[1] - timestamps[0]) & mask;
+                const double elapsedMs =
+                    static_cast<double>(elapsedTicks) *
+                    static_cast<double>(m_context->getPhysicalDeviceProperties().limits.timestampPeriod) /
+                    1000000.0;
+                core::Profiler::get().recordGpuTime(static_cast<float>(elapsedMs));
+                m_timestampQueryPending = false;
+            }
+        }
+
         // The previous frame has completed (fence on the window path, queue-idle
         // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
         // be released safely, before any new build commands are recorded.
@@ -78,6 +102,10 @@ namespace engine::renderer {
         vkResetCommandBuffer(m_commandBuffer, 0);
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
+        if (m_timestampQueryPool) {
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 2);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
+        }
 
         // =========================================================================
         // PRZYGOTOWANIE KAMERY, SĹOĹCA, 4 KASKAD CSM ORAZ LISTY OBIEKTĂ“W SCENY
@@ -1667,6 +1695,9 @@ namespace engine::renderer {
                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
 #endif
 
+        if (m_timestampQueryPool) {
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 1);
+        }
         vkEndCommandBuffer(m_commandBuffer);
 
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -1681,7 +1712,9 @@ namespace engine::renderer {
             submitInfo.pWaitDstStageMask = waitStages;
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
-            vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_inFlightFence);
+            const VkResult submitResult =
+                vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_inFlightFence);
+            m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
 
             VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
             presentInfo.waitSemaphoreCount = 1;
@@ -1695,11 +1728,15 @@ namespace engine::renderer {
                 m_context->recreateSwapchain();
             }
         } else {
-            vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+            const VkResult submitResult =
+                vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+            m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
             vkQueueWaitIdle(m_context->getGraphicsQueue());
         }
 #else
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+        const VkResult submitResult =
+            vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+        m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
         vkQueueWaitIdle(m_context->getGraphicsQueue());
 #endif
     }

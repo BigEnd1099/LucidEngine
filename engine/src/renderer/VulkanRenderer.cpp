@@ -39,6 +39,18 @@ namespace engine::renderer {
         m_accelerationStructure.init(m_context);
         createOffscreenTarget();
         createCommandBuffer();
+
+        // Enable GPU timing only when the selected graphics queue supports timestamps.
+        if (m_context->getTimestampValidBits() > 0 &&
+            m_context->getPhysicalDeviceProperties().limits.timestampPeriod > 0.0f) {
+            VkQueryPoolCreateInfo queryInfo{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+            queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            queryInfo.queryCount = 2;
+            if (vkCreateQueryPool(m_context->getDevice(), &queryInfo, nullptr, &m_timestampQueryPool) != VK_SUCCESS) {
+                m_timestampQueryPool = VK_NULL_HANDLE;
+                core::Logger::warn("GPU timestamp query pool could not be created; GPU timing is disabled.");
+            }
+        }
         createShadowResources();
         createPointShadowResources();
         createDefaultTextures();
@@ -74,6 +86,10 @@ namespace engine::renderer {
         if (m_context && m_context->getDevice()) {
             VkDevice dev = m_context->getDevice();
             vkDeviceWaitIdle(dev);
+            if (m_timestampQueryPool) {
+                vkDestroyQueryPool(dev, m_timestampQueryPool, nullptr);
+                m_timestampQueryPool = VK_NULL_HANDLE;
+            }
             for (auto& entry : m_deformedVertexCache) {
                 auto& cached = entry.second;
                 if (cached.buffer) vmaDestroyBuffer(m_context->getAllocator(), cached.buffer, cached.allocation);
