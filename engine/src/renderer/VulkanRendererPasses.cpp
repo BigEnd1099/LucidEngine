@@ -517,10 +517,17 @@ namespace engine::renderer {
                             auto applyInfluence = [&](uint32_t jointIndex, float weight) {
                                 if (!std::isfinite(weight) || weight <= 0.0f || jointIndex >= skin->jointMatrices.size()) return;
                                 const glm::mat4& jointMatrix = skin->jointMatrices[jointIndex];
-                                const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(jointMatrix)));
+                                const glm::mat3 linearMatrix(jointMatrix);
+                                const float linearDeterminant = glm::determinant(linearMatrix);
+                                const glm::mat3 normalMatrix =
+                                    (std::isfinite(linearDeterminant) && std::abs(linearDeterminant) > 1e-8f)
+                                    ? glm::transpose(glm::inverse(linearMatrix))
+                                    : glm::mat3(1.0f);
                                 skinnedPosition += (jointMatrix * glm::vec4(vertex.position, 1.0f)) * weight;
                                 skinnedNormal += (normalMatrix * vertex.normal) * weight;
-                                skinnedTangent += (normalMatrix * glm::vec3(vertex.tangent)) * weight;
+                                // Tangents are directions in the surface plane: use the
+                                // linear transform, then re-orthogonalize against the normal.
+                                skinnedTangent += (linearMatrix * glm::vec3(vertex.tangent)) * weight;
                                 totalWeight += weight;
                             };
                             for (int k = 0; k < 4; ++k) {
@@ -530,12 +537,16 @@ namespace engine::renderer {
                             if (totalWeight > 1e-6f) {
                                 vertex.position = glm::vec3(skinnedPosition) / totalWeight;
                                 vertex.normal = skinnedNormal / totalWeight;
-                                const glm::vec3 tangent = skinnedTangent / totalWeight;
-                                if (glm::dot(tangent, tangent) > 1e-8f)
-                                    vertex.tangent = glm::vec4(glm::normalize(tangent), vertex.tangent.w);
+                                vertex.tangent = glm::vec4(skinnedTangent / totalWeight, vertex.tangent.w);
                             }
                         }
-                        if (glm::dot(vertex.normal, vertex.normal) > 1e-8f) vertex.normal = glm::normalize(vertex.normal);
+                        if (glm::dot(vertex.normal, vertex.normal) > 1e-8f)
+                            vertex.normal = glm::normalize(vertex.normal);
+                        glm::vec3 tangent = glm::vec3(vertex.tangent);
+                        if (glm::dot(vertex.normal, vertex.normal) > 1e-8f)
+                            tangent -= vertex.normal * glm::dot(vertex.normal, tangent);
+                        if (glm::dot(tangent, tangent) > 1e-8f)
+                            vertex.tangent = glm::vec4(glm::normalize(tangent), vertex.tangent.w);
                     }
 
                     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
