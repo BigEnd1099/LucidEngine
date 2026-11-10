@@ -114,6 +114,7 @@ namespace engine::core {
         void setPaused(bool paused);
         void playSimulation();
         void stopSimulation();
+        void restartSimulation();
         void togglePause();
         bool isPaused() const { return m_paused; }
         bool isSimulationSessionActive() const { return m_simulationSessionActive; }
@@ -147,6 +148,10 @@ namespace engine::core {
             m_camYaw = yaw;
             m_camPitch = pitch;
             m_camFov = fov;
+        }
+        renderer::VulkanRenderer* getRenderer() { return m_renderer.get(); }
+        void invalidateMaterialDescriptor(uint32_t materialId = 0) {
+            if (m_renderer) m_renderer->invalidateMaterialDescriptorSet(materialId);
         }
         void invalidateRtHistory() {
             if (m_renderer) m_renderer->invalidateRtHistory();
@@ -254,6 +259,11 @@ namespace engine::core {
         int m_targetFps{0}; // 0 = unlimited, or 30, 60, 120, 240
         nlohmann::json m_preSimulationSnapshot = nlohmann::json::array();
         bool m_hasPreSimulationSnapshot{false};
+        glm::vec3 m_preSimulationCamPos{0.0f, 15.0f, 30.0f};
+        float m_preSimulationCamYaw{-90.0f};
+        float m_preSimulationCamPitch{-20.0f};
+        float m_preSimulationCamFov{45.0f};
+        std::string m_preSimulationCamMode{"editor"};
         std::string m_pendingProjectLoadPath;
         bool m_hasPendingProjectLoad{false};
         float m_physicsAccumulator{0.0f};

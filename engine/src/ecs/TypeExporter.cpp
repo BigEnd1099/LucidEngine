@@ -60,6 +60,13 @@ namespace engine::ecs {
         out += "  roughness?: number;\n";
         out += "  emissive?: string | [number, number, number];\n";
         out += "  emissiveIntensity?: number;\n";
+        out += "  materialId?: number;\n";
+        out += "  albedoTextureId?: number;\n";
+        out += "  normalTextureId?: number;\n";
+        out += "  ormTextureId?: number;\n";
+        out += "  albedoPath?: string;\n";
+        out += "  normalPath?: string;\n";
+        out += "  ormPath?: string;\n";
         out += "}\n\n";
 
         out += "export interface LightComponent {\n";

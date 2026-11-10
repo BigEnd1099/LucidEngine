@@ -55,7 +55,7 @@ export async function runTemplatesTest() {
     for (let f = 0; f < 10; ++f) {
       await sendRpc('engine.stepSimulation', { steps: 1, dt: 0.016 });
     }
-    await sendRpc('engine.setPaused', { paused: true });
+    await sendRpc('engine.stopSimulation');
 
     // Verify game status & health API
     const hp = await sendRpc('engine.getHealth');

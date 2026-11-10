@@ -24,6 +24,7 @@ namespace engine::renderer {
     struct DrawItem {
         core::MeshAsset* mesh{nullptr};
         PbrPushConstants pcs{};
+        uint32_t materialId{0};
     };
 
 }

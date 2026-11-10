@@ -346,6 +346,102 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     ImGui::SliderFloat(editorText("details.metallic", "Metallic"), &mat.metallic, 0.0f, 1.0f, "%.2f");
                                     ImGui::SliderFloat(editorText("details.roughness", "Roughness"), &mat.roughness, 0.045f, 1.0f, "%.3f");
                                     ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
+
+                                    ImGui::Spacing();
+                                    ImGui::Separator();
+                                    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Zestawy Tekstur PBR (Proceduralne):");
+
+                                    auto applyPreset = [&](const char* name) {
+                                        if (engine && engine->getAssetManager()) {
+                                            auto* am = engine->getAssetManager();
+                                            uint32_t mId = am->applyPbrPreset(name);
+                                            mat.materialId = mId;
+                                            if (auto* mAsset = am->getMaterial(mId)) {
+                                                mat.albedoTextureId = mAsset->albedoTextureId;
+                                                mat.normalTextureId = mAsset->normalTextureId;
+                                                mat.ormTextureId = mAsset->ormTextureId;
+                                            }
+                                            invalidateMaterialDescriptorSet(mat.materialId);
+                                        }
+                                    };
+
+                                    if (ImGui::Button("Cegly (Bricks)")) applyPreset("Bricks");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Kafelki (Tiles)")) applyPreset("Tiles");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Drewno (Wood)")) applyPreset("Wood");
+
+                                    if (ImGui::Button("Krata (MetalGrid)")) applyPreset("MetalGrid");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Szachownica")) applyPreset("Checkerboard");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Reset")) {
+                                        mat.materialId = 0;
+                                        mat.albedoTextureId = 0;
+                                        mat.normalTextureId = 0;
+                                        mat.ormTextureId = 0;
+                                        invalidateMaterialDescriptorSet(0);
+                                    }
+
+                                    ImGui::Spacing();
+                                    ImGui::Separator();
+                                    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Sloty Tekstur PBR (Pliki .png/.jpg):");
+
+                                    auto syncCustomMaterial = [&]() {
+                                        if (!engine || !engine->getAssetManager()) return;
+                                        auto* am = engine->getAssetManager();
+                                        core::MaterialAsset mAsset{};
+                                        mAsset.baseColorFactor = mat.baseColor;
+                                        mAsset.metallicFactor = mat.metallic;
+                                        mAsset.roughnessFactor = mat.roughness;
+                                        mAsset.albedoTextureId = mat.albedoTextureId;
+                                        mAsset.normalTextureId = mat.normalTextureId;
+                                        mAsset.ormTextureId = mat.ormTextureId;
+                                        if (mat.materialId == 0) {
+                                            mat.materialId = am->createMaterial(mAsset);
+                                        } else {
+                                            am->updateMaterial(mat.materialId, mAsset);
+                                        }
+                                        invalidateMaterialDescriptorSet(mat.materialId);
+                                    };
+
+                                    auto renderSlot = [&](const char* label, std::string& path, uint32_t& texId) {
+                                        ImGui::PushID(label);
+                                        char buf[256];
+                                        std::strncpy(buf, path.c_str(), sizeof(buf));
+                                        buf[sizeof(buf) - 1] = '\0';
+                                        if (ImGui::InputText(label, buf, sizeof(buf))) {
+                                            path = buf;
+                                        }
+                                        ImGui::SameLine();
+                                        if (ImGui::Button("Wczytaj")) {
+                                            if (engine && engine->getAssetManager() && !path.empty()) {
+                                                uint32_t newId = engine->getAssetManager()->loadTextureFromFile(path);
+                                                if (newId != 0) {
+                                                    texId = newId;
+                                                    syncCustomMaterial();
+                                                }
+                                            }
+                                        }
+                                        if (texId != 0) {
+                                            ImGui::SameLine();
+                                            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "[ID: %u]", texId);
+                                            ImGui::SameLine();
+                                            if (ImGui::SmallButton("X")) {
+                                                texId = 0;
+                                                path.clear();
+                                                syncCustomMaterial();
+                                            }
+                                        } else {
+                                            ImGui::SameLine();
+                                            ImGui::TextDisabled("(domyslna)");
+                                        }
+                                        ImGui::PopID();
+                                    };
+
+                                    renderSlot("Albedo Map", mat.albedoPath, mat.albedoTextureId);
+                                    renderSlot("Normal Map", mat.normalPath, mat.normalTextureId);
+                                    renderSlot("ORM Map (AO/Rough/Met)", mat.ormPath, mat.ormTextureId);
                                 }
                             }
                         }

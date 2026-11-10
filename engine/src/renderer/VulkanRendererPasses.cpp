@@ -373,9 +373,8 @@ namespace engine::renderer {
                 const auto& meshComp  = meshEntities.get<ecs::MeshComponent>(entity);
                 const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
 
-                const bool isLight = registry.get().all_of<ecs::LightComponent>(entity) ||
-                                     (tag.find("Light") != std::string::npos) || (tag.find("light") != std::string::npos);
-                if (isLight) continue;
+                // Only skip pure directional light helper entities that have no mesh to display
+                if (tag == "DirectionalLight (Sun)" || tag == "DirectionalLight") continue;
                 if (!meshComp.visible) continue;
 
                 core::MeshAsset* meshAsset = assetManager->getMesh(meshComp.meshId);
@@ -385,29 +384,35 @@ namespace engine::renderer {
                                 * glm::mat4_cast(transform.orientation)
                                 * glm::scale(glm::mat4(1.0f), transform.scale);
 
-                const bool isPlane = (meshComp.meshId == 1 || tag == "GroundPlane" || tag == "Ground");
+                // If default unscaled GroundPlane entity, apply fallback floor scaling
+                if ((tag == "GroundPlane" || tag == "Ground") && transform.scale == glm::vec3(1.0f) && meshComp.meshId == 1) {
+                    model = glm::scale(model, glm::vec3(100.0f, 4.0f, 100.0f));
+                }
+
                 glm::vec4 baseColor(0.22f, 0.74f, 0.97f, 1.0f);
                 float metallic = 0.18f;
                 float roughness = 0.42f;
                 float emissive = 0.0f;
+                uint32_t activeMaterialId = 0;
 
-                if (isPlane) {
-                    if (meshComp.meshId == 1) model = glm::scale(model, glm::vec3(100.0f, 4.0f, 100.0f));
-                    baseColor = glm::vec4(0.16f, 0.19f, 0.25f, 1.0f);
-                    metallic  = 0.05f;
-                    roughness = 0.78f;
-                } else if (registry.get().all_of<ecs::MaterialComponent>(entity)) {
+                if (registry.get().all_of<ecs::MaterialComponent>(entity)) {
                     const auto& mat = registry.get().get<ecs::MaterialComponent>(entity);
                     baseColor = mat.baseColor;
                     metallic  = mat.metallic;
                     roughness = mat.roughness;
                     emissive  = mat.emissiveIntensity;
+                    activeMaterialId = mat.materialId;
                 } else if (meshAsset->materialId != 0 && assetManager->getMaterial(meshAsset->materialId)) {
                     core::MaterialAsset* mat = assetManager->getMaterial(meshAsset->materialId);
                     baseColor = mat->baseColorFactor;
                     metallic  = mat->metallicFactor;
                     roughness = mat->roughnessFactor;
                     emissive  = 0.0f;
+                    activeMaterialId = meshAsset->materialId;
+                } else if (meshComp.meshId == 1 || tag == "GroundPlane" || tag == "Ground") {
+                    baseColor = glm::vec4(0.16f, 0.19f, 0.25f, 1.0f);
+                    metallic  = 0.05f;
+                    roughness = 0.78f;
                 } else {
                     bool isCapsule = false;
                     bool isSensor  = false;
@@ -460,6 +465,7 @@ namespace engine::renderer {
                 const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(model)));
                 DrawItem item{};
                 item.mesh = meshAsset;
+                item.materialId = activeMaterialId != 0 ? activeMaterialId : meshAsset->materialId;
                 item.pcs.model = model;
                 item.pcs.normalCol0 = glm::vec4(normalMat[0], metallic);
                 item.pcs.normalCol1 = glm::vec4(normalMat[1], roughness);
@@ -497,7 +503,8 @@ namespace engine::renderer {
                             gpu.indexAddress = indexAddress;
                             gpu.vertexCount = meshAsset->vertexCount;
                             gpu.indexCount = meshAsset->indexCount;
-                            if (auto* rtMaterial = assetManager->getMaterial(meshAsset->materialId)) {
+                            uint32_t rtMatId = activeMaterialId != 0 ? activeMaterialId : meshAsset->materialId;
+                            if (auto* rtMaterial = assetManager->getMaterial(rtMatId)) {
                                 gpu.textureIndices = glm::uvec4(
                                     rtMaterial->albedoTextureId < RT_MATERIAL_TEXTURE_COUNT ? rtMaterial->albedoTextureId : 0u,
                                     rtMaterial->normalTextureId < RT_MATERIAL_TEXTURE_COUNT ? rtMaterial->normalTextureId : 0u,
@@ -605,7 +612,7 @@ namespace engine::renderer {
                         const std::string& tag = registry.get().all_of<ecs::TagComponent>(entity) ? registry.get().get<ecs::TagComponent>(entity).name : kEmptyTag;
                         if (mc.meshId == 1 || tag == "GroundPlane" || tag == "Ground") continue;
                         if (!mc.visible) continue;
-                        if (registry.get().all_of<ecs::LightComponent>(entity) || tag.find("Light") != std::string::npos) continue;
+                        if (tag == "DirectionalLight (Sun)" || tag == "DirectionalLight") continue;
                         if (registry.get().all_of<ecs::RigidBodyComponent>(entity) && registry.get().get<ecs::RigidBodyComponent>(entity).isSensor) continue;
 
                         core::MeshAsset* meshAsset = assetManager->getMesh(mc.meshId);
@@ -818,8 +825,9 @@ namespace engine::renderer {
             for (uint32_t drawIdx = 0; drawIdx < drawItems.size(); ++drawIdx) {
                 const auto& item = drawItems[drawIdx];
                 VkDescriptorSet set = m_descriptorSet;
-                if (item.mesh && item.mesh->materialId != 0) {
-                    set = getOrCreateMaterialDescriptorSet(item.mesh->materialId, assetManager);
+                uint32_t matId = item.materialId != 0 ? item.materialId : (item.mesh ? item.mesh->materialId : 0);
+                if (matId != 0) {
+                    set = getOrCreateMaterialDescriptorSet(matId, assetManager);
                 }
                 if (set != currentBoundSet) {
                     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &set, 0, nullptr);
@@ -1074,8 +1082,9 @@ namespace engine::renderer {
                 VkDescriptorSet currentBoundSet = VK_NULL_HANDLE;
                 for (const auto& item : drawItems) {
                     VkDescriptorSet set = m_descriptorSet;
-                    if (item.mesh && item.mesh->materialId != 0) {
-                        set = getOrCreateMaterialDescriptorSet(item.mesh->materialId, assetManager);
+                    uint32_t matId = item.materialId != 0 ? item.materialId : (item.mesh ? item.mesh->materialId : 0);
+                    if (matId != 0) {
+                        set = getOrCreateMaterialDescriptorSet(matId, assetManager);
                     }
                     if (set != currentBoundSet) {
                         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &set, 0, nullptr);

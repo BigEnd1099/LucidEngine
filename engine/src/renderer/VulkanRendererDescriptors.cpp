@@ -288,4 +288,13 @@ namespace engine::renderer {
         return newSet;
     }
 
+    void VulkanRenderer::invalidateMaterialDescriptorSet(uint32_t materialId) {
+        if (materialId == 0) {
+            m_materialDescriptorSets.clear();
+        } else {
+            m_materialDescriptorSets.erase(materialId);
+        }
+        m_rtTextureDescriptorCount = UINT32_MAX;
+    }
+
 }

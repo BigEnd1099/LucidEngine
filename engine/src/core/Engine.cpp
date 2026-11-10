@@ -26,6 +26,9 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Math/Quat.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <unordered_set>
 
 namespace engine::core {
@@ -212,6 +215,11 @@ namespace engine::core {
                 m_preSimulationSnapshot = getSnapshotJson();
                 m_hasPreSimulationSnapshot = true;
                 m_simulationSessionActive = true;
+                m_preSimulationCamPos = m_camPos;
+                m_preSimulationCamYaw = m_camYaw;
+                m_preSimulationCamPitch = m_camPitch;
+                m_preSimulationCamFov = m_camFov;
+                m_preSimulationCamMode = m_cameraMode;
             }
 
             // Sync editor transforms to Jolt bodies and clear residual velocities
@@ -245,6 +253,17 @@ namespace engine::core {
             }
 
             m_paused = false;
+            if (m_cameraMode == "editor" && m_registry) {
+                auto charView = m_registry->get().view<ecs::CharacterMovementComponent>();
+                if (!charView.empty()) {
+                    auto firstEnt = *charView.begin();
+                    bool isFpp = false;
+                    if (m_registry->get().all_of<ecs::CameraBoomComponent>(firstEnt)) {
+                        isFpp = m_registry->get().get<ecs::CameraBoomComponent>(firstEnt).isFirstPerson;
+                    }
+                    m_cameraMode = isFpp ? "firstPerson" : "thirdPerson";
+                }
+            }
             broadcastSimulationState();
             core::Logger::info("Simulation PLAY started: Edit snapshot secured, Jolt bodies activated.");
         }
@@ -253,6 +272,7 @@ namespace engine::core {
     void Engine::stopSimulation() {
         m_paused = true;
         m_physicsAccumulator = 0.0f;
+        m_cameraMode = "editor";
 
         const bool hadActiveSession = m_simulationSessionActive;
         m_simulationSessionActive = false;
@@ -260,6 +280,15 @@ namespace engine::core {
         // Restore pre-simulation snapshot
         if (hadActiveSession && m_hasPreSimulationSnapshot && !m_preSimulationSnapshot.empty()) {
             applySnapshotJson(m_preSimulationSnapshot.dump());
+        }
+
+        // Restore editor camera pose from before Play session
+        if (hadActiveSession) {
+            m_camPos = m_preSimulationCamPos;
+            m_camYaw = m_preSimulationCamYaw;
+            m_camPitch = m_preSimulationCamPitch;
+            m_camFov = m_preSimulationCamFov;
+            m_cameraMode = m_preSimulationCamMode.empty() ? "editor" : m_preSimulationCamMode;
         }
 
         // Zero all velocities and force-freeze Jolt bodies to the restored edit transforms
@@ -301,6 +330,72 @@ namespace engine::core {
         core::Logger::info("Simulation STOPPED: Scene restored to pre-simulation edit pose (position & rotation).");
     }
 
+    void Engine::restartSimulation() {
+        if (m_hasPreSimulationSnapshot && !m_preSimulationSnapshot.empty()) {
+            applySnapshotJson(m_preSimulationSnapshot.dump());
+        }
+        m_physicsAccumulator = 0.0f;
+        m_score.store(0);
+        m_health.store(100);
+        m_gameStatus = "PLAYING";
+
+        if (!m_currentScriptCode.empty()) {
+            loadScript(m_currentScriptCode);
+        }
+
+        if (m_physicsContext && m_registry) {
+            auto& bi = m_physicsContext->getBodyInterface();
+            auto view = m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>();
+            for (auto entity : view) {
+                auto& t = view.get<ecs::TransformComponent>(entity);
+                auto& rb = view.get<ecs::RigidBodyComponent>(entity);
+                if (rb.bodyId != 0xFFFFFFFF) {
+                    JPH::BodyID bid(rb.bodyId);
+                    if (!bid.IsInvalid()) {
+                        JPH::Quat joltRot = (glm::dot(t.orientation, t.orientation) > 0.001f)
+                            ? JPH::Quat(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w)
+                            : JPH::Quat::sEulerAngles(JPH::Vec3(
+                                glm::radians(t.rotation.x),
+                                glm::radians(t.rotation.y),
+                                glm::radians(t.rotation.z)
+                            ));
+                        bi.SetPositionAndRotation(
+                            bid,
+                            JPH::RVec3(t.position.x, t.position.y, t.position.z),
+                            joltRot,
+                            JPH::EActivation::Activate
+                        );
+                        bi.SetLinearVelocity(bid, JPH::Vec3::sZero());
+                        bi.SetAngularVelocity(bid, JPH::Vec3::sZero());
+                    }
+                }
+            }
+        }
+
+        if (m_registry) {
+            auto meshView = m_registry->get().view<ecs::MeshComponent>();
+            for (auto entity : meshView) {
+                meshView.get<ecs::MeshComponent>(entity).visible = true;
+            }
+        }
+
+        m_paused = false;
+        if (m_cameraMode == "editor" && m_registry) {
+            auto charView = m_registry->get().view<ecs::CharacterMovementComponent>();
+            if (!charView.empty()) {
+                auto firstEnt = *charView.begin();
+                bool isFpp = false;
+                if (m_registry->get().all_of<ecs::CameraBoomComponent>(firstEnt)) {
+                    isFpp = m_registry->get().get<ecs::CameraBoomComponent>(firstEnt).isFirstPerson;
+                }
+                m_cameraMode = isFpp ? "firstPerson" : "thirdPerson";
+            }
+        }
+        invalidateRtHistory();
+        broadcastSimulationState();
+        core::Logger::info("Simulation RESTARTED to pre-simulation state");
+    }
+
     void Engine::setPaused(bool paused) {
         if (paused) {
             m_paused = true;
@@ -321,13 +416,21 @@ namespace engine::core {
             auto& rb = m_registry->get().get<ecs::RigidBodyComponent>(entity);
             if (rb.bodyId != 0xFFFFFFFF) {
                 JPH::BodyID bId(rb.bodyId);
+                auto& bi = m_physicsContext->getBodyInterface();
                 JPH::RVec3 jPos(t.position.x, t.position.y, t.position.z);
                 JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
                     glm::radians(t.rotation.x),
                     glm::radians(t.rotation.y),
                     glm::radians(t.rotation.z)
                 ));
-                m_physicsContext->getBodyInterface().SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::Activate);
+                bi.SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::Activate);
+
+                // Update Jolt collision shape to match current transform scale
+                rb.lastScale = t.scale;
+                JPH::ShapeRefC shape = physics::PhysicsSystem::createShape(rb, t.scale);
+                if (shape) {
+                    bi.SetShape(bId, shape, true, JPH::EActivation::Activate);
+                }
             }
         }
     }
@@ -578,8 +681,12 @@ namespace engine::core {
                     );
                     targetCamPos = (playerPos + glm::vec3(0.0f, socketY, 0.0f)) - glm::normalize(camDir) * armLength;
                     if (cameraLag) {
-                        float lag = glm::clamp(dt * lagSpeed, 0.0f, 1.0f);
-                        m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                        if (glm::distance(m_camPos, targetCamPos) > 30.0f) {
+                            m_camPos = targetCamPos;
+                        } else {
+                            float lag = glm::clamp(dt * lagSpeed, 0.0f, 1.0f);
+                            m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                        }
                     } else {
                         m_camPos = targetCamPos;
                     }
@@ -601,10 +708,12 @@ namespace engine::core {
                     m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
                 }
 
-                float lag = glm::clamp(dt * 10.0f, 0.0f, 1.0f);
-                m_camPos = glm::mix(m_camPos, targetCamPos, lag);
-                m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
-                m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
+                if (m_cameraMode != "firstPerson" && m_cameraMode != "thirdPerson") {
+                    float lag = glm::clamp(dt * 10.0f, 0.0f, 1.0f);
+                    m_camPos = glm::mix(m_camPos, targetCamPos, lag);
+                    m_camYaw = glm::mix(m_camYaw, targetYaw, lag);
+                    m_camPitch = glm::mix(m_camPitch, targetPitch, lag);
+                }
             }
         }
 
@@ -748,6 +857,13 @@ namespace engine::core {
                     if (mJson.contains("roughness")) mat.roughness = mJson["roughness"].get<float>();
                     if (mJson.contains("emissive")) mat.emissive = glm::vec3(parseColorJson(mJson["emissive"], glm::vec4(0.0f)));
                     if (mJson.contains("emissiveIntensity")) mat.emissiveIntensity = mJson["emissiveIntensity"].get<float>();
+                    if (mJson.contains("materialId")) mat.materialId = mJson["materialId"].get<uint32_t>();
+                    if (mJson.contains("albedoTextureId")) mat.albedoTextureId = mJson["albedoTextureId"].get<uint32_t>();
+                    if (mJson.contains("normalTextureId")) mat.normalTextureId = mJson["normalTextureId"].get<uint32_t>();
+                    if (mJson.contains("ormTextureId")) mat.ormTextureId = mJson["ormTextureId"].get<uint32_t>();
+                    if (mJson.contains("albedoPath")) mat.albedoPath = mJson["albedoPath"].get<std::string>();
+                    if (mJson.contains("normalPath")) mat.normalPath = mJson["normalPath"].get<std::string>();
+                    if (mJson.contains("ormPath")) mat.ormPath = mJson["ormPath"].get<std::string>();
                 } else if (entJson.contains("color")) {
                     auto& mat = m_registry->get().get_or_emplace<ecs::MaterialComponent>(entity);
                     mat.baseColor = parseColorJson(entJson["color"], mat.baseColor);
@@ -1129,6 +1245,13 @@ namespace engine::core {
                 mat.emissive = glm::vec3(parseColorJson(matJson["emissive"], glm::vec4(0.0f)));
             }
             mat.emissiveIntensity = matJson.value("emissiveIntensity", 0.0f);
+            mat.materialId = matJson.value("materialId", 0u);
+            mat.albedoTextureId = matJson.value("albedoTextureId", 0u);
+            mat.normalTextureId = matJson.value("normalTextureId", 0u);
+            mat.ormTextureId = matJson.value("ormTextureId", 0u);
+            mat.albedoPath = matJson.value("albedoPath", "");
+            mat.normalPath = matJson.value("normalPath", "");
+            mat.ormPath = matJson.value("ormPath", "");
             m_registry->get().emplace<ecs::MaterialComponent>(entity, mat);
         } else if (components.contains("color") || components.contains("baseColor")) {
             ecs::MaterialComponent mat;
@@ -1227,6 +1350,9 @@ namespace engine::core {
         // Force simulation into paused edit mode and clear accumulator
         m_paused = true;
         m_physicsAccumulator = 0.0f;
+        m_simulationSessionActive = false;
+        m_hasPreSimulationSnapshot = false;
+        m_preSimulationSnapshot = nlohmann::json::array();
         setSelectedEntity(entt::null);
         broadcastSimulationState();
 
@@ -1656,9 +1782,9 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::stepSimulation(int steps, float dt) {
-        // Single-step is only valid inside an active, paused Play session.
-        // Prevent editor-mode clicks or remote commands from advancing the scene.
-        if (!m_simulationSessionActive || !m_paused || steps <= 0 || dt <= 0.0f) return;
+        if (steps <= 0 || dt <= 0.0f) return;
+        // In GUI editor mode, prevent accidental stepping when no play session is active.
+        if (!m_headless && !m_simulationSessionActive) return;
         for (int i = 0; i < steps; ++i) {
             update(dt);
         }
@@ -1728,7 +1854,14 @@ function update(entities, dt, input, contacts) {
                     {"metallic", mat.metallic},
                     {"roughness", mat.roughness},
                     {"emissive", { mat.emissive.r, mat.emissive.g, mat.emissive.b }},
-                    {"emissiveIntensity", mat.emissiveIntensity}
+                    {"emissiveIntensity", mat.emissiveIntensity},
+                    {"materialId", mat.materialId},
+                    {"albedoTextureId", mat.albedoTextureId},
+                    {"normalTextureId", mat.normalTextureId},
+                    {"ormTextureId", mat.ormTextureId},
+                    {"albedoPath", mat.albedoPath},
+                    {"normalPath", mat.normalPath},
+                    {"ormPath", mat.ormPath}
                 };
             }
             if (m_registry->get().all_of<ecs::LightComponent>(entity)) {
@@ -2593,6 +2726,9 @@ function update(entities, dt, input, contacts) {
                 float cFov = cam.value("fov", m_camFov);
                 setCamera(cPos, cYaw, cPitch, cFov);
             }
+            if (proj.contains("cameraMode") && proj["cameraMode"].is_string()) {
+                m_cameraMode = proj["cameraMode"].get<std::string>();
+            }
 
             // 4. Restore entities
             if (proj.contains("entities") && proj["entities"].is_array()) {
@@ -2641,45 +2777,91 @@ function update(entities, dt, input, contacts) {
     bool Engine::packageStandaloneGame(const std::string& targetFolder, const std::string& gameName) {
         try {
             std::filesystem::path outDir(targetFolder);
-            std::filesystem::path gameDir = outDir / gameName;
+            std::filesystem::path gameDir = outDir;
+            std::string outLeaf = outDir.filename().string();
+            if (outLeaf == "Windows" || outLeaf == "Release" || outLeaf == "build" || outLeaf == "dist") {
+                gameDir = outDir / gameName;
+            }
             std::filesystem::create_directories(gameDir);
             std::filesystem::create_directories(gameDir / "assets" / "models");
+            std::filesystem::create_directories(gameDir / "assets" / "textures");
             std::filesystem::create_directories(gameDir / "shaders");
 
-            // 1. Copy engine binary -> <gameName>.exe
-            std::filesystem::path exeSource = "engine/build/Release/engine.exe";
-            if (!std::filesystem::exists(exeSource)) exeSource = "engine.exe";
-            if (std::filesystem::exists(exeSource)) {
+            // 1. Copy engine binary -> <gameName>.exe and engine.exe fallback
+            std::vector<std::filesystem::path> exeCandidates = {
+                "engine/build/Release/engine.exe",
+                "engine/build/Debug/engine.exe",
+                "engine.exe",
+                "build/Release/engine.exe"
+            };
+            std::filesystem::path exeSource;
+            for (const auto& c : exeCandidates) {
+                if (std::filesystem::exists(c)) {
+                    exeSource = c;
+                    break;
+                }
+            }
+            if (!exeSource.empty()) {
                 std::filesystem::copy_file(exeSource, gameDir / (gameName + ".exe"), std::filesystem::copy_options::overwrite_existing);
+                std::filesystem::copy_file(exeSource, gameDir / "engine.exe", std::filesystem::copy_options::overwrite_existing);
             }
 
-            // 2. Copy SPIR-V PBR Shaders
-            if (std::filesystem::exists("engine/build/Release/pbr.vert.spv")) {
-                std::filesystem::copy_file("engine/build/Release/pbr.vert.spv", gameDir / "pbr.vert.spv", std::filesystem::copy_options::overwrite_existing);
-            }
-            if (std::filesystem::exists("engine/build/Release/pbr.frag.spv")) {
-                std::filesystem::copy_file("engine/build/Release/pbr.frag.spv", gameDir / "pbr.frag.spv", std::filesystem::copy_options::overwrite_existing);
-            }
-
-            // 3. Copy 3D Models (Prop and mesh assets)
-            std::filesystem::path modelsSrc = "public/assets/models";
-            if (std::filesystem::exists(modelsSrc)) {
-                for (const auto& f : std::filesystem::directory_iterator(modelsSrc)) {
-                    if (f.is_regular_file()) {
-                        std::filesystem::copy_file(f.path(), gameDir / "assets" / "models" / f.path().filename(), std::filesystem::copy_options::overwrite_existing);
+            // 2. Copy ALL compiled SPIR-V shaders (*.spv) to both root and shaders/
+            std::vector<std::filesystem::path> shaderSearchDirs = {
+                "engine/build/Release",
+                "engine/build",
+                "engine/build/Debug"
+            };
+            for (const auto& sDir : shaderSearchDirs) {
+                if (std::filesystem::exists(sDir)) {
+                    for (const auto& entry : std::filesystem::directory_iterator(sDir)) {
+                        if (entry.is_regular_file() && entry.path().extension() == ".spv") {
+                            std::filesystem::copy_file(entry.path(), gameDir / entry.path().filename(), std::filesystem::copy_options::overwrite_existing);
+                            std::filesystem::copy_file(entry.path(), gameDir / "shaders" / entry.path().filename(), std::filesystem::copy_options::overwrite_existing);
+                        }
                     }
                 }
             }
+
+            // 3. Copy Assets (models, textures, fonts, slate)
+            auto copyDirRecursive = [](const std::filesystem::path& src, const std::filesystem::path& dst) {
+                if (!std::filesystem::exists(src)) return;
+                std::filesystem::create_directories(dst);
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(src)) {
+                    auto rel = std::filesystem::relative(entry.path(), src);
+                    auto target = dst / rel;
+                    if (entry.is_directory()) {
+                        std::filesystem::create_directories(target);
+                    } else if (entry.is_regular_file()) {
+                        std::filesystem::create_directories(target.parent_path());
+                        std::filesystem::copy_file(entry.path(), target, std::filesystem::copy_options::overwrite_existing);
+                    }
+                }
+            };
+
+            copyDirRecursive("engine/assets", gameDir / "assets");
+            copyDirRecursive("engine/assets", gameDir / "engine" / "assets");
+            copyDirRecursive("public/assets", gameDir / "assets");
 
             // 4. Save game project package descriptor (game.json)
             nlohmann::json gamePackage = {
                 {"name", gameName},
                 {"engineAssociation", "Lucid Native Vulkan Runtime"},
                 {"preset", m_currentPreset},
+                {"camera", {
+                    {"x", m_camPos.x},
+                    {"y", m_camPos.y},
+                    {"z", m_camPos.z},
+                    {"yaw", m_camYaw},
+                    {"pitch", m_camPitch},
+                    {"fov", m_camFov}
+                }},
+                {"cameraMode", m_cameraMode},
                 {"entities", getSnapshotJson()},
                 {"script", m_currentScriptCode.empty() ? getDefaultScript(m_currentPreset) : m_currentScriptCode},
+                {"environment", getEnvironmentJson()},
                 {"settings", {
-                    {"gravity", -9.81f},
+                    {"gravity", m_envSettings.gravity},
                     {"fullscreen", false},
                     {"windowWidth", 1920},
                     {"windowHeight", 1080}
@@ -2697,6 +2879,7 @@ function update(entities, dt, input, contacts) {
             if (batFile.is_open()) {
                 batFile << "@echo off\n"
                         << "title " << gameName << " - Lucid Engine (Vulkan 1.3 PC Game)\n"
+                        << "cd /d \"%~dp0\"\n"
                         << "start \"\" \"%~dp0" << gameName << ".exe\" --game game.json\n";
                 batFile.close();
             }

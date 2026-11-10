@@ -383,6 +383,67 @@ namespace engine::script {
         return JS_IsException(val) ? JS_NewObject(ctx) : val;
     }
 
+    static JSValue js_getCamera(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (!engine) return JS_NewObject(ctx);
+        JSValue camObj = JS_NewObject(ctx);
+        glm::vec3 pos = engine->getCameraPosition();
+        JS_SetPropertyStr(ctx, camObj, "x", JS_NewFloat64(ctx, pos.x));
+        JS_SetPropertyStr(ctx, camObj, "y", JS_NewFloat64(ctx, pos.y));
+        JS_SetPropertyStr(ctx, camObj, "z", JS_NewFloat64(ctx, pos.z));
+        JS_SetPropertyStr(ctx, camObj, "yaw", JS_NewFloat64(ctx, engine->getCameraYaw()));
+        JS_SetPropertyStr(ctx, camObj, "pitch", JS_NewFloat64(ctx, engine->getCameraPitch()));
+        JS_SetPropertyStr(ctx, camObj, "fov", JS_NewFloat64(ctx, engine->getCameraFov()));
+        JS_SetPropertyStr(ctx, camObj, "mode", JS_NewString(ctx, engine->getCameraMode().c_str()));
+        return camObj;
+    }
+
+    static JSValue js_setCamera(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 3) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            double x = 0, y = 0, z = 0;
+            double yaw = engine->getCameraYaw();
+            double pitch = engine->getCameraPitch();
+            double fov = engine->getCameraFov();
+            JS_ToFloat64(ctx, &x, argv[0]);
+            JS_ToFloat64(ctx, &y, argv[1]);
+            JS_ToFloat64(ctx, &z, argv[2]);
+            if (argc >= 4) JS_ToFloat64(ctx, &yaw, argv[3]);
+            if (argc >= 5) JS_ToFloat64(ctx, &pitch, argv[4]);
+            if (argc >= 6) JS_ToFloat64(ctx, &fov, argv[5]);
+            engine->setCamera(glm::vec3(x, y, z), static_cast<float>(yaw), static_cast<float>(pitch), static_cast<float>(fov));
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_restart(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            engine->restartSimulation();
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_setCameraMode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        if (argc < 1) return JS_UNDEFINED;
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        if (engine) {
+            const char* str = JS_ToCString(ctx, argv[0]);
+            if (str) {
+                engine->setCameraMode(str);
+                JS_FreeCString(ctx, str);
+            }
+        }
+        return JS_UNDEFINED;
+    }
+
+    static JSValue js_getCameraMode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+        auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(ctx));
+        std::string m = engine ? engine->getCameraMode() : "editor";
+        return JS_NewString(ctx, m.c_str());
+    }
+
     void QuickJSContext::bindEngineAPI(JSContext* ctx, core::Engine* engineInstance) {
         JS_SetContextOpaque(ctx, engineInstance);
         JSValue global_obj = JS_GetGlobalObject(ctx);
@@ -413,6 +474,11 @@ namespace engine::script {
         JS_SetPropertyStr(ctx, engine_obj, "findPath", JS_NewCFunction(ctx, js_findPath, "findPath", 6));
         JS_SetPropertyStr(ctx, engine_obj, "generateProceduralWorld", JS_NewCFunction(ctx, js_generateProceduralWorld, "generateProceduralWorld", 2));
         JS_SetPropertyStr(ctx, engine_obj, "getProfilerStats", JS_NewCFunction(ctx, js_getProfilerStats, "getProfilerStats", 0));
+        JS_SetPropertyStr(ctx, engine_obj, "getCamera", JS_NewCFunction(ctx, js_getCamera, "getCamera", 0));
+        JS_SetPropertyStr(ctx, engine_obj, "setCamera", JS_NewCFunction(ctx, js_setCamera, "setCamera", 6));
+        JS_SetPropertyStr(ctx, engine_obj, "restart", JS_NewCFunction(ctx, js_restart, "restart", 0));
+        JS_SetPropertyStr(ctx, engine_obj, "setCameraMode", JS_NewCFunction(ctx, js_setCameraMode, "setCameraMode", 1));
+        JS_SetPropertyStr(ctx, engine_obj, "getCameraMode", JS_NewCFunction(ctx, js_getCameraMode, "getCameraMode", 0));
 
         JS_SetPropertyStr(ctx, global_obj, "engine", engine_obj);
         JS_FreeValue(ctx, global_obj);
@@ -583,6 +649,15 @@ namespace engine::script {
                 JS_SetPropertyStr(m_ctx, entObj, "rigidBody", rbObj);
             }
 
+            if (registry->get().all_of<ecs::MeshComponent>(entity)) {
+                const auto& m = registry->get().get<ecs::MeshComponent>(entity);
+                JSValue meshObj = JS_NewObject(m_ctx);
+                JS_SetPropertyStr(m_ctx, meshObj, "meshId", JS_NewUint32(m_ctx, m.meshId));
+                JS_SetPropertyStr(m_ctx, meshObj, "materialId", JS_NewUint32(m_ctx, m.materialId));
+                JS_SetPropertyStr(m_ctx, meshObj, "visible", JS_NewBool(m_ctx, m.visible));
+                JS_SetPropertyStr(m_ctx, entObj, "mesh", meshObj);
+            }
+
             JS_SetPropertyUint32(m_ctx, entitiesArr, arrIdx++, entObj);
         }
 
@@ -678,6 +753,15 @@ namespace engine::script {
                         readPropFloat(transObj, "rx", t.rotation.x, rotChanged);
                         readPropFloat(transObj, "ry", t.rotation.y, rotChanged);
                         readPropFloat(transObj, "rz", t.rotation.z, rotChanged);
+                        bool scaleChanged = false;
+                        readPropFloat(transObj, "sx", t.scale.x, scaleChanged);
+                        readPropFloat(transObj, "sy", t.scale.y, scaleChanged);
+                        readPropFloat(transObj, "sz", t.scale.z, scaleChanged);
+
+                        if (scaleChanged) {
+                            auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(m_ctx));
+                            if (engine) engine->syncEntityTransformPhysics(entity);
+                        }
 
                         if ((posChanged || rotChanged) && physics && registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
                             auto& rb = registry->get().get<ecs::RigidBodyComponent>(entity);
@@ -694,6 +778,21 @@ namespace engine::script {
                         }
                     }
                     JS_FreeValue(m_ctx, transObj);
+
+                    // Sync MeshComponent (visibility)
+                    JSValue meshObj = JS_GetPropertyStr(m_ctx, entObj, "mesh");
+                    if (JS_IsObject(meshObj) && registry->get().all_of<ecs::MeshComponent>(entity)) {
+                        auto& m = registry->get().get<ecs::MeshComponent>(entity);
+                        JSValue visVal = JS_GetPropertyStr(m_ctx, meshObj, "visible");
+                        if (!JS_IsUndefined(visVal)) {
+                            int b = JS_ToBool(m_ctx, visVal);
+                            if (b != -1) {
+                                m.visible = (b != 0);
+                            }
+                        }
+                        JS_FreeValue(m_ctx, visVal);
+                    }
+                    JS_FreeValue(m_ctx, meshObj);
 
                     // Sync Velocity
                     JSValue velObj = JS_GetPropertyStr(m_ctx, entObj, "velocity");

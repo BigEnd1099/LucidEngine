@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         exeName = p.stem().string();
         for (char& c : exeName) c = static_cast<char>(std::tolower(c));
     }
-    const bool isEngineEditor = (exeName == "engine" || exeName.find("lucid") != std::string::npos || exeName.empty());
+    const bool isEngineEditor = (exeName == "engine" || exeName == "lucidengine" || exeName.empty());
 
     // Only auto-launch standalone mode if this is an exported game executable (NOT the engine editor itself)
     if (!standaloneGame && !isEngineEditor && std::filesystem::exists("game.json")) {

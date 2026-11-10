@@ -53,6 +53,13 @@ export interface MaterialComponent {
   roughness?: number;
   emissive?: string | [number, number, number];
   emissiveIntensity?: number;
+  materialId?: number;
+  albedoTextureId?: number;
+  normalTextureId?: number;
+  ormTextureId?: number;
+  albedoPath?: string;
+  normalPath?: string;
+  ormPath?: string;
 }
 
 export interface LightComponent {
