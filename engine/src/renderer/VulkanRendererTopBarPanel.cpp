@@ -184,6 +184,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(tabStart.x + 11.0f * state.uiScale, (tabStart.y + tabEnd.y) * 0.5f), 5.0f * state.uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
 
                 ImGui::SameLine(0.0f, 6.0f * state.uiScale);
+                ImGui::BeginDisabled(state.simulationSessionActive);
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.65f, 0.75f, 1.0f));
                 if (ImGui::SmallButton("+ Nowy Poziom")) {
@@ -195,6 +196,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 }
                 ImGui::PopStyleColor(2);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zresetuj do nowego, czystego poziomu");
+                ImGui::EndDisabled();
 
                 ImGui::End();
                 ImGui::PopStyleColor();
@@ -212,7 +214,9 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
 
             // Zapisz projekt z ikona dysku
             ImVec2 sPos = ImGui::GetCursorScreenPos();
+            ImGui::BeginDisabled(state.simulationSessionActive);
             if (ImGui::Button("     Zapisz ", ImVec2(0, btnH))) state.saveProject(false);
+            ImGui::EndDisabled();
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(sPos.x + 11.0f * state.uiScale, sPos.y + btnH * 0.5f), 5.5f * state.uiScale, VectorIconType::SaveDisk, IM_COL32(245, 158, 11, 255));
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zapisz biezacy stan projektu [Ctrl+S]");
             ImGui::SameLine();
