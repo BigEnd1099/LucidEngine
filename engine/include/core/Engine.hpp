@@ -56,7 +56,7 @@ namespace engine::core {
 
     class Engine {
     public:
-        Engine(int wsPort = 9000, bool headless = false, bool enableRemote = true);
+        Engine(int wsPort = 9000, bool headless = false, bool enableRemote = true, bool benchmarkMode = false);
         ~Engine();
 
         void run();

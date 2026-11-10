@@ -537,6 +537,63 @@ namespace engine::renderer {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        // Benchmark mode draws only the already-rendered scene image. It deliberately
+        // bypasses all editor panels, overlays, splitters and viewport auto-resizing.
+        if (m_benchmarkMode) {
+            if (!m_viewportDescriptor && m_viewportSampler && m_colorImageView) {
+                m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(
+                    m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            }
+
+            const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(displaySize, ImGuiCond_Always);
+            ImGui::SetNextWindowBgAlpha(0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            const ImGuiWindowFlags benchmarkFlags =
+                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
+                ImGuiWindowFlags_NoBackground;
+            if (ImGui::Begin("##LucidBenchmarkViewport", nullptr, benchmarkFlags)) {
+                if (m_viewportDescriptor != VK_NULL_HANDLE && displaySize.x > 0.0f && displaySize.y > 0.0f &&
+                    m_width > 0 && m_height > 0) {
+                    const float fitScale = std::min(
+                        displaySize.x / static_cast<float>(m_width),
+                        displaySize.y / static_cast<float>(m_height));
+                    const ImVec2 imageSize(
+                        static_cast<float>(m_width) * fitScale,
+                        static_cast<float>(m_height) * fitScale);
+                    const ImVec2 imageOffset(
+                        (displaySize.x - imageSize.x) * 0.5f,
+                        (displaySize.y - imageSize.y) * 0.5f);
+                    ImGui::SetCursorPos(imageOffset);
+                    ImGui::Image((ImTextureID)m_viewportDescriptor, imageSize);
+                }
+            }
+            ImGui::End();
+            ImGui::PopStyleVar();
+            ImGui::Render();
+
+            VkRenderingAttachmentInfo benchmarkAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            benchmarkAttachment.imageView = targetView;
+            benchmarkAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            benchmarkAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            benchmarkAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            benchmarkAttachment.clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+
+            VkRenderingInfo benchmarkRenderInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            benchmarkRenderInfo.renderArea.extent = m_context->getSwapchainExtent();
+            benchmarkRenderInfo.layerCount = 1;
+            benchmarkRenderInfo.colorAttachmentCount = 1;
+            benchmarkRenderInfo.pColorAttachments = &benchmarkAttachment;
+
+            vkCmdBeginRendering(cmd, &benchmarkRenderInfo);
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+            vkCmdEndRendering(cmd);
+            return;
+        }
+
         ImGuiViewport* mainVp = ImGui::GetMainViewport();
         const float screenW = mainVp->Size.x;
         const float screenH = mainVp->Size.y;

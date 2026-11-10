@@ -8,8 +8,8 @@ import { createServer } from 'node:net';
 const ROOT = process.cwd();
 const EXE = path.resolve(process.argv[2] || 'engine/build/Release/engine.exe');
 const PORT = Number(process.env.LUCID_BENCH_PORT || 9011);
-const WIDTH = Number(process.env.LUCID_BENCH_WIDTH || 2404);
-const HEIGHT = Number(process.env.LUCID_BENCH_HEIGHT || 1866);
+const WIDTH = Number(process.env.LUCID_BENCH_WIDTH || 2560);
+const HEIGHT = Number(process.env.LUCID_BENCH_HEIGHT || 1440);
 const WARMUP_MS = Number(process.env.LUCID_BENCH_WARMUP_MS || 1500);
 const CAPTURE_MS = Number(process.env.LUCID_BENCH_CAPTURE_MS || 2000);
 const SAMPLE_INTERVAL_MS = 100;
@@ -45,7 +45,7 @@ async function assertPortFree() {
 
 function startEngine() {
   console.log('[BENCH] Starting windowed Vulkan engine on port ' + PORT + '...');
-  engineProcess = spawn(EXE, ['--port', String(PORT)], {
+  engineProcess = spawn(EXE, ['--benchmark', '--port', String(PORT)], {
     cwd: ROOT,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -363,7 +363,8 @@ function writeSummary(results, sceneMeta) {
   }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
-    '- Samples are polled over JSON-RPC from a dedicated windowed Vulkan renderer (swapchain + presentation enabled).',
+    '- Samples are polled over JSON-RPC from a dedicated maximized windowed Vulkan renderer (swapchain + presentation enabled).',
+    '- Benchmark mode hides editor UI and disables viewport-driven resolution changes; the offscreen render target stays fixed to the configured benchmark resolution.',
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
     '- The harness does not alter RT reflection algorithms or quality defaults.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));

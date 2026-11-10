@@ -303,7 +303,7 @@ namespace engine::core {
         return fallback;
     }
 
-    Engine::Engine(int wsPort, bool headless, bool enableRemote) : m_headless(headless) {
+    Engine::Engine(int wsPort, bool headless, bool enableRemote, bool benchmarkMode) : m_headless(headless) {
         m_registry = std::make_unique<ecs::Registry>();
         m_scriptContext = std::make_unique<script::QuickJSContext>();
         m_scriptContext->init(this);
@@ -332,7 +332,7 @@ namespace engine::core {
 
         initTestScene();
 
-        m_vulkanContext = std::make_unique<renderer::VulkanContext>(headless);
+        m_vulkanContext = std::make_unique<renderer::VulkanContext>(headless, benchmarkMode);
         m_vulkanContext->init();
         m_assetManager = std::make_unique<AssetManager>(m_vulkanContext.get());
         
@@ -345,6 +345,7 @@ namespace engine::core {
         }
 #endif
         m_renderer = std::make_unique<renderer::VulkanRenderer>(m_vulkanContext.get(), renderW, renderH);
+        m_renderer->setBenchmarkMode(benchmarkMode);
 
         loadUserPreferences();
         applyPreferences();
