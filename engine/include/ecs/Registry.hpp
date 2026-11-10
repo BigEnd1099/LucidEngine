@@ -106,11 +106,12 @@ namespace engine::ecs {
         }
 
         void updateWorldTransforms() {
-            // Hierarchy propagation is unnecessary for ordinary scenes. Avoid
-            // constructing a visited set and walking every Transform when no
-            // entity participates in a hierarchy.
+            // Flat scenes without hierarchy or authored local transforms do
+            // not need world propagation. Keep processing LocalTransform roots:
+            // glTF root nodes can have local transforms without a parent component.
             const auto hierarchyView = m_registry.view<HierarchyComponent>();
-            if (hierarchyView.empty()) return;
+            const auto localTransformView = m_registry.view<LocalTransformComponent>();
+            if (hierarchyView.empty() && localTransformView.empty()) return;
 
             m_worldTransformVisited.clear();
             auto view = m_registry.view<TransformComponent>();
