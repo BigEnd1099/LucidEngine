@@ -34,7 +34,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
 
                 // Equal-width inspector tabs with a persistent active state.
                 const float inspectorTabGap = 4.0f * uiScale;
-                const float inspectorTabWidth = (ImGui::GetContentRegionAvail().x - inspectorTabGap) * 0.5f;
+                const float inspectorTabWidth = std::max(1.0f, (ImGui::GetContentRegionAvail().x - inspectorTabGap) * 0.5f);
                 const ImVec4 tabActive = ImVec4(0.10f, 0.34f, 0.58f, 1.0f);
                 const ImVec4 tabInactive = ImVec4(0.085f, 0.095f, 0.125f, 1.0f);
                 ImGui::PushStyleColor(ImGuiCol_Button, m_detailsTab == 0 ? tabActive : tabInactive);
