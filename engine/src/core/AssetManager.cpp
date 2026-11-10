@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <functional>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include "core/Logger.hpp"
 #include "utils/FileIO.hpp"
 
@@ -555,42 +557,58 @@ namespace engine::core {
             }
             // Instantiate only meshes referenced by nodes in the active scene when available.
             // Node TRS is preserved; assets without nodes fall back to one identity instance per primitive.
-            auto appendNodeInstances = [&](const fastgltf::Node& node) {
+            auto appendNodeInstances = [&](const fastgltf::Node& node, const glm::mat4& worldTransform) {
                 if (!node.meshIndex.has_value() || node.meshIndex.value() >= importedMeshIds.size()) return;
-                glm::vec3 translation(0.0f), scale(1.0f);
-                glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
-                if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
-                    translation = glm::vec3(static_cast<float>(trs->translation[0]), static_cast<float>(trs->translation[1]), static_cast<float>(trs->translation[2]));
-                    scale = glm::vec3(static_cast<float>(trs->scale[0]), static_cast<float>(trs->scale[1]), static_cast<float>(trs->scale[2]));
-                    rotation = glm::quat(static_cast<float>(trs->rotation[3]), static_cast<float>(trs->rotation[0]), static_cast<float>(trs->rotation[1]), static_cast<float>(trs->rotation[2]));
+                glm::vec3 worldPosition(worldTransform[3]);
+                glm::vec3 worldScale(
+                    glm::length(glm::vec3(worldTransform[0])),
+                    glm::length(glm::vec3(worldTransform[1])),
+                    glm::length(glm::vec3(worldTransform[2])));
+                glm::mat3 rotationMatrix(worldTransform);
+                for (int axis = 0; axis < 3; ++axis) {
+                    const float axisScale = worldScale[axis];
+                    if (axisScale > 1e-6f) rotationMatrix[axis] /= axisScale;
                 }
+                glm::quat worldRotation = glm::normalize(glm::quat_cast(rotationMatrix));
                 for (uint32_t id : importedMeshIds[node.meshIndex.value()]) {
                     ImportedMeshInstance instance;
                     instance.meshId = id;
                     instance.name = node.name.empty() ? std::string("Mesh") : std::string(node.name);
-                    instance.translation = translation;
-                    instance.rotation = rotation;
-                    instance.scale = scale;
+                    instance.translation = worldPosition;
+                    instance.rotation = worldRotation;
+                    instance.scale = worldScale;
                     m_lastImportedInstances.push_back(std::move(instance));
                 }
             };
-            std::function<void(size_t)> visitNode = [&](size_t nodeIndex) {
-                if (nodeIndex >= asset.nodes.size()) return;
-                const auto& node = asset.nodes[nodeIndex];
-                appendNodeInstances(node);
-                for (size_t childIndex : node.children) visitNode(childIndex);
-            };
+            std::function<void(size_t, const glm::mat4&)> visitNode =
+                [&](size_t nodeIndex, const glm::mat4& parentTransform) {
+                    if (nodeIndex >= asset.nodes.size()) return;
+                    const auto& node = asset.nodes[nodeIndex];
+                    glm::vec3 translation(0.0f), scale(1.0f);
+                    glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+                    if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
+                        translation = glm::vec3(static_cast<float>(trs->translation[0]), static_cast<float>(trs->translation[1]), static_cast<float>(trs->translation[2]));
+                        scale = glm::vec3(static_cast<float>(trs->scale[0]), static_cast<float>(trs->scale[1]), static_cast<float>(trs->scale[2]));
+                        rotation = glm::quat(static_cast<float>(trs->rotation[3]), static_cast<float>(trs->rotation[0]), static_cast<float>(trs->rotation[1]), static_cast<float>(trs->rotation[2]));
+                    }
+                    glm::mat4 local = glm::translate(glm::mat4(1.0f), translation) *
+                                      glm::mat4_cast(rotation) *
+                                      glm::scale(glm::mat4(1.0f), scale);
+                    const glm::mat4 world = parentTransform * local;
+                    appendNodeInstances(node, world);
+                    for (size_t childIndex : node.children) visitNode(childIndex, world);
+                };
             if (!asset.scenes.empty()) {
                 size_t sceneIndex = asset.defaultScene.value_or(0);
                 if (sceneIndex >= asset.scenes.size()) sceneIndex = 0;
-                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) visitNode(nodeIndex);
+                for (size_t nodeIndex : asset.scenes[sceneIndex].nodeIndices) visitNode(nodeIndex, glm::mat4(1.0f));
             } else {
                 // Some exporters omit scene declarations; visit only hierarchy roots.
                 std::vector<bool> isChild(asset.nodes.size(), false);
                 for (const auto& node : asset.nodes) {
                     for (size_t childIndex : node.children) if (childIndex < isChild.size()) isChild[childIndex] = true;
                 }
-                for (size_t i = 0; i < asset.nodes.size(); ++i) if (!isChild[i]) visitNode(i);
+                for (size_t i = 0; i < asset.nodes.size(); ++i) if (!isChild[i]) visitNode(i, glm::mat4(1.0f));
             }
             if (m_lastImportedInstances.empty()) {
                 for (const auto& meshIds : importedMeshIds) for (uint32_t id : meshIds) {
