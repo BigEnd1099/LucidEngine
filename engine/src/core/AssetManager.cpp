@@ -804,6 +804,7 @@ namespace engine::core {
             meshAsset->id = m_nextMeshId++;
             meshAsset->vertexCount = vertices.size();
             meshAsset->indexCount = indices.size();
+            meshAsset->vertices = vertices;
             meshAsset->hasSkinInfluences = hasSkinAttributes && skinInfluences.size() == vertices.size();
             if (meshAsset->hasSkinInfluences)
                 meshAsset->skinInfluences = std::move(skinInfluences);
