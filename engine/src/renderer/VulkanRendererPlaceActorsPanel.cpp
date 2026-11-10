@@ -1,5 +1,6 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
 #include "imgui.h"
@@ -48,6 +49,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                     ImGui::PopID();
                     ImGui::Spacing();
                 }
+                ImGui::EndDisabled();
                 ImGui::End();
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
@@ -57,23 +59,27 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                ImGui::BeginDisabled(simulationSessionActive);
 
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
+                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("ui.place_actors", "Place Actors"));
                 ImGui::SameLine(placePanelW - 22.0f * uiScale);
                 if (ImGui::SmallButton("<")) showPlaceActors = false;
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin panel Place Actors");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.collapse_place_actors_panel", "Collapse Place Actors panel"));
                 static char classSearch[64] = "";
                 ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
+                ImGui::InputTextWithHint("##SearchClasses", editorText("ui.search_classes", "Search Classes..."), classSearch, sizeof(classSearch));
                 ImGui::Separator();
 
+                int matchedCards = 0;
                 auto spawnCard = [&](const char* title, const char* desc, int spawnType, VectorIconType iconType, ImU32 iconCol) {
                     if (classSearch[0] != '\0') {
                         std::string tL = title, sL = classSearch;
-                        std::transform(tL.begin(), tL.end(), tL.begin(), ::tolower);
-                        std::transform(sL.begin(), sL.end(), sL.begin(), ::tolower);
+                        const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+                        std::transform(tL.begin(), tL.end(), tL.begin(), toLower);
+                        std::transform(sL.begin(), sL.end(), sL.begin(), toLower);
                         if (tL.find(sL) == std::string::npos) return;
                     }
+                    ++matchedCards;
                     ImGui::PushID(title);
                     const float cardH = 38.0f * uiScale;
                     ImGui::BeginChild(title, ImVec2(0, cardH), true, ImGuiWindowFlags_NoScrollbar);
@@ -187,6 +193,11 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 spawnCard("Spot Light",        "Conical Spotlight Emitter",        10, VectorIconType::Light,     IM_COL32(245, 158, 11, 255));
                 spawnCard("Area Light",        "Karis Rectangular Emitter",        11, VectorIconType::Light,     IM_COL32(56, 189, 248, 255));
                 spawnCard("Fire VFX",          "Soft Gaussian HDR Particles",      8,  VectorIconType::Sparkles,  IM_COL32(251, 146, 60, 255));
+                if (matchedCards == 0) {
+                    ImGui::Spacing();
+                    ImGui::TextDisabled(editorText("ui.no_actors_match_your_search", "No actors match your search."));
+                    ImGui::TextDisabled(editorText("ui.try_another_name_e_g_player_light_or_sphere", "Try another name, e.g. Player, Light or Sphere."));
+                }
                 ImGui::EndChild();
                 ImGui::EndDisabled();
 

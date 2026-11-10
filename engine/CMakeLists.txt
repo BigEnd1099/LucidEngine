@@ -188,6 +188,18 @@ add_custom_command(TARGET engine POST_BUILD
     $<TARGET_FILE_DIR:engine>/assets/textures
 )
 
+# Copy catalogs on every build (including Visual Studio builds where LINK_DEPENDS is not portable).
+add_custom_target(CopyLanguageCatalogs ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/language
+    $<TARGET_FILE_DIR:engine>/language
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/language/en.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/language/pl.json
+    VERBATIM
+)
+add_dependencies(CopyLanguageCatalogs engine)
+
 target_include_directories(engine PRIVATE include)
 target_include_directories(engine PRIVATE ${vma_SOURCE_DIR}/include)
 target_include_directories(engine PRIVATE ${jolt_SOURCE_DIR})

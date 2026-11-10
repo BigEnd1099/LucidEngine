@@ -1,4 +1,5 @@
 #include "renderer/EditorOutlinerPanel.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "renderer/EditorUiStyle.hpp"
 #include "ecs/Components.hpp"
 #include "core/Engine.hpp"
@@ -38,14 +39,14 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
         drawEditorVectorIcon(odl, ImVec2(oHdrPos.x + 8.0f * uiScale, oHdrPos.y + 9.0f * uiScale), 5.5f * uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * uiScale);
-        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Hierarchia Sceny");
+        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("ui.scene_outliner", "Scene Outliner"));
 
         auto viewAll = registry.get().view<ecs::TransformComponent>();
         ImGui::SameLine(ImGui::GetWindowWidth() - 95.0f * uiScale);
         ImGui::TextDisabled("[%zu]", viewAll.size());
         ImGui::SameLine(ImGui::GetWindowWidth() - 24.0f * uiScale);
         if (ImGui::SmallButton(">")) { showOutliner = false; showDetails = false; }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin prawy panel inspektora");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.collapse_the_inspector_panel", "Collapse the inspector panel"));
 
         static int s_outlinerCategory = 0; // 0: Wszystko, 1: Siatki, 2: Swiatla, 3: Fizyka, 4: Gracz
         auto drawFilterChip = [&](const char* name, int cIdx) {
@@ -67,16 +68,17 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         const bool hasFilter = (outlinerFilter[0] != '\0');
         const float searchExtraW = (hasFilter ? 84.0f : 62.0f) * uiScale;
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - searchExtraW);
-        ImGui::InputTextWithHint("##OutlinerSearch", "Filtruj scene...", outlinerFilter, sizeof(outlinerFilter));
+        ImGui::InputTextWithHint("##OutlinerSearch", editorText("ui.search_scene", "Search scene..."), outlinerFilter, sizeof(outlinerFilter));
         if (hasFilter) {
             ImGui::SameLine();
             if (ImGui::SmallButton("x##ClearOutlinerFilter")) {
                 outlinerFilter[0] = '\0';
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wyczysc filtr");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.clear_filter", "Clear filter"));
         }
         ImGui::SameLine();
-        if (ImGui::Button("+ Spawn", ImVec2(58.0f * uiScale, 0))) {
+        ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
+        if (ImGui::Button(editorText("ui.spawn", "+ Spawn"), ImVec2(58.0f * uiScale, 0))) {
             auto newEnt = registry.createEntity();
             glm::vec3 sp = cameraPosition + cameraForward * 6.0f;
             if (sp.y < 0.5f) sp.y = 0.5f;
@@ -86,6 +88,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             selectedEntity = newEnt;
             if (engine) engine->setSelectedEntity(selectedEntity);
         }
+        ImGui::EndDisabled();
         ImGui::Separator();
 
         // Blender duplicate entity helper
@@ -124,7 +127,9 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         };
 
         // Hotkey [Ctrl+D] Duplikuj zaznaczony obiekt
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        if (!(engine && engine->isSimulationSessionActive()) &&
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+            !ImGui::GetIO().WantTextInput &&
             ImGui::IsKeyPressed(ImGuiKey_D) && ImGui::GetIO().KeyCtrl &&
             selectedEntity != entt::null && registry.get().valid(selectedEntity)) {
             selectedEntity = duplicateEntity(selectedEntity);
@@ -133,6 +138,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
 
         ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
         auto view = registry.get().view<ecs::TransformComponent>();
+        int visibleEntityCount = 0;
         for (auto entity : view) {
             const auto& entityRegistry = registry.get();
             switch (s_outlinerCategory) {
@@ -160,10 +166,12 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             }
             if (outlinerFilter[0] != '\0') {
                 std::string f = outlinerFilter, l = label;
-                std::transform(f.begin(), f.end(), f.begin(), ::tolower);
-                std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+                const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+                std::transform(f.begin(), f.end(), f.begin(), toLower);
+                std::transform(l.begin(), l.end(), l.begin(), toLower);
                 if (l.find(f) == std::string::npos) continue;
             }
+            ++visibleEntityCount;
             const bool isSelected = (selectedEntity == entity);
             ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
 
@@ -177,6 +185,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 0.4f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.15f, 0.25f, 0.6f));
+            ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
             if (ImGui::Button(eyeBtnId, ImVec2(eyeSz, eyeSz))) {
                 if (hasMesh) {
                     auto& mc = registry.get().get<ecs::MeshComponent>(entity);
@@ -184,8 +193,9 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                 }
             }
             ImGui::PopStyleColor(3);
+            ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(isVis ? "Widoczny w oknie 3D (Kliknij, aby ukryc)" : "Ukryty w oknie 3D (Kliknij, aby pokazac)");
+                ImGui::SetTooltip(isVis ? editorText("ui.visible_in_the_3d_viewport_click_to_hide", "Visible in the 3D viewport (click to hide)") : editorText("ui.hidden_in_the_3d_viewport_click_to_show", "Hidden in the 3D viewport (click to show)"));
             }
             const ImU32 eyeCol = isVis ? IM_COL32(200, 215, 235, 240) : IM_COL32(110, 115, 125, 150);
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(eyeP.x + eyeSz * 0.5f, eyeP.y + eyeSz * 0.5f), 4.2f * uiScale, isVis ? VectorIconType::Eye : VectorIconType::EyeClosed, eyeCol);
@@ -256,6 +266,13 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                 ImGui::EndPopup();
             }
             ImGui::PopID();
+        }
+        if (visibleEntityCount == 0) {
+            ImGui::Spacing();
+            ImGui::TextDisabled(view.empty() ? editorText("ui.scene_is_empty", "Scene is empty.") : editorText("ui.no_entities_match_the_current_filters", "No entities match the current filters."));
+            if (!view.empty() && hasFilter && ImGui::SmallButton(editorText("ui.clear_search_filter", "Clear search filter"))) {
+                outlinerFilter[0] = 0;
+            }
         }
         ImGui::EndChild();
         ImGui::End();

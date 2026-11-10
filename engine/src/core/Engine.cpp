@@ -13,6 +13,7 @@
 #endif
 
 #include "core/Engine.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "core/Logger.hpp"
 #include "ecs/TypeExporter.hpp"
@@ -1752,6 +1753,9 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::stepSimulation(int steps, float dt) {
+        // Single-step is only valid inside an active, paused Play session.
+        // Prevent editor-mode clicks or remote commands from advancing the scene.
+        if (!m_simulationSessionActive || !m_paused || steps <= 0 || dt <= 0.0f) return;
         for (int i = 0; i < steps; ++i) {
             update(dt);
         }
@@ -2066,6 +2070,7 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::applyPreferences() {
+        renderer::setEditorLanguage(m_preferences.language);
         setTargetFps(m_preferences.targetFps);
         setVsyncEnabled(m_preferences.vsync);
         if (m_renderer) {
