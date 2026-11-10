@@ -673,10 +673,12 @@ namespace engine::renderer {
                 ImGui::EndTable();
             }
             ImGui::TextDisabled("History age distribution (normalized bins 0-15; average counter increments/frame)");
+            const float giHistoryPlotMax = std::max(1.0f, *std::max_element(giHistoryAgeBins.begin(), giHistoryAgeBins.end())) * 1.10f;
+            const float reflectionHistoryPlotMax = std::max(1.0f, *std::max_element(reflectionHistoryAgeBins.begin(), reflectionHistoryAgeBins.end())) * 1.10f;
             ImGui::TextUnformatted("Diffuse GI");
-            ImGui::PlotHistogram("##GiHistoryAgeHistogram", giHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, 0.0f, ImVec2(-1.0f, 58.0f));
+            ImGui::PlotHistogram("##GiHistoryAgeHistogram", giHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, giHistoryPlotMax, ImVec2(-1.0f, 58.0f));
             ImGui::TextUnformatted("Reflections");
-            ImGui::PlotHistogram("##ReflectionHistoryAgeHistogram", reflectionHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, 0.0f, ImVec2(-1.0f, 58.0f));
+            ImGui::PlotHistogram("##ReflectionHistoryAgeHistogram", reflectionHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, reflectionHistoryPlotMax, ImVec2(-1.0f, 58.0f));
             ImGui::TextDisabled("All 48 counters and exact histogram bin values are included in the copied report.");
 
             ImGui::Spacing();
