@@ -940,7 +940,8 @@ namespace engine::core {
             // Rebuild parent links only after every saved entity has been recreated.
             // This keeps references valid even when EnTT assigns different runtime IDs.
             for (const auto& entJson : ents) {
-                if (!entJson.is_object() || !entJson.contains("id")) continue;
+                if (!entJson.is_object() ||
+                    (!entJson.contains("id") && !entJson.contains("sourceId"))) continue;
                 const uint32_t savedId = entJson.contains("sourceId")
                     ? entJson["sourceId"].get<uint32_t>() : entJson["id"].get<uint32_t>();
                 auto childIt = restoredEntityMap.find(savedId);
