@@ -381,5 +381,8 @@
   "ui.profiler_mesh_entities": "Encje z siatką",
   "ui.profiler_gpu_depth": "Prepass głębi",
   "ui.profiler_gpu_gbuffer": "G-buffer",
-  "ui.profiler_gpu_ao_rt": "AO + RT"
+  "ui.profiler_gpu_ao_rt": "AO + RT",
+  "ui.profiler_avg_column": "Średnia 1 s",
+  "ui.profiler_render_scale": "Skala renderowania",
+  "ui.profiler_scale_test_hint": "Użyj tych ustawień do kontrolowanego testu skalowania rozdzielczości."
 }
