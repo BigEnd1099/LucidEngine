@@ -361,7 +361,6 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             ImGui::End();
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
-            }
 
             if (s_showShortcutsWindow) {
                 ImGui::SetNextWindowSize(ImVec2(520.0f * state.uiScale, 440.0f * state.uiScale), ImGuiCond_FirstUseEver);
