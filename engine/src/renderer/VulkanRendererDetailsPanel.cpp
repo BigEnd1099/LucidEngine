@@ -30,7 +30,6 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.055f, 0.086f, 1.0f));
                 ImGui::Begin("DetailsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 const bool simulationSessionActive = engine && engine->isSimulationSessionActive();
-                ImGui::BeginDisabled(simulationSessionActive);
 
                 // Equal-width inspector tabs with a persistent active state.
                 const float inspectorTabGap = 4.0f * uiScale;
@@ -49,6 +48,11 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 if (ImGui::Button(editorText("ui.world_graphics", "World & Graphics"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 1;
                 ImGui::PopStyleColor(3);
                 ImGui::Separator();
+                if (simulationSessionActive) {
+                    ImGui::TextDisabled("%s", editorText("details.simulation_readonly", "Inspector is read-only while simulation is running."));
+                    ImGui::Separator();
+                }
+                ImGui::BeginDisabled(simulationSessionActive);
 
                 if (m_detailsTab == 0) {
                     if (selectedEntity == entt::null || !registry.get().valid(selectedEntity)) {
