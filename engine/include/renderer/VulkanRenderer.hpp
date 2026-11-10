@@ -497,6 +497,10 @@ namespace engine::renderer {
 
         VkCommandBuffer m_commandBuffer{VK_NULL_HANDLE};
 
+        // Two timestamp queries measure actual GPU execution time for the render command buffer.
+        VkQueryPool m_timestampQueryPool{VK_NULL_HANDLE};
+        bool m_timestampQueryPending{false};
+
         // Persistent capture staging buffer & command buffer
         VkBuffer m_captureStagingBuffer{VK_NULL_HANDLE};
         VmaAllocation m_captureStagingAlloc{VK_NULL_HANDLE};
