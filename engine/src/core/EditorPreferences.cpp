@@ -11,6 +11,7 @@ namespace engine::core {
 
     nlohmann::json EditorPreferences::toJson() const {
         return nlohmann::json{
+            {"language", language},
             {"ui", {
                 {"uiScale", uiScale},
                 {"showPlaceActors", showPlaceActors},
@@ -63,6 +64,9 @@ namespace engine::core {
 
     void EditorPreferences::fromJson(const nlohmann::json& j) {
         if (!j.is_object()) return;
+
+        language = j.value("language", language);
+        if (language != "pl" && language != "en") language = "en";
 
         // Structured parsing
         if (j.contains("ui") && j["ui"].is_object()) {
