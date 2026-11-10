@@ -375,76 +375,50 @@ namespace engine::core {
             std::vector<renderer::Vertex> vertices(positionAccessor.count);
             std::vector<uint32_t> indices;
 
-            auto extractData = [&](const fastgltf::Accessor& accessor, auto&& callback) {
-                if (!accessor.bufferViewIndex.has_value()) return;
-                size_t bvIdx = accessor.bufferViewIndex.value();
-                if (bvIdx >= asset.bufferViews.size()) return;
-                auto& bufferView = asset.bufferViews[bvIdx];
-                if (bufferView.bufferIndex >= asset.buffers.size()) return;
-                auto& buf = asset.buffers[bufferView.bufferIndex];
-                
-                const uint8_t* bufferData = nullptr;
-                if (auto* vectorBuffer = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(vectorBuffer->bytes.data());
-                } else if (auto* arrayBuffer = std::get_if<fastgltf::sources::Array>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(arrayBuffer->bytes.data());
-                } else if (auto* byteViewBuffer = std::get_if<fastgltf::sources::ByteView>(&buf.data)) {
-                     bufferData = reinterpret_cast<const uint8_t*>(byteViewBuffer->bytes.data());
-                }
-                if (bufferData) {
-                     const uint8_t* accessorData = bufferData + bufferView.byteOffset + accessor.byteOffset;
-                     callback(accessorData, accessor.count);
-                }
-            };
+            // fastgltf's typed iterator handles accessor byteStride, sparse overrides,
+            // component conversion and normalized integer attributes.
+            size_t positionIndex = 0;
+            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, positionAccessor,
+                [&](const fastgltf::math::fvec3& value) {
+                    if (positionIndex >= vertices.size()) return;
+                    vertices[positionIndex].position = glm::vec3(
+                        static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                    vertices[positionIndex].normal = glm::vec3(0, 1, 0);
+                    vertices[positionIndex].texCoord = glm::vec2(0, 0);
+                    ++positionIndex;
+                });
 
-            extractData(positionAccessor, [&](const uint8_t* d, size_t count) {
-                const float* f = reinterpret_cast<const float*>(d);
-                for (size_t i = 0; i < count; ++i) {
-                    vertices[i].position = glm::vec3(f[i * 3 + 0], f[i * 3 + 1], f[i * 3 + 2]);
-                    vertices[i].normal = glm::vec3(0, 1, 0); // default
-                    vertices[i].texCoord = glm::vec2(0, 0);
-                }
-            });
-
-            if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.accessors.size()) {
-                    auto& normalAccessor = asset.accessors[it->accessorIndex];
-                    extractData(normalAccessor, [&](const uint8_t* d, size_t count) {
-                        const float* f = reinterpret_cast<const float*>(d);
-                        for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
-                            vertices[i].normal = glm::vec3(f[i * 3 + 0], f[i * 3 + 1], f[i * 3 + 2]);
+            if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec3& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].normal = glm::vec3(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
                         }
+                        ++index;
                     });
-                }
             }
-            
-            if (auto it = primitive.findAttribute("TEXCOORD_0"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.accessors.size()) {
-                    auto& uvAccessor = asset.accessors[it->accessorIndex];
-                    extractData(uvAccessor, [&](const uint8_t* d, size_t count) {
-                        const float* f = reinterpret_cast<const float*>(d);
-                        for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
-                            vertices[i].texCoord = glm::vec2(f[i * 2 + 0], f[i * 2 + 1]);
+
+            if (auto it = primitive.findAttribute("TEXCOORD_0"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec2>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec2& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].texCoord = glm::vec2(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]));
                         }
+                        ++index;
                     });
-                }
             }
 
             if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
-                auto& idxAccessor = asset.accessors[primitive.indicesAccessor.value()];
-                extractData(idxAccessor, [&](const uint8_t* d, size_t count) {
-                    if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedShort) {
-                         const uint16_t* u16 = reinterpret_cast<const uint16_t*>(d);
-                         for (size_t i = 0; i < count; ++i) indices.push_back(u16[i]);
-                    } else if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedInt) {
-                         const uint32_t* u32 = reinterpret_cast<const uint32_t*>(d);
-                         for (size_t i = 0; i < count; ++i) indices.push_back(u32[i]);
-                    } else if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedByte) {
-                         for (size_t i = 0; i < count; ++i) indices.push_back(d[i]);
-                    }
-                });
+                fastgltf::iterateAccessor<uint32_t>(asset, asset.accessors[primitive.indicesAccessor.value()],
+                    [&](uint32_t index) { indices.push_back(index); });
             } else {
-                for (size_t i = 0; i < vertices.size(); i++) indices.push_back(static_cast<uint32_t>(i));
+                for (size_t i = 0; i < vertices.size(); ++i) indices.push_back(static_cast<uint32_t>(i));
             }
 
             if (vertices.empty() || indices.empty()) return 0;
