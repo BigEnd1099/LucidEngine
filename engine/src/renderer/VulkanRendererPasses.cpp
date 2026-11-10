@@ -1341,6 +1341,8 @@ namespace engine::renderer {
                     m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
+                rtProfiler.recordMetric("rtReflectionHistoryValid", 0.0);
+                rtProfiler.recordMetric("rtHistoryInvalidatedByLightChange", 0.0);
                 rtProfiler.recordMetric("rtReflectionSamples", std::clamp(m_rtSettings.reflectionSamples, 1, 16));
                 rtProfiler.recordMetric("rtReflectionBounces", std::clamp(m_rtSettings.reflectionBounces, 2, 4));
                 rtProfiler.recordMetric("rtReflectionInfiniteBounces", m_rtSettings.reflectionInfiniteBounces ? 1.0 : 0.0);
