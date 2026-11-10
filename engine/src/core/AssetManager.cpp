@@ -36,10 +36,29 @@ namespace engine::core {
 
     uint32_t AssetManager::loadGLTF(const std::string& path) {
         try {
-            auto data = utils::readFile(path);
-            return loadGLTFFromMemory(std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(data.data()), reinterpret_cast<const uint8_t*>(data.data()) + data.size()));
+            fastgltf::Parser parser;
+            auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
+            if (!buffer) {
+                core::Logger::error("AssetManager: unable to read glTF file: " + path);
+                return 0;
+            }
+
+            const auto directory = std::filesystem::path(path).parent_path();
+            const auto options = fastgltf::Options::DecomposeNodeMatrices |
+                                 fastgltf::Options::LoadExternalBuffers |
+                                 fastgltf::Options::LoadExternalImages |
+                                 fastgltf::Options::GenerateMeshIndices;
+            auto asset = parser.loadGltf(buffer.get(), directory, options);
+            if (asset.error() != fastgltf::Error::None) {
+                core::Logger::error("AssetManager: fastgltf failed to parse " + path);
+                return 0;
+            }
+            return loadGLTFAsset(asset.get());
         } catch (const std::exception& e) {
             core::Logger::error("AssetManager::loadGLTF failed for " + path + ": " + e.what());
+            return 0;
+        } catch (...) {
+            core::Logger::error("AssetManager::loadGLTF failed with an unknown exception: " + path);
             return 0;
         }
     }
@@ -304,18 +323,29 @@ namespace engine::core {
             fastgltf::Parser parser;
             auto buffer = fastgltf::GltfDataBuffer::FromBytes(reinterpret_cast<const std::byte*>(data.data()), data.size());
             if (!buffer) return 0;
-
-            auto asset = parser.loadGltfBinary(buffer.get(), "", fastgltf::Options::DecomposeNodeMatrices);
-            
+            const auto options = fastgltf::Options::DecomposeNodeMatrices |
+                                 fastgltf::Options::GenerateMeshIndices;
+            auto asset = parser.loadGltf(buffer.get(), "", options);
             if (asset.error() != fastgltf::Error::None) {
-                core::Logger::error("fastgltf error while parsing GLB");
+                core::Logger::error("fastgltf failed to parse in-memory glTF data");
                 return 0;
             }
+            return loadGLTFAsset(asset.get());
+        } catch (const std::exception& e) {
+            core::Logger::error(std::string("GLTF parsing exception: ") + e.what());
+            return 0;
+        } catch (...) {
+            core::Logger::error("Unknown GLTF parsing exception");
+            return 0;
+        }
+    }
 
+    uint32_t AssetManager::loadGLTFAsset(fastgltf::Asset& asset) {
+        try {
             uint32_t rootMeshId = 0;
             
-            if (asset.get().meshes.empty()) return 0;
-            const auto& gltfMesh = asset.get().meshes[0];
+            if (asset.meshes.empty()) return 0;
+            const auto& gltfMesh = asset.meshes[0];
             if (gltfMesh.primitives.empty()) return 0;
             const auto& primitive = gltfMesh.primitives[0];
             
@@ -325,8 +355,8 @@ namespace engine::core {
                 return 0;
             }
 
-            if (posIt->accessorIndex >= asset.get().accessors.size()) return 0;
-            auto& positionAccessor = asset.get().accessors[posIt->accessorIndex];
+            if (posIt->accessorIndex >= asset.accessors.size()) return 0;
+            auto& positionAccessor = asset.accessors[posIt->accessorIndex];
             if (positionAccessor.count == 0) return 0;
 
             std::vector<renderer::Vertex> vertices(positionAccessor.count);
@@ -335,10 +365,10 @@ namespace engine::core {
             auto extractData = [&](const fastgltf::Accessor& accessor, auto&& callback) {
                 if (!accessor.bufferViewIndex.has_value()) return;
                 size_t bvIdx = accessor.bufferViewIndex.value();
-                if (bvIdx >= asset.get().bufferViews.size()) return;
-                auto& bufferView = asset.get().bufferViews[bvIdx];
-                if (bufferView.bufferIndex >= asset.get().buffers.size()) return;
-                auto& buf = asset.get().buffers[bufferView.bufferIndex];
+                if (bvIdx >= asset.bufferViews.size()) return;
+                auto& bufferView = asset.bufferViews[bvIdx];
+                if (bufferView.bufferIndex >= asset.buffers.size()) return;
+                auto& buf = asset.buffers[bufferView.bufferIndex];
                 
                 const uint8_t* bufferData = nullptr;
                 if (auto* vectorBuffer = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
@@ -364,8 +394,8 @@ namespace engine::core {
             });
 
             if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.get().accessors.size()) {
-                    auto& normalAccessor = asset.get().accessors[it->accessorIndex];
+                if (it->accessorIndex < asset.accessors.size()) {
+                    auto& normalAccessor = asset.accessors[it->accessorIndex];
                     extractData(normalAccessor, [&](const uint8_t* d, size_t count) {
                         const float* f = reinterpret_cast<const float*>(d);
                         for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
@@ -376,8 +406,8 @@ namespace engine::core {
             }
             
             if (auto it = primitive.findAttribute("TEXCOORD_0"); it != primitive.attributes.end()) {
-                if (it->accessorIndex < asset.get().accessors.size()) {
-                    auto& uvAccessor = asset.get().accessors[it->accessorIndex];
+                if (it->accessorIndex < asset.accessors.size()) {
+                    auto& uvAccessor = asset.accessors[it->accessorIndex];
                     extractData(uvAccessor, [&](const uint8_t* d, size_t count) {
                         const float* f = reinterpret_cast<const float*>(d);
                         for (size_t i = 0; i < std::min(count, vertices.size()); ++i) {
@@ -387,8 +417,8 @@ namespace engine::core {
                 }
             }
 
-            if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.get().accessors.size()) {
-                auto& idxAccessor = asset.get().accessors[primitive.indicesAccessor.value()];
+            if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
+                auto& idxAccessor = asset.accessors[primitive.indicesAccessor.value()];
                 extractData(idxAccessor, [&](const uint8_t* d, size_t count) {
                     if (idxAccessor.componentType == fastgltf::ComponentType::UnsignedShort) {
                          const uint16_t* u16 = reinterpret_cast<const uint16_t*>(d);
@@ -416,20 +446,20 @@ namespace engine::core {
             rootMeshId = m_nextMeshId - 1;
             
             // --- Load Textures from glTF ---
-            std::vector<uint32_t> textureIdMap(asset.get().textures.size(), 0);
-            for (size_t t = 0; t < asset.get().textures.size(); ++t) {
-                const auto& gltfTex = asset.get().textures[t];
-                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.get().images.size()) continue;
+            std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
+            for (size_t t = 0; t < asset.textures.size(); ++t) {
+                const auto& gltfTex = asset.textures[t];
+                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.images.size()) continue;
 
-                const auto& image = asset.get().images[gltfTex.imageIndex.value()];
+                const auto& image = asset.images[gltfTex.imageIndex.value()];
                 const uint8_t* rawBytes = nullptr;
                 size_t rawSize = 0;
 
                 if (auto* bv = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
-                    if (bv->bufferViewIndex < asset.get().bufferViews.size()) {
-                        const auto& bufferView = asset.get().bufferViews[bv->bufferViewIndex];
-                        if (bufferView.bufferIndex < asset.get().buffers.size()) {
-                            const auto& buf = asset.get().buffers[bufferView.bufferIndex];
+                    if (bv->bufferViewIndex < asset.bufferViews.size()) {
+                        const auto& bufferView = asset.bufferViews[bv->bufferViewIndex];
+                        if (bufferView.bufferIndex < asset.buffers.size()) {
+                            const auto& buf = asset.buffers[bufferView.bufferIndex];
                             const uint8_t* bufferStart = nullptr;
                             if (auto* vb = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
                                 bufferStart = reinterpret_cast<const uint8_t*>(vb->bytes.data());
@@ -472,8 +502,8 @@ namespace engine::core {
                 }
             }
 
-            if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.get().materials.size()) {
-                auto& mat = asset.get().materials[primitive.materialIndex.value()];
+            if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.materials.size()) {
+                auto& mat = asset.materials[primitive.materialIndex.value()];
                 auto materialAsset = std::make_unique<MaterialAsset>();
                 materialAsset->id = m_nextMaterialId++;
                 materialAsset->baseColorFactor = glm::vec4(
@@ -508,10 +538,10 @@ namespace engine::core {
             }
             return rootMeshId;
         } catch (const std::exception& e) {
-            core::Logger::error(std::string("GLTF parsing exception: ") + e.what());
+            core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
             return 0;
         } catch (...) {
-            core::Logger::error("Unknown GLTF parsing exception");
+            core::Logger::error("Unknown GLTF asset import exception");
             return 0;
         }
     }
