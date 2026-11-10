@@ -42,7 +42,8 @@ namespace engine::ecs {
         bool reparentEntity(entt::entity child, entt::entity parent) {
             if (!m_registry.valid(child) || !m_registry.all_of<TransformComponent>(child)) return false;
             const TransformComponent worldBefore = m_registry.get<TransformComponent>(child);
-            if (!m_registry.all_of<LocalTransformComponent>(child)) {
+            const bool hadLocalTransform = m_registry.all_of<LocalTransformComponent>(child);
+            if (!hadLocalTransform) {
                 LocalTransformComponent local{};
                 local.position = worldBefore.position;
                 local.rotation = worldBefore.rotation;
@@ -50,7 +51,10 @@ namespace engine::ecs {
                 local.orientation = worldBefore.orientation;
                 m_registry.emplace<LocalTransformComponent>(child, local);
             }
-            if (!setParent(child, parent)) return false;
+            if (!setParent(child, parent)) {
+                if (!hadLocalTransform) m_registry.remove<LocalTransformComponent>(child);
+                return false;
+            }
             m_registry.get<TransformComponent>(child) = worldBefore;
             syncLocalTransformFromWorld(child);
             return true;
