@@ -38,6 +38,19 @@ Atrium Benchmark is generated from native ECS entities and built-in meshes. It c
 
 Each case resets RT temporal history, warms up, then samples profiler telemetry. The report includes mean and p95 values, raw samples, and a CSV summary.
 
+## Quality profiles and diagnostics
+
+The Atrium feature matrix runs twice with identical feature combinations:
+
+- `default` — the engine's current RT defaults (1 GI sample, 2 GI bounces, 1 reflection sample, 2 reflection bounces, 32-frame history capacity and 0.60 reflection roughness limit).
+- `editor_quality` — the configuration from the supplied Editor Performance Profiler capture (16 GI samples, 3 GI bounces, 16 reflection samples, 2 reflection bounces, 256-frame history capacity and 1.0 reflection roughness limit). Other RT controls are explicitly set to the same known defaults and are included in readback.
+
+The benchmark configures settings through `engine.setRenderFeatures` and stores the renderer's actual readback in every case JSON. It does not assume that requested settings were accepted. The JSON-RPC endpoint supports RT sample counts, bounce counts, GI resolution/checkerboard/intensity, reflection roughness/throughput and optimization flags, denoiser/SVGF/history controls, debug mode, plus GTAO radius/intensity and SSGI intensity/ground controls.
+
+Every numeric profiler metric is copied into each raw sample dynamically, so newly added numeric diagnostics are retained without another benchmark-script edit. Current settings telemetry includes GTAO/SSGI parameters and RT enable flags, quality settings, internal GI dimensions, pass timings and dependency intervals. Reports retain per-case mean/p95 and raw samples.
+
+The editor-quality profile reproduces the RT values visible in the supplied capture; it does not claim to reproduce unreported editor settings. GTAO/SSGI values are recorded from the running renderer and are not silently inferred.
+
 ## Output
 
 Every run creates `benchmark-results/run-<timestamp>/` containing:
