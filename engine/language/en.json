@@ -367,5 +367,23 @@
     "ui.profiler_gpu_hdr": "HDR lighting",
     "ui.profiler_gpu_post": "Post-processing",
     "ui.profiler_gpu_ui": "UI + swapchain"
-  }
+  },
+  "ui.profiler_one_second_average": "ONE-SECOND ROLLING AVERAGE",
+  "ui.profiler_samples": "Samples",
+  "ui.profiler_average_note": "Averages are calculated from the last 1.0 second of editor frames.",
+  "ui.profiler_avg_fps": "AVG. FPS (1s)",
+  "ui.profiler_avg_loop": "AVG. LOOP (1s)",
+  "ui.profiler_avg_cpu": "AVG. RENDER CPU (1s)",
+  "ui.profiler_avg_gpu": "AVG. GPU (1s)",
+  "ui.profiler_copy_average": "Copy 1-second average report",
+  "ui.profiler_copy_hint": "Copies averaged values and scene counters to clipboard.",
+  "ui.profiler_registry_entities": "Registry entities",
+  "ui.profiler_mesh_entities": "Mesh entities",
+  "ui.profiler_gpu_depth": "Depth prepass",
+  "ui.profiler_gpu_gbuffer": "G-buffer",
+  "ui.profiler_gpu_ao_rt": "AO + RT",
+  "ui.profiler_avg_column": "1s average",
+  "ui.profiler_render_scale": "Render scale",
+  "ui.profiler_scale_test_hint": "Use these presets for a controlled resolution-scaling test.",
+  "ui.profiler_collecting_one_second": "Collecting a full one-second window..."
 }

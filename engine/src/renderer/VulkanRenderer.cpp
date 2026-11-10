@@ -45,7 +45,7 @@ namespace engine::renderer {
             m_context->getPhysicalDeviceProperties().limits.timestampPeriod > 0.0f) {
             VkQueryPoolCreateInfo queryInfo{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
             queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-            queryInfo.queryCount = 7;
+            queryInfo.queryCount = 9;
             if (vkCreateQueryPool(m_context->getDevice(), &queryInfo, nullptr, &m_timestampQueryPool) != VK_SUCCESS) {
                 m_timestampQueryPool = VK_NULL_HANDLE;
                 core::Logger::warn("GPU timestamp query pool could not be created; GPU timing is disabled.");

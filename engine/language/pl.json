@@ -367,5 +367,23 @@
     "ui.profiler_gpu_hdr": "Oświetlenie HDR",
     "ui.profiler_gpu_post": "Post-processing",
     "ui.profiler_gpu_ui": "UI + swapchain"
-  }
+  },
+  "ui.profiler_one_second_average": "ŚREDNIA KROCZĄCA Z 1 SEKUNDY",
+  "ui.profiler_samples": "Próbki",
+  "ui.profiler_average_note": "Średnie są obliczane z ostatniej 1,0 sekundy pracy edytora.",
+  "ui.profiler_avg_fps": "ŚR. FPS (1 s)",
+  "ui.profiler_avg_loop": "ŚR. PĘTLA (1 s)",
+  "ui.profiler_avg_cpu": "ŚR. CPU RENDERU (1 s)",
+  "ui.profiler_avg_gpu": "ŚR. GPU (1 s)",
+  "ui.profiler_copy_average": "Kopiuj raport — średnia 1-sekundowa",
+  "ui.profiler_copy_hint": "Kopiuje uśrednione wyniki i liczniki sceny do schowka.",
+  "ui.profiler_registry_entities": "Encje rejestru",
+  "ui.profiler_mesh_entities": "Encje z siatką",
+  "ui.profiler_gpu_depth": "Prepass głębi",
+  "ui.profiler_gpu_gbuffer": "G-buffer",
+  "ui.profiler_gpu_ao_rt": "AO + RT",
+  "ui.profiler_avg_column": "Średnia 1 s",
+  "ui.profiler_render_scale": "Skala renderowania",
+  "ui.profiler_scale_test_hint": "Użyj tych ustawień do kontrolowanego testu skalowania rozdzielczości.",
+  "ui.profiler_collecting_one_second": "Zbieranie pełnego okna pomiarowego 1 sekundy..."
 }

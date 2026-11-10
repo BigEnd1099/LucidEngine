@@ -57,12 +57,12 @@ namespace engine::renderer {
         }
 #endif
 
-        // The frame fence (or headless queue-idle) guarantees the previous timestamp
-        // pair is available. Never stall here: consume it only when Vulkan reports ready.
+        // The frame fence (or headless queue-idle) guarantees the previous timestamp set
+        // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
-            uint64_t timestamps[7]{};
+            uint64_t timestamps[9]{};
             const VkResult queryResult = vkGetQueryPoolResults(
-                m_context->getDevice(), m_timestampQueryPool, 0, 7,
+                m_context->getDevice(), m_timestampQueryPool, 0, 9,
                 sizeof(timestamps), timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT);
             if (queryResult == VK_SUCCESS) {
@@ -77,13 +77,15 @@ namespace engine::renderer {
                     return static_cast<double>(ticks) * timestampPeriodNs / 1000000.0;
                 };
 
-                core::Profiler::get().recordGpuTime(static_cast<float>(elapsedMs(0, 6)));
+                core::Profiler::get().recordGpuTime(static_cast<float>(elapsedMs(0, 8)));
                 core::Profiler::get().recordMetric("gpuScenePrepMs", elapsedMs(0, 1));
                 core::Profiler::get().recordMetric("gpuShadowMs", elapsedMs(1, 2));
-                core::Profiler::get().recordMetric("gpuGeometryMs", elapsedMs(2, 3));
-                core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(3, 4));
-                core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(4, 5));
-                core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(5, 6));
+                core::Profiler::get().recordMetric("gpuDepthMs", elapsedMs(2, 3));
+                core::Profiler::get().recordMetric("gpuGBufferMs", elapsedMs(3, 4));
+                core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
+                core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
+                core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
+                core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
                 m_timestampQueryPending = false;
             }
         }
@@ -112,7 +114,7 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (m_timestampQueryPool) {
-            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 7);
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 9);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
         }
 
@@ -425,6 +427,7 @@ namespace engine::renderer {
         if (rtInstances.capacity() < 64) rtInstances.reserve(64);
         if (rtGpuInstances.capacity() < 64) rtGpuInstances.reserve(64);
         if (assetManager) {
+            core::Profiler::ScopedSample drawItemPreparationSample("Draw Item Preparation");
             auto meshEntities = registry.get().view<ecs::TransformComponent, ecs::MeshComponent>();
             for (auto entity : meshEntities) {
                 const auto& transform = meshEntities.get<ecs::TransformComponent>(entity);
@@ -1006,6 +1009,9 @@ namespace engine::renderer {
             vkCmdEndRendering(m_commandBuffer);
         }
 
+        if (m_timestampQueryPool)
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 3);
+
         // =========================================================================
         // PASS 2A.5: THIN G-BUFFER (Smooth Shading Normals + Roughness + Albedo + Metallic + Motion)
         // Rendered with depthCompareOp = EQUAL against Depth Prepass Z-buffer.
@@ -1108,6 +1114,9 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         }
+
+        if (m_timestampQueryPool)
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 4);
 
         // =========================================================================
         // PASS 2B: MULTI-BOUNCE GTAO + BILATERAL BLUR (przed cieniowaniem IBL PBR!)
@@ -1284,7 +1293,7 @@ namespace engine::renderer {
         }
 
         if (m_timestampQueryPool)
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 3);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 5);
 
         // =========================================================================
         // PASS 3: MAIN HDR PBR PASS + CUBEMAP SKYBOX + SOFT GAUSSIAN PARTICLES
@@ -1443,7 +1452,7 @@ namespace engine::renderer {
         }
 
         if (m_timestampQueryPool)
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 4);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 6);
 
         // =========================================================================
         // PASS 4: 5-MIP JIMENEZ BLOOM PYRAMID (13-Tap Karis Downsample + 3x3 Tent Up)
@@ -1644,7 +1653,7 @@ namespace engine::renderer {
         }
 
         if (m_timestampQueryPool)
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 5);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 7);
 
         // =========================================================================
         // PASS 6: SWAPCHAIN BLIT / IMGUI EDITOR RENDERING & PRESENT
@@ -1722,7 +1731,7 @@ namespace engine::renderer {
 #endif
 
         if (m_timestampQueryPool) {
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 6);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 8);
         }
         vkEndCommandBuffer(m_commandBuffer);
 

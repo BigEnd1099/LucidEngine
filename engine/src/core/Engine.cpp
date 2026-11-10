@@ -3325,7 +3325,16 @@ function update(entities, dt, input, contacts) {
     nlohmann::json Engine::getProfilerStats() {
         auto stats = Profiler::get().getStatsJson();
         if (m_registry) {
-            stats["activeEntities"] = m_registry->get().storage<entt::entity>().size();
+            auto& registry = m_registry->get();
+            stats["registryEntities"] = registry.storage<entt::entity>().size();
+
+            uint64_t meshEntityCount = 0;
+            auto meshView = registry.view<ecs::TransformComponent, ecs::MeshComponent>();
+            for (auto entity : meshView) {
+                (void)entity;
+                ++meshEntityCount;
+            }
+            stats["meshEntities"] = meshEntityCount;
         }
         if (m_worldPartition) {
             stats["loadedCells"] = m_worldPartition->getLoadedCellCount();
