@@ -110,6 +110,7 @@
     "ui.golden_hour": "Złota godzina",
     "ui.sunset": "Zachód",
     "ui.path_to_exr_hdr_file_e_g_c_maps_sky_exr": "Ścieżka do pliku .exr / .hdr (np. C:/maps/sky.exr)",
-    "ui.load_hdri_exr": "Wczytaj HDRI/EXR"
+    "ui.load_hdri_exr": "Wczytaj HDRI/EXR",
+    "settings.language": "Język"
   }
 }
