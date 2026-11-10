@@ -740,6 +740,9 @@ namespace engine::renderer {
                     else ++it;
                 }
             }
+            core::Profiler::get().recordMetric("drawItems", static_cast<double>(drawItems.size()));
+            core::Profiler::get().recordMetric("rtInstances", static_cast<double>(rtGpuInstances.size()));
+
             bool rtSceneReady = false;
             if (isRayTracingEnabled() && !rtInstances.empty() &&
                 rtGpuInstances.size() <= RT_MAX_INSTANCE_COUNT && m_rtInstanceDataMapped) {
