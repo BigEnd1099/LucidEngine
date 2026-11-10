@@ -45,8 +45,16 @@ namespace engine::renderer {
 #ifdef USE_GLFW
         uint32_t imageIndex = 0;
         if (!m_context->isHeadless()) {
-            vkWaitForFences(m_context->getDevice(), 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
-            VkResult result = vkAcquireNextImageKHR(m_context->getDevice(), m_context->getSwapchain(), UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+            {
+                core::Profiler::ScopedSample waitFenceSample("Vulkan Fence Wait");
+                vkWaitForFences(m_context->getDevice(), 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+            }
+            VkResult result = VK_SUCCESS;
+            {
+                core::Profiler::ScopedSample acquireSample("Vulkan Acquire Image");
+                result = vkAcquireNextImageKHR(m_context->getDevice(), m_context->getSwapchain(),
+                                               UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+            }
             if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_SURFACE_LOST_KHR) {
                 m_context->recreateSwapchain();
                 return;
@@ -1840,18 +1848,22 @@ namespace engine::renderer {
             submitInfo.pWaitDstStageMask = waitStages;
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
-            const VkResult submitResult =
-                vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_inFlightFence);
-            m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
+            VkResult submitResult = VK_SUCCESS;
+            VkResult res = VK_SUCCESS;
+            {
+                core::Profiler::ScopedSample submitPresentSample("Vulkan Submit + Present");
+                submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_inFlightFence);
+                m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
 
-            VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+                VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
             presentInfo.waitSemaphoreCount = 1;
             presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
             VkSwapchainKHR swapChains[] = { m_context->getSwapchain() };
             presentInfo.swapchainCount = 1;
             presentInfo.pSwapchains = swapChains;
             presentInfo.pImageIndices = &imageIndex;
-            VkResult res = vkQueuePresentKHR(m_context->getGraphicsQueue(), &presentInfo);
+                res = vkQueuePresentKHR(m_context->getGraphicsQueue(), &presentInfo);
+            }
             if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
                 m_context->recreateSwapchain();
             }
