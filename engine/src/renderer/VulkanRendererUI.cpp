@@ -260,6 +260,36 @@ namespace engine::renderer {
             }
 
             ImGui::Spacing();
+            ImGui::SeparatorText(editorText("ui.profiler_gpu_passes", "GPU PASS BREAKDOWN"));
+            if (ImGui::BeginTable("##GpuPassTable", 2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn(editorText("ui.profiler_gpu_pass", "GPU stage"), ImGuiTableColumnFlags_WidthStretch, 0.70f);
+                ImGui::TableSetupColumn(editorText("ui.profiler_gpu_time", "Time"), ImGuiTableColumnFlags_WidthFixed, 0.30f);
+                ImGui::TableHeadersRow();
+
+                const std::pair<const char*, const char*> gpuStages[] = {
+                    {"ui.profiler_gpu_scene_prep", "gpuScenePrepMs"},
+                    {"ui.profiler_gpu_shadows", "gpuShadowMs"},
+                    {"ui.profiler_gpu_geometry", "gpuGeometryMs"},
+                    {"ui.profiler_gpu_hdr", "gpuHdrMs"},
+                    {"ui.profiler_gpu_post", "gpuPostMs"},
+                    {"ui.profiler_gpu_ui", "gpuUiMs"}
+                };
+                for (const auto& stage : gpuStages) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(editorText(stage.first, stage.first));
+                    ImGui::TableNextColumn();
+                    if (m_timestampQueryPool && metrics.contains(stage.second))
+                        ImGui::Text("%.3f ms", metrics.value(stage.second, 0.0));
+                    else
+                        ImGui::TextDisabled("N/A");
+                }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
             ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
             ImGui::Text("%s: %u x %u", editorText("ui.profiler_render_resolution", "Render resolution"), m_width, m_height);
             ImGui::Text("%s: %s", editorText("ui.profiler_gpu_queries", "GPU timestamp queries"),
