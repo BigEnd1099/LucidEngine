@@ -381,6 +381,11 @@ void AccelerationStructure::cleanup() {
         m_scratchAlloc = VK_NULL_HANDLE;
     }
     releaseCompletedScratch();
+    m_tlasBuiltOnce = false;
+    m_blasChangedSinceTlas = false;
+    m_lastInstanceCount = 0;
+    m_lastInstanceHash = 0;
+    m_maxInstanceCapacity = 0;
     m_ready = false;
 }
 }
