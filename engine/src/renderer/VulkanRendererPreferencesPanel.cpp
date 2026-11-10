@@ -21,6 +21,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     static char scriptBuf[16384] = "";
                     static bool s_scriptInit = false;
                     static bool s_scriptDirty = false;
+                    static bool s_scriptLastRunOk = true;
                     if (engine && !s_scriptInit) {
                         s_scriptInit = true;
                         const std::string code = engine->getCurrentScript();
@@ -29,9 +30,13 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         s_scriptDirty = false;
                     }
                     if (ImGui::Button(editorText("script.apply_run", " Apply & Run Script ")) && engine) {
-                        engine->loadScript(scriptBuf);
-                        engine->setCurrentScript(scriptBuf);
-                        s_scriptDirty = false;
+                        s_scriptLastRunOk = engine->loadScript(scriptBuf);
+                        if (s_scriptLastRunOk) {
+                            engine->setCurrentScript(scriptBuf);
+                            s_scriptDirty = false;
+                        } else {
+                            s_scriptDirty = true;
+                        }
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.reload_from_scene", " Reload from Scene ")) && engine) {
@@ -39,6 +44,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = false;
+                        s_scriptLastRunOk = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.clear", " Clear "))) {
@@ -59,9 +65,14 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = true;
                     }
-                    if (ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) s_scriptDirty = true;
                     ImGui::SameLine();
-                    ImGui::TextDisabled("%s", editorText(s_scriptDirty ? "script.modified" : "script.synced", s_scriptDirty ? "Modified" : "Synced"));
+                    const char* scriptStatusKey = !s_scriptLastRunOk ? "script.run_failed" : (s_scriptDirty ? "script.modified" : "script.synced");
+                    const char* scriptStatusFallback = !s_scriptLastRunOk ? "Run failed - check Output Log" : (s_scriptDirty ? "Modified" : "Synced");
+                    ImGui::TextDisabled("%s", editorText(scriptStatusKey, scriptStatusFallback));
+                    if (ImGui::InputTextMultiline("##ScriptCode", scriptBuf, sizeof(scriptBuf), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
+                        s_scriptDirty = true;
+                        s_scriptLastRunOk = true;
+                    }
                 }
                 ImGui::End();
             }
