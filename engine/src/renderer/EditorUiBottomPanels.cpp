@@ -170,8 +170,8 @@ void drawEditorBottomPanels(bool immersivePlay,
                 dl->AddText(ImVec2(cardPos.x + std::max(4.0f, (itemWidth - textW) * 0.5f), cardPos.y + itemHeight - 22.0f * uiScale), IM_COL32(230, 235, 245, 255), displayLabel.c_str());
 
                 if (ImGui::IsItemHovered()) {
-                    if (entry.is_directory()) ImGui::SetTooltip("Folder: %s\nKliknij dwukrotnie, aby otworzyc", filename.c_str());
-                    else ImGui::SetTooltip("Plik: %s\nRozmiar: %zu B", filename.c_str(), entry.file_size(ec));
+                    if (entry.is_directory()) ImGui::SetTooltip(editorText("ui.folder_tooltip", "Folder: %s\nDouble-click to open"), filename.c_str());
+                    else ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), entry.file_size(ec));
                 }
 
                 colIdx++;
