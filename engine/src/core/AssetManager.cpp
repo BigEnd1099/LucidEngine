@@ -716,10 +716,20 @@ namespace engine::core {
             const bool hasWeights1 = readWeightSet("WEIGHTS_1", true);
             const bool hasSkinAttributes = hasJoints0 && hasWeights0;
             if ((hasJoints0 != hasWeights0) || (hasJoints1 != hasWeights1)) {
-                core::Logger::warn("AssetManager: incomplete glTF JOINTS/WEIGHTS attribute pair; missing pair will use identity influence");
+                core::Logger::warn("AssetManager: incomplete glTF JOINTS/WEIGHTS attribute pair; incomplete influence set will be ignored");
             }
             if (hasSkinAttributes) {
                 for (auto& influence : skinInfluences) {
+                    if (hasJoints1 != hasWeights1)
+                        influence.weights1 = glm::vec4(0.0f);
+                    auto sanitizeWeights = [](glm::vec4& weights) {
+                        for (int component = 0; component < 4; ++component) {
+                            float& weight = weights[component];
+                            weight = std::isfinite(weight) ? std::max(0.0f, weight) : 0.0f;
+                        }
+                    };
+                    sanitizeWeights(influence.weights0);
+                    sanitizeWeights(influence.weights1);
                     float total = glm::dot(influence.weights0, glm::vec4(1.0f)) +
                                   glm::dot(influence.weights1, glm::vec4(1.0f));
                     if (!std::isfinite(total) || total <= 1e-8f) {
