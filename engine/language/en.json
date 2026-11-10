@@ -110,6 +110,7 @@
     "ui.golden_hour": "Golden hour",
     "ui.sunset": "Sunset",
     "ui.path_to_exr_hdr_file_e_g_c_maps_sky_exr": "Path to .exr / .hdr file (e.g. C:/maps/sky.exr)",
-    "ui.load_hdri_exr": "Load HDRI/EXR"
+    "ui.load_hdri_exr": "Load HDRI/EXR",
+    "settings.language": "Language"
   }
 }
