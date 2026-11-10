@@ -604,6 +604,7 @@ namespace engine::core {
 
                     ImportedSceneNode importedNode;
                     importedNode.nodeIndex = nodeIndex;
+                    const size_t importedNodePosition = m_lastImportedNodes.size();
                     importedNode.parentNodeIndex = parentNodeIndex;
                     importedNode.name = node.name.empty() ? ("Node_" + std::to_string(nodeIndex)) : std::string(node.name);
                     if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size())
@@ -641,7 +642,7 @@ namespace engine::core {
                         }
                     }
                     for (size_t childIndex : node.children)
-                        visitNode(childIndex, static_cast<int64_t>(nodeIndex), world);
+                        visitNode(childIndex, static_cast<int64_t>(importedNodePosition), world);
                 };
 
             if (!asset.scenes.empty()) {
