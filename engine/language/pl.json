@@ -316,6 +316,7 @@
     "ui.shortcut_focus": "Skup kamerę na obiekcie",
     "ui.shortcut_delete": "Usuń zaznaczony obiekt",
     "ui.shortcut_duplicate": "Duplikuj zaznaczony obiekt",
-    "ui.shortcuts_note": "Skróty viewportu są blokowane podczas edycji tekstu oraz w trakcie symulacji, gdy ma to zastosowanie."
+    "ui.shortcuts_note": "Skróty viewportu są blokowane podczas edycji tekstu oraz w trakcie symulacji, gdy ma to zastosowanie.",
+    "ui.refresh_assets": "Odśwież"
   }
 }
