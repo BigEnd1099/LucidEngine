@@ -343,7 +343,7 @@ namespace engine::renderer {
                 report << "\n[SCREEN-SPACE AND RT SUBPASSES - 1s AVERAGE]\n";
                 const char* effectStageLabels[] = {
                     "GTAO + SSGI main shader", "GTAO/SSGI bilateral blur",
-                    "RT GI trace", "RT GI temporal", "RT GI a-trous 0", "RT GI a-trous 1",
+                    "RT indirect GI/AO trace", "RT indirect temporal", "RT indirect a-trous 0", "RT indirect a-trous 1",
                     "RT reflections trace", "RT reflections temporal", "RT compute total (inclusive)"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i)
