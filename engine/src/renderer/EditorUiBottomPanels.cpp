@@ -60,8 +60,10 @@ void drawEditorBottomPanels(bool immersivePlay,
         if (showContentDrawer) {
             // Blender/BUI inspired file browser navigation bar
             static fs::path s_currentBrowsePath = "engine/assets";
-            if (!fs::exists(s_currentBrowsePath)) {
-                if (fs::exists("assets")) s_currentBrowsePath = "assets";
+            std::error_code pathError;
+            if (!fs::is_directory(s_currentBrowsePath, pathError) || pathError) {
+                pathError.clear();
+                if (fs::is_directory("assets", pathError) && !pathError) s_currentBrowsePath = "assets";
                 else s_currentBrowsePath = ".";
             }
 
@@ -114,6 +116,7 @@ void drawEditorBottomPanels(bool immersivePlay,
             const int columns = std::max(1, static_cast<int>(panelWidth / (itemWidth + 10.0f * uiScale)));
 
             int colIdx = 0;
+            int visibleAssetCount = 0;
             std::error_code ec;
             std::vector<fs::directory_entry> entries;
             std::string browseError;
@@ -158,6 +161,7 @@ void drawEditorBottomPanels(bool immersivePlay,
                     if (s_assetFilterCategory == 3 && ext != ".js" && ext != ".mjs" && ext != ".ts") continue;
                 }
 
+                ++visibleAssetCount;
                 ImGui::PushID(filename.c_str());
                 ImVec2 cardPos = ImGui::GetCursorScreenPos();
 
@@ -196,8 +200,13 @@ void drawEditorBottomPanels(bool immersivePlay,
                 dl->AddText(ImVec2(cardPos.x + std::max(4.0f, (itemWidth - textW) * 0.5f), cardPos.y + itemHeight - 22.0f * uiScale), IM_COL32(230, 235, 245, 255), displayLabel.c_str());
 
                 if (ImGui::IsItemHovered()) {
-                    if (isDirectory) ImGui::SetTooltip(editorText("ui.folder_tooltip", "Folder: %s\nDouble-click to open"), filename.c_str());
-                    else ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), entry.file_size(ec));
+                    if (isDirectory) {
+                        ImGui::SetTooltip(editorText("ui.folder_tooltip", "Folder: %s\nClick to open"), filename.c_str());
+                    } else {
+                        const auto fileSize = entry.file_size(ec);
+                        if (ec) ec.clear();
+                        ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), fileSize);
+                    }
                 }
 
                 colIdx++;
@@ -210,7 +219,7 @@ void drawEditorBottomPanels(bool immersivePlay,
             }
 
             if (!browseError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s: %s", editorText("ui.asset_read_error", "Cannot read directory"), browseError.c_str());
-            if (entries.empty() && browseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
+            if (visibleAssetCount == 0 && browseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
             ImGui::EndChild();
         } else {
             static bool s_autoScroll = true;
