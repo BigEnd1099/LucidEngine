@@ -298,6 +298,24 @@
     "ui.asset_no_results": "No assets match this search.",
     "script.modified": "Modified",
     "script.synced": "Synced",
-    "script.run_failed": "Run failed - check Output Log"
+    "script.run_failed": "Run failed - check Output Log",
+    "ui.help": "Help",
+    "ui.keyboard_shortcuts": "Keyboard Shortcuts",
+    "ui.shortcuts_project_windows": "Project & Windows",
+    "ui.shortcut_save": "Save project",
+    "ui.shortcut_save_as": "Save project as",
+    "ui.shortcut_open": "Open project",
+    "ui.shortcut_preferences": "Open editor preferences",
+    "ui.shortcut_content_drawer": "Toggle Content Drawer",
+    "ui.shortcut_script_studio": "Toggle QuickJS Script Studio",
+    "ui.shortcut_immersive": "Toggle immersive viewport",
+    "ui.shortcuts_viewport": "Viewport & Selection",
+    "ui.shortcut_translate": "Move gizmo",
+    "ui.shortcut_rotate": "Rotate gizmo",
+    "ui.shortcut_scale": "Scale gizmo",
+    "ui.shortcut_focus": "Focus selected object",
+    "ui.shortcut_delete": "Delete selected object",
+    "ui.shortcut_duplicate": "Duplicate selected object",
+    "ui.shortcuts_note": "Viewport shortcuts are disabled while editing text or during simulation where applicable."
   }
 }
