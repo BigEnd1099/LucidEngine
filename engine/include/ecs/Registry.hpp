@@ -130,7 +130,8 @@ namespace engine::ecs {
         void destroyEntity(entt::entity entity) {
             if (!m_registry.valid(entity)) return;
             if (m_registry.all_of<HierarchyComponent>(entity)) {
-                const auto& children = m_registry.get<HierarchyComponent>(entity).children;
+                // Detaching children mutates this vector, so iterate over a snapshot.
+                const auto children = m_registry.get<HierarchyComponent>(entity).children;
                 for (entt::entity child : children) {
                     if (!m_registry.valid(child)) continue;
                     detachFromParent(child);
