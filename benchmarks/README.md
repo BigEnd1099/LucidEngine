@@ -24,7 +24,7 @@ The runner does not attach to or terminate an already-open editor instance. It l
 
 ## Scene design
 
-Atrium Benchmark is generated from native ECS entities and built-in meshes. It contains an architectural shell, 15 structural columns, beams, a 21-object PBR gallery, a dense modular prop field, polished metal spheres, emissive panels, and 12 local point lights. The current scene generator creates approximately 170 entities, depending on future changes.
+Atrium Benchmark is generated from native ECS entities and built-in meshes. It contains an architectural shell, 6 perimeter columns, beams, a 21-object PBR gallery, a dense modular prop field, polished metal spheres, emissive panels, and 12 local point lights. The current scene generator creates approximately 160 entities, depending on future changes.
 
 ## Test matrix
 
