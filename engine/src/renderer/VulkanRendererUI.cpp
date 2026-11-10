@@ -123,13 +123,15 @@ namespace engine::renderer {
         return hypotf(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
     }
 
-    void VulkanRenderer::drawPerformanceProfilerPanel() {
+    void VulkanRenderer::drawPerformanceProfilerPanel(core::Engine* engine) {
         if (!m_showPerformanceProfiler) return;
 
         const nlohmann::json stats = core::Profiler::get().getStatsJson();
         const double fps = static_cast<double>(ImGui::GetIO().Framerate);
         const double loopFrameMs = stats.value("frameTimeMs", 0.0);
         const double gpuFrameMs = stats.value("gpuTimeMs", 0.0);
+        const nlohmann::json engineStats = engine ? engine->getProfilerStats() : nlohmann::json::object();
+        const nlohmann::json metrics = stats.value("metrics", nlohmann::json::object());
 
         double renderCpuMs = 0.0;
         double updateCpuMs = 0.0;
@@ -193,10 +195,22 @@ namespace engine::renderer {
             ImGui::SeparatorText("FRAME TIME HISTORY");
             ImGui::TextDisabled("Last %zu samples | CPU: Vulkan render submission | GPU: full render command buffer", historyCount);
             if (historyCount > 1) {
+                float cpuPlotMax = 0.10f;
+                float gpuPlotMax = 0.10f;
+                for (size_t i = 0; i < historyCount; ++i) {
+                    cpuPlotMax = std::max(cpuPlotMax, cpuHistory[i]);
+                    gpuPlotMax = std::max(gpuPlotMax, gpuHistory[i]);
+                }
+                cpuPlotMax *= 1.15f;
+                gpuPlotMax *= 1.15f;
                 ImGui::PlotLines("CPU##RenderCpuHistory", cpuHistory.data(), static_cast<int>(historyCount),
-                    0, nullptr, 0.0f, FLT_MAX, ImVec2(-1.0f, 72.0f));
-                ImGui::PlotLines("GPU##RenderGpuHistory", gpuHistory.data(), static_cast<int>(historyCount),
-                    0, nullptr, 0.0f, FLT_MAX, ImVec2(-1.0f, 72.0f));
+                    0, nullptr, 0.0f, cpuPlotMax, ImVec2(-1.0f, 72.0f));
+                if (m_timestampQueryPool) {
+                    ImGui::PlotLines("GPU##RenderGpuHistory", gpuHistory.data(), static_cast<int>(historyCount),
+                        0, nullptr, 0.0f, gpuPlotMax, ImVec2(-1.0f, 72.0f));
+                } else {
+                    ImGui::TextDisabled("GPU timestamp queries are unavailable on this queue.");
+                }
             } else {
                 ImGui::TextDisabled("Collecting samples...");
             }
@@ -249,6 +263,15 @@ namespace engine::renderer {
             ImGui::Text("Render resolution: %u x %u", m_width, m_height);
             ImGui::Text("GPU timestamp queries: %s",
                 m_timestampQueryPool ? "Supported and active" : "Unavailable on selected graphics queue");
+            ImGui::Text("Scene entities: %llu   |   Draw items: %.0f   |   RT instances: %.0f",
+                static_cast<unsigned long long>(engineStats.value("activeEntities", uint64_t{0})),
+                metrics.value("drawItems", 0.0),
+                metrics.value("rtInstances", 0.0));
+            if (engineStats.contains("loadedCells")) {
+                ImGui::Text("World cells: %llu / %llu",
+                    static_cast<unsigned long long>(engineStats.value("loadedCells", uint64_t{0})),
+                    static_cast<unsigned long long>(engineStats.value("totalCells", uint64_t{0})));
+            }
             ImGui::Text("Update CPU: %.3f ms   |   Animation / Skinning CPU: %.3f ms",
                 updateCpuMs, animationCpuMs);
             ImGui::TextDisabled("GPU time is the previous completed frame; CPU scopes are also one frame behind.");
@@ -1329,7 +1352,7 @@ namespace engine::renderer {
                 s_engineNotification, s_engineNotificationTimer
             };
             drawEditorPreferencesPanel(engine, preferencesUiState, screenW, screenH);
-            drawPerformanceProfilerPanel();
+            drawPerformanceProfilerPanel(engine);
 
             if (s_engineNotificationTimer > 0.0f) {
                 s_engineNotificationTimer -= ImGui::GetIO().DeltaTime;
