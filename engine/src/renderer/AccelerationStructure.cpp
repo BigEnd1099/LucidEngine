@@ -139,7 +139,8 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, con
         hostBarrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
         hostBarrier.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
         hostBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-        hostBarrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        hostBarrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                                    VK_ACCESS_2_SHADER_READ_BIT;
         VkDependencyInfo hostDep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
         hostDep.memoryBarrierCount = 1;
         hostDep.pMemoryBarriers = &hostBarrier;
