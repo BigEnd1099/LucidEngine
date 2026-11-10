@@ -321,6 +321,11 @@
     "details.simulation_readonly": "Inspektor jest tylko do odczytu podczas symulacji.",
     "script.discard_message": "Ten skrypt zawiera niezastosowane zmiany. Odrzucić je i zamknąć Script Studio?",
     "script.discard": "Odrzuć",
-    "script.keep_editing": "Kontynuuj edycję"
+    "script.keep_editing": "Kontynuuj edycję",
+    "ui.asset_unknown_type": "Nieznany typ",
+    "ui.copy_asset_path": "Kopiuj ścieżkę",
+    "ui.asset_size_unavailable": "Rozmiar niedostępny",
+    "ui.asset_size": "Rozmiar",
+    "ui.asset_select_hint": "Wybierz plik, aby zobaczyć jego metadane."
   }
 }
