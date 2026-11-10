@@ -531,13 +531,18 @@ namespace engine::renderer {
                 ImGui::TableNextRow();
                 metric("GI samples / frame", metrics.value("rtGiSamples", 0.0), "samples");
                 metric("GI bounces", metrics.value("rtGiBounces", 0.0), "bounces");
-                metric("GI internal resolution", metrics.value("rtGiWidth", 0.0), "px wide");
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("GI internal resolution");
+                ImGui::Text("%.0f x %.0f px", metrics.value("rtGiWidth", 0.0), metrics.value("rtGiHeight", 0.0));
                 metric("History capacity", metrics.value("rtMaxHistory", 0.0), "frames");
                 ImGui::TableNextRow();
                 metric("Spatial filter strength", metrics.value("rtSpatialStrength", 0.0), "");
                 metric("Reflection samples", metrics.value("rtReflectionSamples", 0.0), "samples");
                 metric("SVGF", metrics.value("rtSvgfEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("GI history", metrics.value("rtGiHistoryValid", 0.0) > 0.5 ? 1.0 : 0.0, "valid");
+                ImGui::TableNextRow();
+                metric("GI checkerboard", metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("RT denoiser CPU", averageCpuScope("RT Denoiser Command Recording"), "ms");
                 ImGui::EndTable();
             }
 
