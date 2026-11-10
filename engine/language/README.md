@@ -23,7 +23,7 @@ Each catalog contains locale metadata and a `translations` object:
 }
 ```
 
-The current migration layer uses the English source phrase as the lookup key so existing editor panels can be moved to external catalogs incrementally. New localization work should keep the English phrase as the key in every catalog and provide a translated value for each locale.
+Each UI string uses a stable key (for example, `ui.file`) that is independent of the displayed wording. Keep the same keys in every catalog; English is the canonical source language. This allows translations to change without changing C++ code.
 
 If a key is missing, the UI falls back to its English source string (or the legacy Polish fallback while older panel code is being migrated). If a locale file cannot be loaded, the editor falls back to English.
 
