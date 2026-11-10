@@ -163,10 +163,19 @@ namespace engine::renderer {
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
             std::array<double, 20> effectStages{};
+            std::array<double, 48> rtDiagnostics{};
             std::unordered_map<std::string, double> cpuScopes;
         };
         static std::deque<ProfilerWindowSample> oneSecondSamples;
         static uint64_t lastWindowFrame = UINT64_MAX;
+        static constexpr const char* rtDiagnosticMetricNames[48] = {
+            "rtGiPixels", "rtGiHistoryAccepted", "rtGiHistoryRejected", "rtGiOutOfBounds", "rtGiDepthRejected", "rtGiNormalRejected", "rtGiCheckerboardReuse", "rtGiSpatialFallback",
+            "rtReflectionPixels", "rtReflectionHistoryAccepted", "rtReflectionHistoryRejected", "rtReflectionOutOfBounds", "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback",
+            "rtGiHistoryAgeBin00", "rtGiHistoryAgeBin01", "rtGiHistoryAgeBin02", "rtGiHistoryAgeBin03", "rtGiHistoryAgeBin04", "rtGiHistoryAgeBin05", "rtGiHistoryAgeBin06", "rtGiHistoryAgeBin07",
+            "rtGiHistoryAgeBin08", "rtGiHistoryAgeBin09", "rtGiHistoryAgeBin10", "rtGiHistoryAgeBin11", "rtGiHistoryAgeBin12", "rtGiHistoryAgeBin13", "rtGiHistoryAgeBin14", "rtGiHistoryAgeBin15",
+            "rtReflectionHistoryAgeBin00", "rtReflectionHistoryAgeBin01", "rtReflectionHistoryAgeBin02", "rtReflectionHistoryAgeBin03", "rtReflectionHistoryAgeBin04", "rtReflectionHistoryAgeBin05", "rtReflectionHistoryAgeBin06", "rtReflectionHistoryAgeBin07",
+            "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11", "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15"
+        };
 
         const uint64_t frameCounter = stats.value("frameCounter", uint64_t{0});
         const double nowSeconds = ImGui::GetTime();
@@ -199,6 +208,8 @@ namespace engine::renderer {
             };
             for (size_t i = 0; i < sample.effectStages.size(); ++i)
                 sample.effectStages[i] = metrics.value(effectMetricNames[i], 0.0);
+            for (size_t i = 0; i < sample.rtDiagnostics.size(); ++i)
+                sample.rtDiagnostics[i] = metrics.value(rtDiagnosticMetricNames[i], 0.0);
 
             if (cpuStats.is_object()) {
                 for (auto it = cpuStats.begin(); it != cpuStats.end(); ++it)
@@ -264,6 +275,22 @@ namespace engine::renderer {
         std::array<double, 20> avgEffectStages{};
         for (size_t i = 0; i < avgEffectStages.size(); ++i) {
             avgEffectStages[i] = average([i](const ProfilerWindowSample& s) { return s.effectStages[i]; });
+        }
+        std::array<double, 48> avgRtDiagnostics{};
+        for (size_t i = 0; i < avgRtDiagnostics.size(); ++i) {
+            avgRtDiagnostics[i] = average([i](const ProfilerWindowSample& s) { return s.rtDiagnostics[i]; });
+        }
+        auto historyAcceptedPercent = [&](size_t offset) -> double {
+            const double accepted = avgRtDiagnostics[offset + 1];
+            const double rejected = avgRtDiagnostics[offset + 2];
+            const double total = accepted + rejected;
+            return total > 0.0 ? accepted * 100.0 / total : 0.0;
+        };
+        std::array<float, 16> giHistoryAgeBins{};
+        std::array<float, 16> reflectionHistoryAgeBins{};
+        for (size_t i = 0; i < 16; ++i) {
+            giHistoryAgeBins[i] = static_cast<float>(avgRtDiagnostics[16 + i]);
+            reflectionHistoryAgeBins[i] = static_cast<float>(avgRtDiagnostics[32 + i]);
         }
 
         const uint64_t registryEntities = engineStats.value("registryEntities", uint64_t{0});
@@ -419,6 +446,25 @@ namespace engine::renderer {
                 report << "RT inclusive stage times include the following dependency barrier; dispatch and dependency-gap values are also listed separately.\n";
                 report << "Dependency-gap timestamps are GPU scheduling intervals around barriers, not direct measurements of barrier instruction cost.\n";
                 report << "RT quality telemetry is observational and does not modify renderer settings.\n";
+                report << "\n[RT TEMPORAL DIAGNOSTICS - 1s AVERAGE]\n";
+                report << "Counters are average increments per rendered frame over the capture window.\n";
+                report << "GI pixels: " << avgRtDiagnostics[0] << " | accepted: " << avgRtDiagnostics[1]
+                       << " | rejected: " << avgRtDiagnostics[2] << " | acceptance: " << historyAcceptedPercent(0) << "%\n";
+                report << "GI out-of-bounds: " << avgRtDiagnostics[3] << " | depth rejected: " << avgRtDiagnostics[4]
+                       << " | normal rejected: " << avgRtDiagnostics[5] << " | checkerboard reuse: " << avgRtDiagnostics[6]
+                       << " | spatial fallback: " << avgRtDiagnostics[7] << "\n";
+                report << "Reflection pixels: " << avgRtDiagnostics[8] << " | accepted: " << avgRtDiagnostics[9]
+                       << " | rejected: " << avgRtDiagnostics[10] << " | acceptance: " << historyAcceptedPercent(8) << "%\n";
+                report << "Reflection out-of-bounds: " << avgRtDiagnostics[11] << " | depth rejected: " << avgRtDiagnostics[12]
+                       << " | normal rejected: " << avgRtDiagnostics[13] << " | checkerboard reuse: " << avgRtDiagnostics[14]
+                       << " | spatial fallback: " << avgRtDiagnostics[15] << "\n";
+                report << "GI history age histogram (normalized bins 0-15; counts/frame):\n";
+                for (size_t i = 0; i < 16; ++i)
+                    report << "  Bin " << std::setw(2) << std::setfill('0') << i << ": " << avgRtDiagnostics[16 + i] << "\n";
+                report << "Reflection history age histogram (normalized bins 0-15; counts/frame):\n";
+                for (size_t i = 0; i < 16; ++i)
+                    report << "  Bin " << std::setw(2) << std::setfill('0') << i << ": " << avgRtDiagnostics[32 + i] << "\n";
+                report << std::setfill(' ');
                 report << "Loop frame time includes engine frame pacing/sleep; editor FPS uses ImGui frame delta.\n";
                 ImGui::SetClipboardText(report.str().c_str());
             }
@@ -604,6 +650,36 @@ namespace engine::renderer {
                 metric("RT debug mode ID", metrics.value("rtDebugMode", 0.0), "");
                 ImGui::EndTable();
             }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("RT TEMPORAL REUSE / HISTORY AGE (1s AVERAGE)");
+            if (ImGui::BeginTable("##RtTemporalDiagnostics", 4,
+                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableNextRow();
+                metric("GI accepted", avgRtDiagnostics[1], "px/frame");
+                metric("GI rejected", avgRtDiagnostics[2], "px/frame");
+                metric("GI acceptance", historyAcceptedPercent(0), "%", avgRtDiagnostics[1] + avgRtDiagnostics[2] > 0.0);
+                metric("GI checkerboard reuse", avgRtDiagnostics[6], "px/frame");
+                ImGui::TableNextRow();
+                metric("Reflection accepted", avgRtDiagnostics[9], "px/frame");
+                metric("Reflection rejected", avgRtDiagnostics[10], "px/frame");
+                metric("Reflection acceptance", historyAcceptedPercent(8), "%", avgRtDiagnostics[9] + avgRtDiagnostics[10] > 0.0);
+                metric("Reflection checkerboard reuse", avgRtDiagnostics[14], "px/frame");
+                ImGui::TableNextRow();
+                metric("GI depth rejected", avgRtDiagnostics[4], "px/frame");
+                metric("GI normal rejected", avgRtDiagnostics[5], "px/frame");
+                metric("Reflection depth rejected", avgRtDiagnostics[12], "px/frame");
+                metric("Reflection normal rejected", avgRtDiagnostics[13], "px/frame");
+                ImGui::EndTable();
+            }
+            ImGui::TextDisabled("History age distribution (normalized bins 0-15; average counter increments/frame)");
+            const float giHistoryPlotMax = std::max(1.0f, *std::max_element(giHistoryAgeBins.begin(), giHistoryAgeBins.end())) * 1.10f;
+            const float reflectionHistoryPlotMax = std::max(1.0f, *std::max_element(reflectionHistoryAgeBins.begin(), reflectionHistoryAgeBins.end())) * 1.10f;
+            ImGui::TextUnformatted("Diffuse GI");
+            ImGui::PlotHistogram("##GiHistoryAgeHistogram", giHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, giHistoryPlotMax, ImVec2(-1.0f, 58.0f));
+            ImGui::TextUnformatted("Reflections");
+            ImGui::PlotHistogram("##ReflectionHistoryAgeHistogram", reflectionHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, reflectionHistoryPlotMax, ImVec2(-1.0f, 58.0f));
+            ImGui::TextDisabled("All 48 counters and exact histogram bin values are included in the copied report.");
 
             ImGui::Spacing();
             ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
