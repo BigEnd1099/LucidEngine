@@ -44,6 +44,8 @@ namespace engine::core {
     uint32_t AssetManager::loadGLTF(const std::string& path) {
         m_lastImportedInstances.clear();
         m_lastImportedNodes.clear();
+        m_lastImportedSkins.clear();
+        m_lastImportedAnimations.clear();
         try {
             fastgltf::Parser parser;
             auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
@@ -376,11 +378,100 @@ namespace engine::core {
             m_nextTextureId = nextTextureCheckpoint;
             m_lastImportedInstances.clear();
             m_lastImportedNodes.clear();
+            m_lastImportedSkins.clear();
+            m_lastImportedAnimations.clear();
         };
         try {
             uint32_t rootMeshId = 0;
-            
+
             if (asset.meshes.empty()) return 0;
+
+            // Preserve skin definitions and inverse-bind matrices for runtime animation.
+            m_lastImportedSkins.reserve(asset.skins.size());
+            for (size_t skinIndex = 0; skinIndex < asset.skins.size(); ++skinIndex) {
+                const auto& sourceSkin = asset.skins[skinIndex];
+                SkinAsset skin;
+                skin.id = static_cast<uint32_t>(skinIndex + 1);
+                skin.name = sourceSkin.name.empty() ? ("Skin_" + std::to_string(skinIndex)) : std::string(sourceSkin.name);
+                if (sourceSkin.skeleton.has_value())
+                    skin.skeletonNodeIndex = static_cast<int64_t>(sourceSkin.skeleton.value());
+                skin.jointNodeIndices.assign(sourceSkin.joints.begin(), sourceSkin.joints.end());
+                skin.inverseBindMatrices.assign(skin.jointNodeIndices.size(), glm::mat4(1.0f));
+                if (sourceSkin.inverseBindMatrices.has_value() &&
+                    sourceSkin.inverseBindMatrices.value() < asset.accessors.size()) {
+                    size_t matrixIndex = 0;
+                    fastgltf::iterateAccessor<fastgltf::math::fmat4x4>(
+                        asset, asset.accessors[sourceSkin.inverseBindMatrices.value()],
+                        [&](const fastgltf::math::fmat4x4& matrix) {
+                            if (matrixIndex >= skin.inverseBindMatrices.size()) return;
+                            glm::mat4 converted(1.0f);
+                            for (int column = 0; column < 4; ++column)
+                                for (int row = 0; row < 4; ++row)
+                                    converted[column][row] = static_cast<float>(matrix[column][row]);
+                            skin.inverseBindMatrices[matrixIndex++] = converted;
+                        });
+                }
+                m_lastImportedSkins.push_back(std::move(skin));
+            }
+
+            // Keep animation channels in a renderer-independent representation so they can
+            // be sampled later without retaining pointers into fastgltf's temporary Asset.
+            m_lastImportedAnimations.reserve(asset.animations.size());
+            for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex) {
+                const auto& sourceAnimation = asset.animations[animationIndex];
+                ImportedAnimationClip clip;
+                clip.name = sourceAnimation.name.empty()
+                    ? ("Animation_" + std::to_string(animationIndex)) : std::string(sourceAnimation.name);
+                for (const auto& channel : sourceAnimation.channels) {
+                    if (!channel.nodeIndex.has_value() || channel.samplerIndex >= sourceAnimation.samplers.size())
+                        continue;
+                    const auto& sampler = sourceAnimation.samplers[channel.samplerIndex];
+                    if (sampler.inputAccessor >= asset.accessors.size() ||
+                        sampler.outputAccessor >= asset.accessors.size()) continue;
+
+                    ImportedAnimationTrack track;
+                    track.nodeIndex = channel.nodeIndex.value();
+                    track.path = static_cast<uint8_t>(channel.path);
+                    track.interpolation = static_cast<uint8_t>(sampler.interpolation);
+                    fastgltf::iterateAccessor<float>(asset, asset.accessors[sampler.inputAccessor],
+                        [&](float time) {
+                            track.keyframeTimes.push_back(time);
+                            clip.duration = std::max(clip.duration, time);
+                        });
+
+                    const auto& outputAccessor = asset.accessors[sampler.outputAccessor];
+                    if (outputAccessor.type == fastgltf::AccessorType::Vec3) {
+                        fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, outputAccessor,
+                            [&](const fastgltf::math::fvec3& value) {
+                                track.values.insert(track.values.end(), {
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2])});
+                            });
+                    } else if (outputAccessor.type == fastgltf::AccessorType::Vec4) {
+                        fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, outputAccessor,
+                            [&](const fastgltf::math::fvec4& value) {
+                                track.values.insert(track.values.end(), {
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), static_cast<float>(value[3])});
+                            });
+                    } else if (outputAccessor.type == fastgltf::AccessorType::Scalar) {
+                        fastgltf::iterateAccessor<float>(asset, outputAccessor,
+                            [&](float value) { track.values.push_back(value); });
+                    } else {
+                        core::Logger::warn("AssetManager: skipping animation channel with unsupported output accessor type");
+                        continue;
+                    }
+
+                    const size_t splineMultiplier = sampler.interpolation == fastgltf::AnimationInterpolation::CubicSpline ? 3u : 1u;
+                    const size_t keyCount = track.keyframeTimes.size() * splineMultiplier;
+                    if (keyCount > 0)
+                        track.componentsPerKey = static_cast<uint32_t>(track.values.size() / keyCount);
+                    if (!track.keyframeTimes.empty() && !track.values.empty())
+                        clip.tracks.push_back(std::move(track));
+                }
+                if (!clip.tracks.empty())
+                    m_lastImportedAnimations.push_back(std::move(clip));
+            }
+
             // Decode/upload glTF images lazily and cache by source image + color space.
             // Base-color/emissive data is sRGB; normal/metallic-roughness/occlusion is linear.
             std::unordered_map<uint64_t, uint32_t> gltfTextureCache;
@@ -607,6 +698,31 @@ namespace engine::core {
             meshAsset->id = m_nextMeshId++;
             meshAsset->vertexCount = vertices.size();
             meshAsset->indexCount = indices.size();
+
+            // Preserve all morph target deltas on CPU. They are indexed per primitive
+            // and can be uploaded to a dedicated deformation stream by the animation renderer.
+            for (const auto& targetAttributes : primitive.targets) {
+                ImportedMorphTarget target;
+                auto readTargetVector = [&](const char* semantic, std::vector<glm::vec3>& destination) {
+                    for (const auto& attribute : targetAttributes) {
+                        if (attribute.name != semantic || attribute.accessorIndex >= asset.accessors.size()) continue;
+                        destination.assign(vertices.size(), glm::vec3(0.0f));
+                        size_t targetIndex = 0;
+                        fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute.accessorIndex],
+                            [&](const fastgltf::math::fvec3& value) {
+                                if (targetIndex < destination.size())
+                                    destination[targetIndex] = glm::vec3(
+                                        static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                ++targetIndex;
+                            });
+                        break;
+                    }
+                };
+                readTargetVector("POSITION", target.positionDeltas);
+                readTargetVector("NORMAL", target.normalDeltas);
+                readTargetVector("TANGENT", target.tangentDeltas);
+                meshAsset->morphTargets.push_back(std::move(target));
+            }
             
             try {
                 uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(),
@@ -702,8 +818,21 @@ namespace engine::core {
                     const size_t importedNodePosition = m_lastImportedNodes.size();
                     importedNode.parentNodeIndex = parentNodeIndex;
                     importedNode.name = node.name.empty() ? ("Node_" + std::to_string(nodeIndex)) : std::string(node.name);
-                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size())
+                    if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
                         importedNode.meshIds = importedMeshIds[node.meshIndex.value()];
+                        if (!node.weights.empty()) {
+                            importedNode.morphWeights.reserve(node.weights.size());
+                            for (auto weight : node.weights)
+                                importedNode.morphWeights.push_back(static_cast<float>(weight));
+                        } else if (node.meshIndex.value() < asset.meshes.size()) {
+                            const auto& defaultWeights = asset.meshes[node.meshIndex.value()].weights;
+                            importedNode.morphWeights.reserve(defaultWeights.size());
+                            for (auto weight : defaultWeights)
+                                importedNode.morphWeights.push_back(static_cast<float>(weight));
+                        }
+                    }
+                    if (node.skinIndex.has_value() && node.skinIndex.value() < m_lastImportedSkins.size())
+                        importedNode.skinId = m_lastImportedSkins[node.skinIndex.value()].id;
 
                     glm::vec3 skew(0.0f), localTranslation(0.0f), localScale(1.0f);
                     glm::vec4 perspective(0.0f);
