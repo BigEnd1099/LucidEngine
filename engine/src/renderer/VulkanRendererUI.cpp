@@ -162,7 +162,7 @@ namespace engine::renderer {
             double drawItems{0.0};
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
-            std::array<double, 9> effectStages{};
+            std::array<double, 19> effectStages{};
             std::unordered_map<std::string, double> cpuScopes;
         };
         static std::deque<ProfilerWindowSample> oneSecondSamples;
@@ -192,7 +192,10 @@ namespace engine::renderer {
             const char* effectMetricNames[] = {
                 "gpuScreenSpaceAoGiMs", "gpuScreenSpaceBlurMs",
                 "rtGiTraceMs", "rtGiTemporalMs", "rtGiAtrous0Ms", "rtGiAtrous1Ms",
-                "rtReflectionTraceMs", "rtReflectionTemporalMs", "rtComputeTotalMs"
+                "rtReflectionTraceMs", "rtReflectionTemporalMs", "rtComputeTotalMs",
+                "rtGiTraceExecMs", "rtGiTraceSyncMs", "rtGiTemporalExecMs", "rtGiTemporalSyncMs",
+                "rtGiAtrous0ExecMs", "rtGiAtrous0SyncMs", "rtReflectionTraceExecMs",
+                "rtReflectionTraceSyncMs", "rtReflectionTemporalExecMs", "rtReflectionTemporalSyncMs"
             };
             for (size_t i = 0; i < sample.effectStages.size(); ++i)
                 sample.effectStages[i] = metrics.value(effectMetricNames[i], 0.0);
@@ -343,8 +346,13 @@ namespace engine::renderer {
                 report << "\n[SCREEN-SPACE AND RT SUBPASSES - 1s AVERAGE]\n";
                 const char* effectStageLabels[] = {
                     "GTAO + SSGI main shader", "GTAO/SSGI bilateral blur",
-                    "RT indirect GI/AO trace", "RT indirect temporal", "RT indirect a-trous 0", "RT indirect a-trous 1",
-                    "RT reflections trace", "RT reflections temporal", "RT compute total (inclusive)"
+                    "RT GI/AO trace (inclusive)", "RT GI temporal (inclusive)", "RT GI a-trous 0 (inclusive)", "RT GI a-trous 1",
+                    "RT reflections trace (inclusive)", "RT reflections temporal (inclusive)", "RT compute total (inclusive)",
+                    "RT GI trace dispatch", "RT GI trace dependency gap",
+                    "RT GI temporal dispatch", "RT GI temporal dependency gap",
+                    "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
+                    "RT reflections trace dispatch", "RT reflections trace dependency gap",
+                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i)
                     report << effectStageLabels[i] << ": " << avgEffectStages[i] << " ms\n";
@@ -353,6 +361,18 @@ namespace engine::renderer {
                 report << "RT GI enabled: " << (metrics.value("rtGiEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "RT AO enabled: " << (metrics.value("rtAoEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "RT reflections enabled: " << (metrics.value("rtReflectionsEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "\n[RT QUALITY / TEMPORAL HISTORY]\n";
+                report << "GI samples per frame: " << metrics.value("rtGiSamples", 0.0) << "\n";
+                report << "GI bounces: " << metrics.value("rtGiBounces", 0.0) << "\n";
+                report << "GI internal resolution: " << metrics.value("rtGiWidth", 0.0) << " x "
+                       << metrics.value("rtGiHeight", 0.0) << "\n";
+                report << "Temporal history capacity: " << metrics.value("rtMaxHistory", 0.0) << "\n";
+                report << "Spatial filter strength: " << metrics.value("rtSpatialStrength", 0.0) << "\n";
+                report << "SVGF enabled: " << (metrics.value("rtSvgfEnabled", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "GI checkerboard: " << (metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "GI history valid at frame start: " << (metrics.value("rtGiHistoryValid", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection samples: " << metrics.value("rtReflectionSamples", 0.0) << "\n";
+                report << "RT denoiser CPU command recording: " << averageCpuScope("RT Denoiser Command Recording") << " ms\n";
                 report << "\n[SCENE]\n";
                 report << "Registry entities: " << registryEntities << "\n";
                 report << "Mesh entities: " << meshEntities << "\n";
@@ -368,6 +388,9 @@ namespace engine::renderer {
                 report << "GPU timestamps refer to the previous completed command buffer.\n";
                 report << "Screen-space and RT subpass timings are nested inside the AO + RT aggregate; do not add them to the aggregate.\n";
                 report << "GTAO and SSGI share one fragment shader pass and are reported together.\n";
+                report << "RT inclusive stage times include the following dependency barrier; dispatch and dependency-gap values are also listed separately.\n";
+                report << "Dependency-gap timestamps are GPU scheduling intervals around barriers, not direct measurements of barrier instruction cost.\n";
+                report << "RT quality telemetry is observational and does not modify renderer settings.\n";
                 report << "Loop frame time includes engine frame pacing/sleep; editor FPS uses ImGui frame delta.\n";
                 ImGui::SetClipboardText(report.str().c_str());
             }
@@ -483,8 +506,13 @@ namespace engine::renderer {
                 ImGui::TableHeadersRow();
                 const char* effectStageLabels[] = {
                     "GTAO + SSGI main shader", "GTAO/SSGI bilateral blur",
-                    "RT GI trace", "RT GI temporal", "RT GI a-trous 0", "RT GI a-trous 1",
-                    "RT reflections trace", "RT reflections temporal", "RT compute total (inclusive)"
+                    "RT GI/AO trace (inclusive)", "RT GI temporal (inclusive)", "RT GI a-trous 0 (inclusive)", "RT GI a-trous 1",
+                    "RT reflections trace (inclusive)", "RT reflections temporal (inclusive)", "RT compute total (inclusive)",
+                    "RT GI trace dispatch", "RT GI trace dependency gap",
+                    "RT GI temporal dispatch", "RT GI temporal dependency gap",
+                    "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
+                    "RT reflections trace dispatch", "RT reflections trace dependency gap",
+                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i) {
                     ImGui::TableNextRow();
@@ -493,6 +521,23 @@ namespace engine::renderer {
                     ImGui::TableNextColumn();
                     ImGui::Text("%.3f ms", avgEffectStages[i]);
                 }
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("RT QUALITY / TEMPORAL HISTORY");
+            if (ImGui::BeginTable("##RtQualityDiagnostics", 4,
+                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableNextRow();
+                metric("GI samples / frame", metrics.value("rtGiSamples", 0.0), "samples");
+                metric("GI bounces", metrics.value("rtGiBounces", 0.0), "bounces");
+                metric("GI internal resolution", metrics.value("rtGiWidth", 0.0), "px wide");
+                metric("History capacity", metrics.value("rtMaxHistory", 0.0), "frames");
+                ImGui::TableNextRow();
+                metric("Spatial filter strength", metrics.value("rtSpatialStrength", 0.0), "");
+                metric("Reflection samples", metrics.value("rtReflectionSamples", 0.0), "samples");
+                metric("SVGF", metrics.value("rtSvgfEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("GI history", metrics.value("rtGiHistoryValid", 0.0) > 0.5 ? 1.0 : 0.0, "valid");
                 ImGui::EndTable();
             }
 
