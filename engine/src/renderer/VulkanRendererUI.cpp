@@ -372,6 +372,14 @@ namespace engine::renderer {
                 report << "GI checkerboard: " << (metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "GI history valid at frame start: " << (metrics.value("rtGiHistoryValid", 0.0) > 0.5 ? "yes" : "no") << "\n";
                 report << "Reflection samples: " << metrics.value("rtReflectionSamples", 0.0) << "\n";
+                report << "Reflection bounces: " << metrics.value("rtReflectionBounces", 0.0) << "\n";
+                report << "Reflection infinite bounces: " << (metrics.value("rtReflectionInfiniteBounces", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection max roughness: " << metrics.value("rtReflectionMaxRoughness", 0.0) << "\n";
+                report << "Reflection checkerboard: " << (metrics.value("rtReflectionCheckerboard", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection stochastic lights: " << (metrics.value("rtReflectionStochasticLights", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection LOD bias: " << (metrics.value("rtReflectionLodBias", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "Reflection half resolution: " << (metrics.value("rtReflectionHalfRes", 0.0) > 0.5 ? "yes" : "no") << "\n";
+                report << "RT debug mode id: " << metrics.value("rtDebugMode", 0.0) << "\n";
                 report << "RT denoiser CPU command recording: " << averageCpuScope("RT Denoiser Command Recording") << " ms\n";
                 report << "\n[SCENE]\n";
                 report << "Registry entities: " << registryEntities << "\n";
@@ -543,6 +551,16 @@ namespace engine::renderer {
                 ImGui::TableNextRow();
                 metric("GI checkerboard", metrics.value("rtGiCheckerboard", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("RT denoiser CPU", averageCpuScope("RT Denoiser Command Recording"), "ms");
+                ImGui::TableNextRow();
+                metric("Reflection bounces", metrics.value("rtReflectionBounces", 0.0), "bounces");
+                metric("Reflection max roughness", metrics.value("rtReflectionMaxRoughness", 0.0), "");
+                metric("Reflection checkerboard", metrics.value("rtReflectionCheckerboard", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Reflection half res", metrics.value("rtReflectionHalfRes", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                ImGui::TableNextRow();
+                metric("Stochastic lights", metrics.value("rtReflectionStochasticLights", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Reflection LOD bias", metrics.value("rtReflectionLodBias", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Infinite reflection bounces", metrics.value("rtReflectionInfiniteBounces", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("RT debug mode ID", metrics.value("rtDebugMode", 0.0), "");
                 ImGui::EndTable();
             }
 
