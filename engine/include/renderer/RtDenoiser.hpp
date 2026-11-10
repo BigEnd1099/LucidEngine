@@ -38,7 +38,7 @@ namespace engine::renderer {
             bool      reflectionCheckerboard{true};
             bool      reflectionStochasticLights{true};
             bool      reflectionLodBias{true};
-            bool      reflectionHalfRes{false};
+            bool      reflectionHalfRes{true};
         };
 
         struct GpuTimings {
