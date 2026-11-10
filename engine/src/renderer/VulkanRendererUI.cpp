@@ -468,6 +468,48 @@ namespace engine::renderer {
             const ImVec2 vSize = ImGui::GetItemRectSize();
             const bool isHovered = ImGui::IsItemHovered();
             const bool isWindowFocused = ImGui::IsWindowFocused();
+
+            // Content Drawer -> Viewport: import glTF/GLB files as new scene actors.
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LUCID_ASSET_PATH")) {
+                    if (payload->Data && payload->DataSize > 1) {
+                        const char* rawPath = static_cast<const char*>(payload->Data);
+                        const char* pathEnd = static_cast<const char*>(std::memchr(rawPath, '\0', static_cast<size_t>(payload->DataSize)));
+                        if (pathEnd && ! (engine && engine->isSimulationSessionActive()) && assetManager) {
+                            const std::filesystem::path droppedPath(std::string(rawPath, pathEnd));
+                            std::string extension = droppedPath.extension().string();
+                            std::transform(extension.begin(), extension.end(), extension.begin(),
+                                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                            std::error_code dropError;
+                            const bool supportedModel = extension == ".gltf" || extension == ".glb";
+                            const bool fileExists = std::filesystem::is_regular_file(droppedPath, dropError) && !dropError;
+                            if (supportedModel && fileExists) {
+                                const uint32_t meshId = assetManager->loadGLTF(droppedPath.string());
+                                if (assetManager->getMesh(meshId)) {
+                                    const entt::entity newEntity = registry.createEntity();
+                                    const std::string actorName = droppedPath.stem().string().empty()
+                                        ? std::string("ImportedModel") : droppedPath.stem().string();
+                                    registry.get().emplace<ecs::TagComponent>(newEntity, ecs::TagComponent{actorName});
+                                    registry.get().emplace<ecs::TransformComponent>(
+                                        newEntity, ecs::TransformComponent{camPos + front * 5.0f, glm::vec3(0.0f), glm::vec3(1.0f)});
+                                    registry.get().emplace<ecs::MeshComponent>(newEntity, ecs::MeshComponent{meshId});
+                                    selectedEnt = newEntity;
+                                    if (engine) engine->setSelectedEntity(newEntity);
+                                    core::Logger::info("Imported model into viewport: " + droppedPath.string());
+                                } else {
+                                    core::Logger::error("Viewport drop failed to import model: " + droppedPath.string());
+                                }
+                            } else if (!supportedModel) {
+                                core::Logger::warn("Viewport drop supports .gltf and .glb models only: " + droppedPath.string());
+                            } else {
+                                core::Logger::error("Viewport drop file is no longer available: " + droppedPath.string());
+                            }
+                        }
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
             const ImVec2 mousePos = ImGui::GetIO().MousePos;
             ImDrawList* drawList = ImGui::GetWindowDrawList();
 
