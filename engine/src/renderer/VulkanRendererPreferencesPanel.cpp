@@ -19,7 +19,8 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                 ImGui::SetNextWindowSizeConstraints(
                     ImVec2(std::min(360.0f * state.uiScale, screenW), std::min(240.0f * state.uiScale, screenH)),
                     ImVec2(screenW, screenH));
-                if (ImGui::Begin(editorText("script.studio_title", "Blueprints / QuickJS Script Studio"), &state.showScriptStudio)) {
+                const std::string scriptStudioTitle = std::string(editorText("script.studio_title", "Blueprints / QuickJS Script Studio")) + "###QuickJSScriptStudio";
+                if (ImGui::Begin(scriptStudioTitle.c_str(), &state.showScriptStudio)) {
                     static char scriptBuf[16384] = "";
                     static bool s_scriptInit = false;
                     static bool s_scriptDirty = false;
