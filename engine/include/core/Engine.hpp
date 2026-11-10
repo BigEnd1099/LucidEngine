@@ -114,6 +114,7 @@ namespace engine::core {
         void setPaused(bool paused);
         void playSimulation();
         void stopSimulation();
+        void restartSimulation();
         void togglePause();
         bool isPaused() const { return m_paused; }
         void broadcastSimulationState();
@@ -146,6 +147,10 @@ namespace engine::core {
             m_camYaw = yaw;
             m_camPitch = pitch;
             m_camFov = fov;
+        }
+        renderer::VulkanRenderer* getRenderer() { return m_renderer.get(); }
+        void invalidateMaterialDescriptor(uint32_t materialId = 0) {
+            if (m_renderer) m_renderer->invalidateMaterialDescriptorSet(materialId);
         }
         void invalidateRtHistory() {
             if (m_renderer) m_renderer->invalidateRtHistory();

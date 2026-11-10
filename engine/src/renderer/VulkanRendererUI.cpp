@@ -144,21 +144,145 @@ namespace engine::renderer {
         };
 
         if (m_standaloneGameMode) {
+            // Forward gameplay controls in standalone mode
+            if (engine) {
+                engine->setKeyInput("KeyW", ImGui::IsKeyDown(ImGuiKey_W));
+                engine->setKeyInput("KeyS", ImGui::IsKeyDown(ImGuiKey_S));
+                engine->setKeyInput("KeyA", ImGui::IsKeyDown(ImGuiKey_A));
+                engine->setKeyInput("KeyD", ImGui::IsKeyDown(ImGuiKey_D));
+                engine->setKeyInput("Space", ImGui::IsKeyDown(ImGuiKey_Space));
+                engine->setKeyInput("ShiftLeft", ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift));
+                engine->setKeyInput("ShiftRight", ImGui::IsKeyDown(ImGuiKey_RightShift));
+                engine->setKeyInput("KeyE", ImGui::IsKeyDown(ImGuiKey_E));
+                engine->setKeyInput("KeyR", ImGui::IsKeyDown(ImGuiKey_R));
+                engine->setKeyInput("KeyF", ImGui::IsKeyDown(ImGuiKey_F));
+                engine->setKeyInput("KeyQ", ImGui::IsKeyDown(ImGuiKey_Q));
+                engine->setKeyInput("ArrowUp", ImGui::IsKeyDown(ImGuiKey_UpArrow));
+                engine->setKeyInput("ArrowDown", ImGui::IsKeyDown(ImGuiKey_DownArrow));
+                engine->setKeyInput("ArrowLeft", ImGui::IsKeyDown(ImGuiKey_LeftArrow));
+                engine->setKeyInput("ArrowRight", ImGui::IsKeyDown(ImGuiKey_RightArrow));
+
+                // 'R' key restarts simulation in standalone game
+                if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+                    engine->restartSimulation();
+                }
+
+                // 'V' key toggles FPP / TPP perspective in gameplay
+                if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+                    std::string curMode = engine->getCameraMode();
+                    bool toFpp = (curMode != "firstPerson");
+                    engine->setCameraMode(toFpp ? "firstPerson" : "thirdPerson");
+                    auto boomView = registry.get().view<ecs::CameraBoomComponent>();
+                    for (auto bEnt : boomView) {
+                        auto& b = boomView.get<ecs::CameraBoomComponent>(bEnt);
+                        b.isFirstPerson = toFpp;
+                        b.targetArmLength = toFpp ? 0.0f : 8.0f;
+                        b.cameraLag = !toFpp;
+                    }
+                }
+
+                // Mouse look when dragging RMB or LMB
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    float sens = engine->getPreferences().camMouseSensitivity;
+                    float yDelta = ImGui::GetIO().MouseDelta.y * sens;
+                    if (engine->getPreferences().invertY) yDelta = -yDelta;
+                    float camYaw = engine->getCameraYaw() + ImGui::GetIO().MouseDelta.x * sens;
+                    float camPitch = glm::clamp(engine->getCameraPitch() - yDelta, -88.0f, 88.0f);
+                    engine->setCamera(engine->getCameraPosition(), camYaw, camPitch, engine->getCameraFov());
+                }
+
+                // Mouse wheel zoom
+                if (std::abs(ImGui::GetIO().MouseWheel) > 0.01f) {
+                    float mw = ImGui::GetIO().MouseWheel;
+                    auto boomView = registry.get().view<ecs::CameraBoomComponent>();
+                    for (auto bEnt : boomView) {
+                        auto& b = boomView.get<ecs::CameraBoomComponent>(bEnt);
+                        if (mw > 0.1f) {
+                            if (!b.isFirstPerson) {
+                                b.targetArmLength -= 1.5f;
+                                if (b.targetArmLength <= 1.0f) {
+                                    b.targetArmLength = 0.0f;
+                                    b.isFirstPerson = true;
+                                    b.cameraLag = false;
+                                    engine->setCameraMode("firstPerson");
+                                }
+                            }
+                        } else if (mw < -0.1f) {
+                            if (b.isFirstPerson) {
+                                b.targetArmLength = 4.0f;
+                                b.isFirstPerson = false;
+                                b.cameraLag = true;
+                                engine->setCameraMode("thirdPerson");
+                            } else {
+                                b.targetArmLength = glm::clamp(b.targetArmLength + 1.5f, 2.0f, 40.0f);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Top-left HUD Card
             ImGui::SetNextWindowPos(ImVec2(24, 24), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(320, 100), ImGuiCond_Always);
-            ImGuiWindowFlags hudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings;
-            ImGui::Begin("GameHUD", nullptr, hudFlags);
+            ImGui::SetNextWindowSize(ImVec2(360, 125), ImGuiCond_Always);
+            ImGuiWindowFlags hudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.09f, 0.12f, 0.85f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 12));
+            if (ImGui::Begin("GameHUD", nullptr, hudFlags)) {
+                const int hp = engine ? engine->getHealth() : 100;
+                const int score = engine ? engine->getScore() : 0;
+                const std::string st = engine ? engine->getGameStatus() : "PLAYING";
+
+                ImVec4 hpColor = (hp > 50) ? ImVec4(0.1f, 0.85f, 0.45f, 1.0f) : ((hp > 25) ? ImVec4(0.95f, 0.75f, 0.1f, 1.0f) : ImVec4(0.95f, 0.25f, 0.2f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, hpColor);
+                ImGui::ProgressBar(std::clamp(hp / 100.0f, 0.0f, 1.0f), ImVec2(332, 22), ("HEALTH: " + std::to_string(hp) + " / 100").c_str());
+                ImGui::PopStyleColor();
+
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "POWER ORBS COLLECTED: %d / 5", score);
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "OBJECTIVE: Collect all orbs and reach the Portal!");
+                ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.7f, 1.0f), "Controls: [WASD] Move | [SPACE] Jump | [V] FPP/TPP | [R] Restart");
+            }
+            ImGui::End();
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor();
+
+            // Center Victory / Defeat Modal Banner
+            const std::string st = engine ? engine->getGameStatus() : "PLAYING";
             const int hp = engine ? engine->getHealth() : 100;
             const int score = engine ? engine->getScore() : 0;
-            const std::string st = engine ? engine->getGameStatus() : "PLAYING";
-
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.06f, 0.73f, 0.51f, 1.0f));
-            ImGui::ProgressBar(hp / 100.0f, ImVec2(300, 20), ("HP: " + std::to_string(hp) + "%").c_str());
-            ImGui::PopStyleColor();
-            ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.08f, 1.0f), "SCORE: %d", score);
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), "  |  %s", st.c_str());
-            ImGui::End();
+            if (st == "VICTORY" || st == "WIN" || hp <= 0 || st == "GAME_OVER" || st == "DEFEAT") {
+                bool isWin = (st == "VICTORY" || st == "WIN");
+                ImGui::SetNextWindowPos(ImVec2(screenW * 0.5f - 210, screenH * 0.5f - 100), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(420, 200), ImGuiCond_Always);
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, isWin ? ImVec4(0.05f, 0.18f, 0.10f, 0.95f) : ImVec4(0.20f, 0.06f, 0.06f, 0.95f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
+                if (ImGui::Begin("GameOutcomeModal", nullptr, hudFlags)) {
+                    if (isWin) {
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.5f, 1.0f), "=== VICTORY! MISSION COMPLETE ===");
+                        ImGui::Spacing();
+                        ImGui::TextWrapped("You successfully gathered all 5 Power Orbs and activated the Portal!");
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "Final Score: %d Orbs  |  Health Remaining: %d%%", score, hp);
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "=== GAME OVER / DEFEAT ===");
+                        ImGui::Spacing();
+                        ImGui::TextWrapped("Your health reached zero from hazardous laser traps!");
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Score: %d Orbs collected before falling.", score);
+                    }
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                    if (ImGui::Button(" [R] Play Again / Respawn ", ImVec2(380, 36))) {
+                        if (engine) engine->restartSimulation();
+                    }
+                }
+                ImGui::End();
+                ImGui::PopStyleVar(2);
+                ImGui::PopStyleColor();
+            }
         } else {
             static bool s_immersivePlay = false;
             static bool s_showPlaceActors = true;
@@ -750,6 +874,62 @@ namespace engine::renderer {
                 s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode
             };
             drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
+
+            if (engine && !engine->isPaused()) {
+                const int hp = engine->getHealth();
+                const int score = engine->getScore();
+                const std::string st = engine->getGameStatus();
+
+                ImGui::SetNextWindowPos(ImVec2(vMin.x + 20, vMin.y + 40), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(340, 110), ImGuiCond_Always);
+                ImGuiWindowFlags vpHudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.09f, 0.12f, 0.85f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
+                if (ImGui::Begin("##ViewportGameHUD", nullptr, vpHudFlags)) {
+                    ImVec4 hpColor = (hp > 50) ? ImVec4(0.1f, 0.85f, 0.45f, 1.0f) : ((hp > 25) ? ImVec4(0.95f, 0.75f, 0.1f, 1.0f) : ImVec4(0.95f, 0.25f, 0.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, hpColor);
+                    ImGui::ProgressBar(std::clamp(hp / 100.0f, 0.0f, 1.0f), ImVec2(316, 20), ("HEALTH: " + std::to_string(hp) + " / 100").c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::Spacing();
+                    ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "POWER ORBS: %d / 5", score);
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), " | STATUS: %s", st.c_str());
+                    ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.7f, 1.0f), "[WASD] Move  [SPACE] Jump  [V] FPP/TPP  [R] Reset");
+                }
+                ImGui::End();
+                ImGui::PopStyleVar(2);
+                ImGui::PopStyleColor();
+
+                if (st == "VICTORY" || st == "WIN" || hp <= 0 || st == "GAME_OVER" || st == "DEFEAT") {
+                    bool isWin = (st == "VICTORY" || st == "WIN");
+                    ImGui::SetNextWindowPos(ImVec2(vMin.x + (vSize.x - 380) * 0.5f, vMin.y + (vSize.y - 180) * 0.5f), ImGuiCond_Always);
+                    ImGui::SetNextWindowSize(ImVec2(380, 180), ImGuiCond_Always);
+                    ImGui::PushStyleColor(ImGuiCol_WindowBg, isWin ? ImVec4(0.05f, 0.18f, 0.10f, 0.95f) : ImVec4(0.20f, 0.06f, 0.06f, 0.95f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
+                    if (ImGui::Begin("##ViewportGameModal", nullptr, vpHudFlags)) {
+                        if (isWin) {
+                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.5f, 1.0f), "=== VICTORY! MISSION COMPLETE ===");
+                            ImGui::Spacing();
+                            ImGui::TextWrapped("All Power Orbs collected & Portal reached!");
+                            ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "Final Score: %d Orbs  |  Health: %d%%", score, hp);
+                        } else {
+                            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "=== GAME OVER / DEFEAT ===");
+                            ImGui::Spacing();
+                            ImGui::TextWrapped("Destroyed by hazardous laser trap!");
+                            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Orbs collected: %d", score);
+                        }
+                        ImGui::Spacing();
+                        if (ImGui::Button(" [R] Play Again / Respawn ", ImVec2(348, 32))) {
+                            engine->restartSimulation();
+                        }
+                    }
+                    ImGui::End();
+                    ImGui::PopStyleVar(2);
+                    ImGui::PopStyleColor();
+                }
+            }
 
             ImGui::End();
             ImGui::PopStyleColor();

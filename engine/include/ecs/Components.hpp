@@ -45,6 +45,7 @@ namespace engine::ecs {
         bool lockRotationY{false};
         bool lockRotationZ{false};
         bool isSensor{false}; // Trigger / sensor volume (no collision response, generates contact events)
+        glm::vec3 lastScale{0.0f, 0.0f, 0.0f}; // Cached scale for dynamic shape rebuilding
     };
 
     struct MaterialComponent {
@@ -53,6 +54,13 @@ namespace engine::ecs {
         float roughness{0.5f};
         glm::vec3 emissive{0.0f, 0.0f, 0.0f};
         float emissiveIntensity{0.0f};
+        uint32_t materialId{0};
+        uint32_t albedoTextureId{0};
+        uint32_t normalTextureId{0};
+        uint32_t ormTextureId{0};
+        std::string albedoPath{""};
+        std::string normalPath{""};
+        std::string ormPath{""};
     };
 
     struct LightComponent {

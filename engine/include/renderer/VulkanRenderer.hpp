@@ -105,6 +105,7 @@ namespace engine::renderer {
 
         void setFogEnabled(bool enabled) { m_fogEnabled = enabled; }
         bool isFogEnabled() const { return m_fogEnabled; }
+        void invalidateMaterialDescriptorSet(uint32_t materialId = 0);
 
     private:
         void createOffscreenTarget();

@@ -19,6 +19,18 @@ void VulkanRenderer::drawEditorCameraNavigation(core::Engine* engine,
                     engine->setKeyInput("Space", ImGui::IsKeyDown(ImGuiKey_Space));
                     engine->setKeyInput("ShiftLeft", ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift));
                     engine->setKeyInput("ShiftRight", ImGui::IsKeyDown(ImGuiKey_RightShift));
+                    engine->setKeyInput("KeyE", ImGui::IsKeyDown(ImGuiKey_E));
+                    engine->setKeyInput("KeyR", ImGui::IsKeyDown(ImGuiKey_R));
+                    engine->setKeyInput("KeyF", ImGui::IsKeyDown(ImGuiKey_F));
+                    engine->setKeyInput("KeyQ", ImGui::IsKeyDown(ImGuiKey_Q));
+                    engine->setKeyInput("ArrowUp", ImGui::IsKeyDown(ImGuiKey_UpArrow));
+                    engine->setKeyInput("ArrowDown", ImGui::IsKeyDown(ImGuiKey_DownArrow));
+                    engine->setKeyInput("ArrowLeft", ImGui::IsKeyDown(ImGuiKey_LeftArrow));
+                    engine->setKeyInput("ArrowRight", ImGui::IsKeyDown(ImGuiKey_RightArrow));
+
+                    if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+                        engine->restartSimulation();
+                    }
 
                     // 'V' key toggles FPP / TPP perspective in gameplay
                     if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {

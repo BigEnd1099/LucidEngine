@@ -291,9 +291,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL)
+                        // Żywa edycja komponentu materiału PBR (Kulla-Conty Multiscatter + Cubemap IBL + Tekstury PBR)
                         if (registry.get().all_of<ecs::MeshComponent>(selectedEntity)) {
-                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                            if (ImGui::CollapsingHeader("PBR Material (Multiscatter GGX & Textures)", ImGuiTreeNodeFlags_DefaultOpen)) {
                                 if (!registry.get().all_of<ecs::MaterialComponent>(selectedEntity)) {
                                     if (ImGui::Button("+ Dodaj wlasny Material PBR")) {
                                         ecs::MaterialComponent m{};
@@ -309,6 +309,102 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f, "%.2f");
                                     ImGui::SliderFloat("Roughness", &mat.roughness, 0.045f, 1.0f, "%.3f");
                                     ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
+
+                                    ImGui::Spacing();
+                                    ImGui::Separator();
+                                    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Zestawy Tekstur PBR (Proceduralne):");
+
+                                    auto applyPreset = [&](const char* name) {
+                                        if (engine && engine->getAssetManager()) {
+                                            auto* am = engine->getAssetManager();
+                                            uint32_t mId = am->applyPbrPreset(name);
+                                            mat.materialId = mId;
+                                            if (auto* mAsset = am->getMaterial(mId)) {
+                                                mat.albedoTextureId = mAsset->albedoTextureId;
+                                                mat.normalTextureId = mAsset->normalTextureId;
+                                                mat.ormTextureId = mAsset->ormTextureId;
+                                            }
+                                            invalidateMaterialDescriptorSet(mat.materialId);
+                                        }
+                                    };
+
+                                    if (ImGui::Button("Cegly (Bricks)")) applyPreset("Bricks");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Kafelki (Tiles)")) applyPreset("Tiles");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Drewno (Wood)")) applyPreset("Wood");
+
+                                    if (ImGui::Button("Krata (MetalGrid)")) applyPreset("MetalGrid");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Szachownica")) applyPreset("Checkerboard");
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Reset")) {
+                                        mat.materialId = 0;
+                                        mat.albedoTextureId = 0;
+                                        mat.normalTextureId = 0;
+                                        mat.ormTextureId = 0;
+                                        invalidateMaterialDescriptorSet(0);
+                                    }
+
+                                    ImGui::Spacing();
+                                    ImGui::Separator();
+                                    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Sloty Tekstur PBR (Pliki .png/.jpg):");
+
+                                    auto syncCustomMaterial = [&]() {
+                                        if (!engine || !engine->getAssetManager()) return;
+                                        auto* am = engine->getAssetManager();
+                                        core::MaterialAsset mAsset{};
+                                        mAsset.baseColorFactor = mat.baseColor;
+                                        mAsset.metallicFactor = mat.metallic;
+                                        mAsset.roughnessFactor = mat.roughness;
+                                        mAsset.albedoTextureId = mat.albedoTextureId;
+                                        mAsset.normalTextureId = mat.normalTextureId;
+                                        mAsset.ormTextureId = mat.ormTextureId;
+                                        if (mat.materialId == 0) {
+                                            mat.materialId = am->createMaterial(mAsset);
+                                        } else {
+                                            am->updateMaterial(mat.materialId, mAsset);
+                                        }
+                                        invalidateMaterialDescriptorSet(mat.materialId);
+                                    };
+
+                                    auto renderSlot = [&](const char* label, std::string& path, uint32_t& texId) {
+                                        ImGui::PushID(label);
+                                        char buf[256];
+                                        std::strncpy(buf, path.c_str(), sizeof(buf));
+                                        buf[sizeof(buf) - 1] = '\0';
+                                        if (ImGui::InputText(label, buf, sizeof(buf))) {
+                                            path = buf;
+                                        }
+                                        ImGui::SameLine();
+                                        if (ImGui::Button("Wczytaj")) {
+                                            if (engine && engine->getAssetManager() && !path.empty()) {
+                                                uint32_t newId = engine->getAssetManager()->loadTextureFromFile(path);
+                                                if (newId != 0) {
+                                                    texId = newId;
+                                                    syncCustomMaterial();
+                                                }
+                                            }
+                                        }
+                                        if (texId != 0) {
+                                            ImGui::SameLine();
+                                            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "[ID: %u]", texId);
+                                            ImGui::SameLine();
+                                            if (ImGui::SmallButton("X")) {
+                                                texId = 0;
+                                                path.clear();
+                                                syncCustomMaterial();
+                                            }
+                                        } else {
+                                            ImGui::SameLine();
+                                            ImGui::TextDisabled("(domyslna)");
+                                        }
+                                        ImGui::PopID();
+                                    };
+
+                                    renderSlot("Albedo Map", mat.albedoPath, mat.albedoTextureId);
+                                    renderSlot("Normal Map", mat.normalPath, mat.normalTextureId);
+                                    renderSlot("ORM Map (AO/Rough/Met)", mat.ormPath, mat.ormTextureId);
                                 }
                             }
                         }
@@ -316,10 +412,53 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         if (registry.get().all_of<ecs::RigidBodyComponent>(selectedEntity)) {
                             auto& rb = registry.get().get<ecs::RigidBodyComponent>(selectedEntity);
                             if (ImGui::CollapsingHeader("Jolt Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f);
-                                ImGui::SliderFloat("Restitution", &rb.restitution, 0.0f, 1.0f);
-                                ImGui::SliderFloat("Friction", &rb.friction, 0.0f, 1.0f);
+                                bool shapeChanged = false;
+                                const char* shapeNames[] = { "Box (Szescian)", "Sphere (Kula)", "Capsule (Kapsula)" };
+                                int curShape = std::clamp(rb.shapeType, 0, 2);
+                                if (ImGui::Combo("Shape Type", &curShape, shapeNames, IM_ARRAYSIZE(shapeNames))) {
+                                    rb.shapeType = curShape;
+                                    shapeChanged = true;
+                                }
+
+                                if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
+                                    const auto& tc = registry.get().get<ecs::TransformComponent>(selectedEntity);
+                                    if (rb.shapeType == 0) {
+                                        glm::vec3 worldDim = rb.halfExtents * 2.0f * glm::abs(tc.scale);
+                                        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Hitbox: %.2f x %.2f x %.2f m", worldDim.x, worldDim.y, worldDim.z);
+                                        if (drawEditorVec3Control("Half Extents", rb.halfExtents, 0.5f)) shapeChanged = true;
+                                    } else if (rb.shapeType == 1) {
+                                        float baseR = (rb.halfExtents.x > 0.0f ? rb.halfExtents.x : 0.5f);
+                                        glm::vec3 rDim = baseR * 2.0f * glm::abs(tc.scale);
+                                        if (std::abs(tc.scale.x - tc.scale.y) < 0.01f && std::abs(tc.scale.x - tc.scale.z) < 0.01f) {
+                                            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Kula (R = %.2f m)", rDim.x * 0.5f);
+                                        } else {
+                                            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Elipsoida (Convex Hull): %.2f x %.2f x %.2f m", rDim.x, rDim.y, rDim.z);
+                                        }
+                                        if (ImGui::DragFloat("Base Radius", &rb.halfExtents.x, 0.05f, 0.05f, 50.0f, "%.2f m")) shapeChanged = true;
+                                    } else if (rb.shapeType == 2) {
+                                        float radS = std::max(std::abs(tc.scale.x), std::abs(tc.scale.z));
+                                        float hS = std::abs(tc.scale.y);
+                                        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Wymiary: R=%.2f m, H=%.2f m", rb.capsuleRadius * radS, (rb.capsuleHalfHeight + rb.capsuleRadius) * 2.0f * hS);
+                                        if (ImGui::DragFloat("Capsule Radius", &rb.capsuleRadius, 0.05f, 0.05f, 20.0f, "%.2f m")) shapeChanged = true;
+                                        if (ImGui::DragFloat("Capsule Half Height", &rb.capsuleHalfHeight, 0.05f, 0.05f, 50.0f, "%.2f m")) shapeChanged = true;
+                                    }
+                                }
+
+                                ImGui::Separator();
+                                ImGui::DragFloat("Mass (kg)", &rb.mass, 0.1f, 0.0f, 500.0f, "%.1f kg");
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("0.0 = Statyczny (nieporuszalny ground/sciana), > 0.0 = Dynamiczny (spadajacy)");
+                                ImGui::SliderFloat("Restitution (Sprezystosc)", &rb.restitution, 0.0f, 1.0f, "%.2f");
+                                ImGui::SliderFloat("Friction (Tarcie)", &rb.friction, 0.0f, 1.0f, "%.2f");
                                 ImGui::Checkbox("Is Sensor (Trigger)", &rb.isSensor);
+
+                                ImGui::TextDisabled("Blokady obrotu (Lock Rotation DOFs):");
+                                ImGui::Checkbox("Lock X##Rb", &rb.lockRotationX); ImGui::SameLine();
+                                ImGui::Checkbox("Lock Y##Rb", &rb.lockRotationY); ImGui::SameLine();
+                                ImGui::Checkbox("Lock Z##Rb", &rb.lockRotationZ);
+
+                                if (shapeChanged && engine) {
+                                    engine->syncEntityTransformPhysics(selectedEntity);
+                                }
                             }
                         }
 
