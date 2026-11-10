@@ -298,7 +298,7 @@ void main() {
     float NdotV = max(dot(N, V), 1e-4);
 
     vec4 texSample = texture(albedoMap, fragTexCoord);
-    vec3 texLinear = pow(max(texSample.rgb, vec3(0.0)), vec3(2.2));
+    vec3 texLinear = texSample.rgb;
     vec3 albedo = clamp(pcs.baseColorFactor.rgb * texLinear, vec3(0.0), vec3(1.0));
 
     vec3 orm = texture(ormMap, fragTexCoord).rgb;
