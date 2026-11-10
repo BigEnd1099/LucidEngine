@@ -61,12 +61,13 @@ void AccelerationStructure::destroyResource(AccelResource& resource) {
 }
 
 bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, const core::MeshAsset& mesh,
-                                               VkBuffer vertexBuffer, bool dynamicGeometry) {
+                                               VkBuffer vertexBuffer, bool dynamicGeometry, bool geometryChanged) {
     if (!m_ready || blasId == 0 || !vertexBuffer || !mesh.indexBuffer ||
         mesh.vertexCount == 0 || mesh.indexCount < 3) return false;
 
     auto existing = m_blas.find(blasId);
-    if (existing != m_blas.end() && (!dynamicGeometry || !existing->second.dynamicGeometry))
+    if (existing != m_blas.end() &&
+        (!dynamicGeometry || !existing->second.dynamicGeometry || !geometryChanged))
         return true;
 
     VkDevice dev = m_context->getDevice();
