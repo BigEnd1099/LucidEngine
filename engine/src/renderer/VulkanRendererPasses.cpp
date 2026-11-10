@@ -1856,12 +1856,12 @@ namespace engine::renderer {
                 m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
 
                 VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-            presentInfo.waitSemaphoreCount = 1;
-            presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
-            VkSwapchainKHR swapChains[] = { m_context->getSwapchain() };
-            presentInfo.swapchainCount = 1;
-            presentInfo.pSwapchains = swapChains;
-            presentInfo.pImageIndices = &imageIndex;
+                presentInfo.waitSemaphoreCount = 1;
+                presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
+                VkSwapchainKHR swapChains[] = { m_context->getSwapchain() };
+                presentInfo.swapchainCount = 1;
+                presentInfo.pSwapchains = swapChains;
+                presentInfo.pImageIndices = &imageIndex;
                 res = vkQueuePresentKHR(m_context->getGraphicsQueue(), &presentInfo);
             }
             if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
