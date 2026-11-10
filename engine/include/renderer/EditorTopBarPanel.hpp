@@ -20,6 +20,7 @@ struct EditorTopBarUiState {
     float& userDrawerH;
     char* engineNotification;
     float& engineNotificationTimer;
+    bool simulationSessionActive;
     std::function<void(bool)> saveProject;
     std::function<void(const std::string&)> loadProject;
 };

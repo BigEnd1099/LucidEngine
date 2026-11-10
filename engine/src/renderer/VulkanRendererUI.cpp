@@ -418,6 +418,7 @@ namespace engine::renderer {
                 m_resolutionScale, m_antiAliasingMode,
                 s_userLeftPanelW, s_userRightPanelW, s_userOutlinerH, s_userDrawerH,
                 s_engineNotification, s_engineNotificationTimer,
+                engine && engine->isSimulationSessionActive(),
                 [&](bool saveAs) { saveCurrentGame(saveAs); },
                 [&](const std::string& path) { loadCurrentGame(path); }
             };
@@ -751,8 +752,7 @@ namespace engine::renderer {
 
             EditorViewportOverlayState viewportOverlayState{
                 s_immersivePlay, s_showPlaceActors, s_showOutliner, s_showDetails,
-                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode, gizmoEnabled,
-                isSimulationSessionActive
+                s_snapEnabled, s_cameraSpeed, s_uiScale, s_gizmoMode, gizmoEnabled
             };
             drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
