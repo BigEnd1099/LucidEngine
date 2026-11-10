@@ -171,35 +171,6 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::PopStyleVar();
             }
 
-            if (s_showShortcutsWindow) {
-                ImGui::SetNextWindowSize(ImVec2(520.0f * state.uiScale, 440.0f * state.uiScale), ImGuiCond_FirstUseEver);
-                if (ImGui::Begin(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts"), &s_showShortcutsWindow, ImGuiWindowFlags_NoCollapse)) {
-                    auto shortcutRow = [&](const char* keys, const char* description) {
-                        ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", keys);
-                        ImGui::SameLine(150.0f * state.uiScale);
-                        ImGui::TextUnformatted(description);
-                    };
-                    ImGui::SeparatorText(editorText("ui.shortcuts_project_windows", "Project & Windows"));
-                    shortcutRow("Ctrl + S", editorText("ui.shortcut_save", "Save project"));
-                    shortcutRow("Ctrl + Shift + S", editorText("ui.shortcut_save_as", "Save project as"));
-                    shortcutRow("Ctrl + O", editorText("ui.shortcut_open", "Open project"));
-                    shortcutRow("Ctrl + ,", editorText("ui.shortcut_preferences", "Open editor preferences"));
-                    shortcutRow("Ctrl + Space", editorText("ui.shortcut_content_drawer", "Toggle Content Drawer"));
-                    shortcutRow("F4", editorText("ui.shortcut_script_studio", "Toggle QuickJS Script Studio"));
-                    shortcutRow("F11", editorText("ui.shortcut_immersive", "Toggle immersive viewport"));
-                    ImGui::SeparatorText(editorText("ui.shortcuts_viewport", "Viewport & Selection"));
-                    shortcutRow("W / G", editorText("ui.shortcut_translate", "Move gizmo"));
-                    shortcutRow("E / R", editorText("ui.shortcut_rotate", "Rotate gizmo"));
-                    shortcutRow("S", editorText("ui.shortcut_scale", "Scale gizmo"));
-                    shortcutRow("F", editorText("ui.shortcut_focus", "Focus selected object"));
-                    shortcutRow("Delete", editorText("ui.shortcut_delete", "Delete selected object"));
-                    shortcutRow("Ctrl + D", editorText("ui.shortcut_duplicate", "Duplicate selected object"));
-                    ImGui::Spacing();
-                    ImGui::TextDisabled("%s", editorText("ui.shortcuts_note", "Viewport shortcuts are disabled while editing text or during simulation where applicable."));
-                }
-                ImGui::End();
-            }
-
             // 2. LEVEL TABS STRIP
                 ImGui::SetNextWindowPos(ImVec2(0, topTitleBarH), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(screenW, topLevelTabsH), ImGuiCond_Always);
@@ -381,7 +352,36 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
             ImGui::End();
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
+            }
 
-}
+            if (s_showShortcutsWindow) {
+                ImGui::SetNextWindowSize(ImVec2(520.0f * state.uiScale, 440.0f * state.uiScale), ImGuiCond_FirstUseEver);
+                if (ImGui::Begin(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts"), &s_showShortcutsWindow, ImGuiWindowFlags_NoCollapse)) {
+                    auto shortcutRow = [&](const char* keys, const char* description) {
+                        ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", keys);
+                        ImGui::SameLine(150.0f * state.uiScale);
+                        ImGui::TextUnformatted(description);
+                    };
+                    ImGui::SeparatorText(editorText("ui.shortcuts_project_windows", "Project & Windows"));
+                    shortcutRow("Ctrl + S", editorText("ui.shortcut_save", "Save project"));
+                    shortcutRow("Ctrl + Shift + S", editorText("ui.shortcut_save_as", "Save project as"));
+                    shortcutRow("Ctrl + O", editorText("ui.shortcut_open", "Open project"));
+                    shortcutRow("Ctrl + ,", editorText("ui.shortcut_preferences", "Open editor preferences"));
+                    shortcutRow("Ctrl + Space", editorText("ui.shortcut_content_drawer", "Toggle Content Drawer"));
+                    shortcutRow("F4", editorText("ui.shortcut_script_studio", "Toggle QuickJS Script Studio"));
+                    shortcutRow("F11", editorText("ui.shortcut_immersive", "Toggle immersive viewport"));
+                    ImGui::SeparatorText(editorText("ui.shortcuts_viewport", "Viewport & Selection"));
+                    shortcutRow("W / G", editorText("ui.shortcut_translate", "Move gizmo"));
+                    shortcutRow("E / R", editorText("ui.shortcut_rotate", "Rotate gizmo"));
+                    shortcutRow("S", editorText("ui.shortcut_scale", "Scale gizmo"));
+                    shortcutRow("F", editorText("ui.shortcut_focus", "Focus selected object"));
+                    shortcutRow("Delete", editorText("ui.shortcut_delete", "Delete selected object"));
+                    shortcutRow("Ctrl + D", editorText("ui.shortcut_duplicate", "Duplicate selected object"));
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("%s", editorText("ui.shortcuts_note", "Viewport shortcuts are disabled while editing text or during simulation where applicable."));
+                }
+                ImGui::End();
+            }
+
 }
 #endif
