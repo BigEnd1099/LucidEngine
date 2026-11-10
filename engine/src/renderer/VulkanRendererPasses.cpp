@@ -1225,6 +1225,11 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         } else {
+            // No screen-space shader or bilateral blur ran this frame; keep both subpass timings at zero.
+            if (m_timestampQueryPool) {
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
+                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
+            }
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
@@ -1245,10 +1250,6 @@ namespace engine::renderer {
             clearRi.pColorAttachments = &clearAo;
             vkCmdBeginRendering(m_commandBuffer, &clearRi);
             vkCmdEndRendering(m_commandBuffer);
-            if (m_timestampQueryPool) {
-                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 9);
-                vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 10);
-            }
 
             transitionImage(m_commandBuffer, m_aoBlurImage,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
