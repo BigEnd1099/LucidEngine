@@ -1130,6 +1130,8 @@ namespace engine::renderer {
                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         }
 
+        core::Profiler::get().recordMetric("gtaoEnabled", m_gtaoEnabled ? 1.0 : 0.0);
+        core::Profiler::get().recordMetric("ssgiEnabled", m_lightBounceEnabled ? 1.0 : 0.0);
         if ((m_gtaoEnabled || m_lightBounceEnabled) && m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty()) {
             transitionImage(m_commandBuffer, m_aoImage,
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1271,6 +1273,9 @@ namespace engine::renderer {
                 m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&
                 tlasReady && m_descriptorSet != VK_NULL_HANDLE &&
                 (m_rtSettings.giEnabled || m_rtSettings.aoEnabled || m_rtSettings.reflectionsEnabled || m_rtSettings.debugMode != RtDebugMode::None);
+            core::Profiler::get().recordMetric("rtGiEnabled", m_rtSettings.giEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtAoEnabled", m_rtSettings.aoEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionsEnabled", m_rtSettings.reflectionsEnabled ? 1.0 : 0.0);
             if (rtIndirectActive) {
                 RtDenoiser::Params rtp;
                 rtp.viewProj = vp;
@@ -1298,6 +1303,13 @@ namespace engine::renderer {
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
             } else {
                 m_rtDenoiser.invalidateHistory();
+                core::Profiler::get().recordMetric("rtGiTraceMs", 0.0);
+                core::Profiler::get().recordMetric("rtGiTemporalMs", 0.0);
+                core::Profiler::get().recordMetric("rtGiAtrous0Ms", 0.0);
+                core::Profiler::get().recordMetric("rtGiAtrous1Ms", 0.0);
+                core::Profiler::get().recordMetric("rtReflectionTraceMs", 0.0);
+                core::Profiler::get().recordMetric("rtReflectionTemporalMs", 0.0);
+                core::Profiler::get().recordMetric("rtComputeTotalMs", 0.0);
             }
         }
 
