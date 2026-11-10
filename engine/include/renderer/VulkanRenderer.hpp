@@ -64,6 +64,10 @@ namespace engine::renderer {
 
         void setGtaoEnabled(bool enabled) { m_gtaoEnabled = enabled; }
         bool isGtaoEnabled() const { return m_gtaoEnabled; }
+
+        // Public screen-space GI controls used by JSON-RPC and benchmark tooling.
+        void setSsgiEnabled(bool enabled) { m_lightBounceEnabled = enabled; }
+        bool isSsgiEnabled() const { return m_lightBounceEnabled; }
         void setGtaoRadius(float radius) { m_gtaoRadius = std::clamp(radius, 0.1f, 5.0f); }
         float getGtaoRadius() const { return m_gtaoRadius; }
         void setGtaoIntensity(float intensity) { m_gtaoIntensity = std::clamp(intensity, 0.0f, 5.0f); }
