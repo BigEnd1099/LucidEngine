@@ -137,6 +137,7 @@ namespace engine::renderer {
         float s_uiScale = m_uiScale * (dpiScale > 1.0f ? (1.0f + (dpiScale - 1.0f) * 0.35f) : 1.0f);
         s_uiScale = std::clamp(s_uiScale, 0.65f, 2.00f);
         ImGui::GetIO().FontGlobalScale = s_uiScale;
+        ImGui::GetStyle().Alpha = 1.0f;
 
         auto requestResolution = [&](uint32_t w, uint32_t h) {
             g_pendingRenderWidth  = std::clamp(w, 64u, 7680u);
@@ -880,65 +881,67 @@ namespace engine::renderer {
             };
             drawEditorViewportOverlay(viewportOverlayState, glm::vec2(viewportPanelSize.x, viewportPanelSize.y));
 
+            ImGui::End();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+
             if (engine && !engine->isPaused()) {
                 const int hp = engine->getHealth();
                 const int score = engine->getScore();
                 const std::string st = engine->getGameStatus();
 
-                ImGui::SetNextWindowPos(ImVec2(vMin.x + 20, vMin.y + 40), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(340, 110), ImGuiCond_Always);
-                ImGuiWindowFlags vpHudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.09f, 0.12f, 0.85f));
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
-                if (ImGui::Begin("##ViewportGameHUD", nullptr, vpHudFlags)) {
-                    ImVec4 hpColor = (hp > 50) ? ImVec4(0.1f, 0.85f, 0.45f, 1.0f) : ((hp > 25) ? ImVec4(0.95f, 0.75f, 0.1f, 1.0f) : ImVec4(0.95f, 0.25f, 0.2f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, hpColor);
-                    ImGui::ProgressBar(std::clamp(hp / 100.0f, 0.0f, 1.0f), ImVec2(316, 20), ("HEALTH: " + std::to_string(hp) + " / 100").c_str());
-                    ImGui::PopStyleColor();
-                    ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "POWER ORBS: %d / 5", score);
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), " | STATUS: %s", st.c_str());
-                    ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.7f, 1.0f), "[WASD] Move  [SPACE] Jump  [V] FPP/TPP  [R] Reset");
-                }
-                ImGui::End();
-                ImGui::PopStyleVar(2);
-                ImGui::PopStyleColor();
-
-                if (st == "VICTORY" || st == "WIN" || hp <= 0 || st == "GAME_OVER" || st == "DEFEAT") {
-                    bool isWin = (st == "VICTORY" || st == "WIN");
-                    ImGui::SetNextWindowPos(ImVec2(vMin.x + (vSize.x - 380) * 0.5f, vMin.y + (vSize.y - 180) * 0.5f), ImGuiCond_Always);
-                    ImGui::SetNextWindowSize(ImVec2(380, 180), ImGuiCond_Always);
-                    ImGui::PushStyleColor(ImGuiCol_WindowBg, isWin ? ImVec4(0.05f, 0.18f, 0.10f, 0.95f) : ImVec4(0.20f, 0.06f, 0.06f, 0.95f));
-                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
-                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
-                    if (ImGui::Begin("##ViewportGameModal", nullptr, vpHudFlags)) {
-                        if (isWin) {
-                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.5f, 1.0f), "=== VICTORY! MISSION COMPLETE ===");
-                            ImGui::Spacing();
-                            ImGui::TextWrapped("All Power Orbs collected & Portal reached!");
-                            ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "Final Score: %d Orbs  |  Health: %d%%", score, hp);
-                        } else {
-                            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "=== GAME OVER / DEFEAT ===");
-                            ImGui::Spacing();
-                            ImGui::TextWrapped("Destroyed by hazardous laser trap!");
-                            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Orbs collected: %d", score);
-                        }
+                if (score > 0 || hp < 100 || st == "VICTORY" || st == "WIN" || st == "GAME_OVER" || st == "DEFEAT") {
+                    ImGui::SetNextWindowPos(ImVec2(vMin.x + 20, vMin.y + 40), ImGuiCond_Always);
+                    ImGui::SetNextWindowSize(ImVec2(340, 110), ImGuiCond_Always);
+                    ImGuiWindowFlags vpHudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus;
+                    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.09f, 0.12f, 0.85f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
+                    if (ImGui::Begin("##ViewportGameHUD", nullptr, vpHudFlags)) {
+                        ImVec4 hpColor = (hp > 50) ? ImVec4(0.1f, 0.85f, 0.45f, 1.0f) : ((hp > 25) ? ImVec4(0.95f, 0.75f, 0.1f, 1.0f) : ImVec4(0.95f, 0.25f, 0.2f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, hpColor);
+                        ImGui::ProgressBar(std::clamp(hp / 100.0f, 0.0f, 1.0f), ImVec2(316, 20), ("HEALTH: " + std::to_string(hp) + " / 100").c_str());
+                        ImGui::PopStyleColor();
                         ImGui::Spacing();
-                        if (ImGui::Button(" [R] Play Again / Respawn ", ImVec2(348, 32))) {
-                            engine->restartSimulation();
-                        }
+                        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "POWER ORBS: %d / 5", score);
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), " | STATUS: %s", st.c_str());
+                        ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.7f, 1.0f), "[WASD] Move  [SPACE] Jump  [V] FPP/TPP  [R] Reset");
                     }
                     ImGui::End();
                     ImGui::PopStyleVar(2);
                     ImGui::PopStyleColor();
+
+                    if (st == "VICTORY" || st == "WIN" || hp <= 0 || st == "GAME_OVER" || st == "DEFEAT") {
+                        bool isWin = (st == "VICTORY" || st == "WIN");
+                        ImGui::SetNextWindowPos(ImVec2(vMin.x + (vSize.x - 380) * 0.5f, vMin.y + (vSize.y - 180) * 0.5f), ImGuiCond_Always);
+                        ImGui::SetNextWindowSize(ImVec2(380, 180), ImGuiCond_Always);
+                        ImGui::PushStyleColor(ImGuiCol_WindowBg, isWin ? ImVec4(0.05f, 0.18f, 0.10f, 0.95f) : ImVec4(0.20f, 0.06f, 0.06f, 0.95f));
+                        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+                        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
+                        if (ImGui::Begin("##ViewportGameModal", nullptr, vpHudFlags)) {
+                            if (isWin) {
+                                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.5f, 1.0f), "=== VICTORY! MISSION COMPLETE ===");
+                                ImGui::Spacing();
+                                ImGui::TextWrapped("All Power Orbs collected & Portal reached!");
+                                ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "Final Score: %d Orbs  |  Health: %d%%", score, hp);
+                            } else {
+                                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "=== GAME OVER / DEFEAT ===");
+                                ImGui::Spacing();
+                                ImGui::TextWrapped("Destroyed by hazardous laser trap!");
+                                ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Orbs collected: %d", score);
+                            }
+                            ImGui::Spacing();
+                            if (ImGui::Button(" [R] Play Again / Respawn ", ImVec2(348, 32))) {
+                                engine->restartSimulation();
+                            }
+                        }
+                        ImGui::End();
+                        ImGui::PopStyleVar(2);
+                        ImGui::PopStyleColor();
+                    }
                 }
             }
-
-            ImGui::End();
-            ImGui::PopStyleColor();
-            ImGui::PopStyleVar();
 
             drawEditorOutlinerPanel(registry, engine, selectedEnt, s_immersivePlay,
                                      s_showOutliner, s_showDetails, s_uiScale,

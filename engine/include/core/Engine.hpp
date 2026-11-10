@@ -259,6 +259,11 @@ namespace engine::core {
         int m_targetFps{0}; // 0 = unlimited, or 30, 60, 120, 240
         nlohmann::json m_preSimulationSnapshot = nlohmann::json::array();
         bool m_hasPreSimulationSnapshot{false};
+        glm::vec3 m_preSimulationCamPos{0.0f, 15.0f, 30.0f};
+        float m_preSimulationCamYaw{-90.0f};
+        float m_preSimulationCamPitch{-20.0f};
+        float m_preSimulationCamFov{45.0f};
+        std::string m_preSimulationCamMode{"editor"};
         std::string m_pendingProjectLoadPath;
         bool m_hasPendingProjectLoad{false};
         float m_physicsAccumulator{0.0f};

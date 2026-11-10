@@ -25,8 +25,6 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.043f, 0.055f, 0.075f, 1.0f));
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f * uiScale, 8.0f * uiScale));
                 ImGui::Begin("FarLeftToolDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-                const bool simulationSessionActive = engine && engine->isSimulationSessionActive();
-                ImGui::BeginDisabled(simulationSessionActive);
 
                 static int s_activeToolMode = 1;
                 const VectorIconType dockIcons[6] = {
@@ -57,6 +55,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                const bool simulationSessionActive = engine && engine->isSimulationSessionActive();
+                ImGui::BeginDisabled(simulationSessionActive);
 
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
                 ImGui::SameLine(placePanelW - 22.0f * uiScale);

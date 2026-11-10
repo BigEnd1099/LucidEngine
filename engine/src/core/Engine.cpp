@@ -214,6 +214,11 @@ namespace engine::core {
                 m_preSimulationSnapshot = getSnapshotJson();
                 m_hasPreSimulationSnapshot = true;
                 m_simulationSessionActive = true;
+                m_preSimulationCamPos = m_camPos;
+                m_preSimulationCamYaw = m_camYaw;
+                m_preSimulationCamPitch = m_camPitch;
+                m_preSimulationCamFov = m_camFov;
+                m_preSimulationCamMode = m_cameraMode;
             }
 
             // Sync editor transforms to Jolt bodies and clear residual velocities
@@ -274,6 +279,15 @@ namespace engine::core {
         // Restore pre-simulation snapshot
         if (hadActiveSession && m_hasPreSimulationSnapshot && !m_preSimulationSnapshot.empty()) {
             applySnapshotJson(m_preSimulationSnapshot.dump());
+        }
+
+        // Restore editor camera pose from before Play session
+        if (hadActiveSession) {
+            m_camPos = m_preSimulationCamPos;
+            m_camYaw = m_preSimulationCamYaw;
+            m_camPitch = m_preSimulationCamPitch;
+            m_camFov = m_preSimulationCamFov;
+            m_cameraMode = m_preSimulationCamMode.empty() ? "editor" : m_preSimulationCamMode;
         }
 
         // Zero all velocities and force-freeze Jolt bodies to the restored edit transforms
@@ -1323,6 +1337,9 @@ namespace engine::core {
         // Force simulation into paused edit mode and clear accumulator
         m_paused = true;
         m_physicsAccumulator = 0.0f;
+        m_simulationSessionActive = false;
+        m_hasPreSimulationSnapshot = false;
+        m_preSimulationSnapshot = nlohmann::json::array();
         setSelectedEntity(entt::null);
         broadcastSimulationState();
 

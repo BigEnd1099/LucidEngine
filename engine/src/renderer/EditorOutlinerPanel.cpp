@@ -248,6 +248,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(entity)); else registry.get().destroy(entity);
                     if (selectedEntity == entity) selectedEntity = entt::null;
                     if (engine) engine->setSelectedEntity(entt::null);
+                    ImGui::EndDisabled();
                     ImGui::EndPopup();
                     ImGui::PopID();
                     break;
