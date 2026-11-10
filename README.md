@@ -127,3 +127,37 @@ LucidEngine_WebRemote.bat
 ## 📄 Licencja
 
 Wszelkie prawa zastrzeżone © 2026 Lucid Engine Team.
+
+---
+
+## 🧪 Render Benchmark & RT Debugger
+
+Windows launchers (run from the repository root):
+
+| File | Purpose |
+|---|---|
+| `Run_Render_Benchmark.bat` | Runs the automated Vulkan render benchmark and writes Markdown, CSV and JSON reports to `benchmark-results/` |
+| `Run_RT_Debugger.bat` | Connects to an already running engine on port 9000, cycles GI / RT AO / reflections and writes telemetry reports to `rt-debug-results/` |
+| `Run_RT_Temporal_Debug.bat` | Starts the RT debugger with the live History Length debug view enabled |
+
+### Render benchmark
+
+1. Build Release with `build_engine.bat release` (the launcher attempts this if the executable is missing).
+2. Run `Run_Render_Benchmark.bat`.
+3. Optional arguments: capture duration in milliseconds, then warmup duration. Example: `Run_Render_Benchmark.bat 5000 2000`.
+
+The benchmark launches its own windowed Vulkan renderer with a dedicated JSON-RPC port. Do not run another benchmark instance on that port simultaneously.
+
+### RT Debugger
+
+1. Start `LucidEngine.bat` and load the saved `AtriumBenchmark` project for repeatable scene comparisons.
+2. Run `Run_RT_Debugger.bat`.
+3. Optional arguments: WebSocket port, capture duration per case in milliseconds, debug view. Example: `Run_RT_Debugger.bat 9000 15000 history`.
+
+Available debug views: `none`, `raw`, `history`, `normals`, `depth`, `ao`, `reflections`, `variance`.
+
+The debugger attaches to the currently running editor; it does not launch or close the engine. It changes RT quality/features and leaves the final selected configuration active. Use the same scene, resolution, build and GPU driver when comparing runs.
+
+### Temporal diagnostics status
+
+The History Length debug view visualizes the renderer's existing per-pixel GI history length. The RT Debugger records existing profiler telemetry without additional GPU readback. Per-pixel history-age histograms, reflection-specific history age, and rejection counters by cause are **not yet implemented**; they require dedicated shader instrumentation and a fence-safe asynchronous GPU readback path. They are intentionally not represented as available metrics in these reports.
