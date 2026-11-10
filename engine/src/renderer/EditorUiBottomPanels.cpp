@@ -5,6 +5,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -84,7 +85,11 @@ void drawEditorBottomPanels(bool immersivePlay,
             }
 
             // Filter chips
-            static int s_assetFilterCategory = 0; // 0: Wszystko, 1: Tekstury/HDR, 2: Modele, 3: Skrypty
+            static int s_assetFilterCategory = 0;
+            static char s_assetSearch[128] = "";
+            ImGui::SetNextItemWidth(std::min(260.0f * uiScale, ImGui::GetContentRegionAvail().x * 0.42f));
+            ImGui::InputTextWithHint("##AssetSearch", editorText("ui.search_assets", "Search assets..."), s_assetSearch, sizeof(s_assetSearch));
+            ImGui::SameLine();
             auto drawAssetChip = [&](const char* name, int cIdx) {
                 const bool active = (s_assetFilterCategory == cIdx);
                 if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.44f, 0.95f, 1.0f));
@@ -111,22 +116,43 @@ void drawEditorBottomPanels(bool immersivePlay,
             int colIdx = 0;
             std::error_code ec;
             std::vector<fs::directory_entry> entries;
-            for (const auto& entry : fs::directory_iterator(s_currentBrowsePath, ec)) {
-                entries.push_back(entry);
+            std::string browseError;
+            try {
+                fs::directory_iterator it(s_currentBrowsePath, fs::directory_options::skip_permission_denied, ec);
+                const fs::directory_iterator end;
+                while (!ec && it != end) {
+                    entries.push_back(*it);
+                    it.increment(ec);
+                }
+                if (ec) browseError = ec.message();
+            } catch (const fs::filesystem_error& error) {
+                browseError = error.what();
             }
 
-            // Sort: folders first, then alphabetical
+            // Sort folders first; tolerate inaccessible entries instead of aborting the panel.
             std::sort(entries.begin(), entries.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
-                if (a.is_directory() != b.is_directory()) return a.is_directory();
+                std::error_code aError, bError;
+                const bool aDirectory = a.is_directory(aError);
+                const bool bDirectory = b.is_directory(bError);
+                if (aDirectory != bDirectory) return aDirectory;
                 return a.path().filename().string() < b.path().filename().string();
             });
 
             for (const auto& entry : entries) {
                 const std::string filename = entry.path().filename().string();
                 const std::string ext = entry.path().extension().string();
+                std::error_code entryError;
+                const bool isDirectory = entry.is_directory(entryError);
+                if (entryError) continue;
+
+                std::string searchName = filename;
+                std::string searchQuery = s_assetSearch;
+                std::transform(searchName.begin(), searchName.end(), searchName.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                std::transform(searchQuery.begin(), searchQuery.end(), searchQuery.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                if (!searchQuery.empty() && searchName.find(searchQuery) == std::string::npos) continue;
 
                 // Category filtering
-                if (!entry.is_directory()) {
+                if (!isDirectory) {
                     if (s_assetFilterCategory == 1 && ext != ".hdr" && ext != ".exr" && ext != ".png" && ext != ".jpg") continue;
                     if (s_assetFilterCategory == 2 && ext != ".gltf" && ext != ".glb" && ext != ".obj" && ext != ".bin") continue;
                     if (s_assetFilterCategory == 3 && ext != ".js" && ext != ".mjs" && ext != ".ts") continue;
@@ -137,7 +163,7 @@ void drawEditorBottomPanels(bool immersivePlay,
 
                 VectorIconType cardIcon = VectorIconType::Cube;
                 ImU32 iconColor = IM_COL32(100, 180, 245, 255);
-                if (entry.is_directory()) {
+                if (isDirectory) {
                     cardIcon = VectorIconType::Folder;
                     iconColor = IM_COL32(245, 158, 11, 255); // orange
                 } else if (ext == ".hdr" || ext == ".exr") {
@@ -153,7 +179,7 @@ void drawEditorBottomPanels(bool immersivePlay,
 
                 std::string btnLabel = "##Card_" + filename;
                 if (ImGui::Button(btnLabel.c_str(), ImVec2(itemWidth, itemHeight))) {
-                    if (entry.is_directory()) {
+                    if (isDirectory) {
                         s_currentBrowsePath = entry.path();
                     }
                 }
@@ -170,7 +196,7 @@ void drawEditorBottomPanels(bool immersivePlay,
                 dl->AddText(ImVec2(cardPos.x + std::max(4.0f, (itemWidth - textW) * 0.5f), cardPos.y + itemHeight - 22.0f * uiScale), IM_COL32(230, 235, 245, 255), displayLabel.c_str());
 
                 if (ImGui::IsItemHovered()) {
-                    if (entry.is_directory()) ImGui::SetTooltip(editorText("ui.folder_tooltip", "Folder: %s\nDouble-click to open"), filename.c_str());
+                    if (isDirectory) ImGui::SetTooltip(editorText("ui.folder_tooltip", "Folder: %s\nDouble-click to open"), filename.c_str());
                     else ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), entry.file_size(ec));
                 }
 
@@ -183,6 +209,8 @@ void drawEditorBottomPanels(bool immersivePlay,
                 ImGui::PopID();
             }
 
+            if (!browseError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s: %s", editorText("ui.asset_read_error", "Cannot read directory"), browseError.c_str());
+            if (entries.empty() && browseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
             ImGui::EndChild();
         } else {
             static bool s_autoScroll = true;
