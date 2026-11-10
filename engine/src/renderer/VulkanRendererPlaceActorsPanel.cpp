@@ -1,5 +1,6 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
 #include "imgui.h"
@@ -60,13 +61,13 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 ImGui::BeginDisabled(simulationSessionActive);
 
-                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
+                ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("Place Actors", "Dodaj obiekty"));
                 ImGui::SameLine(placePanelW - 22.0f * uiScale);
                 if (ImGui::SmallButton("<")) showPlaceActors = false;
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin panel Place Actors");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Collapse Place Actors panel", "Zwiń panel dodawania obiektów"));
                 static char classSearch[64] = "";
                 ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
+                ImGui::InputTextWithHint("##SearchClasses", editorText("Search Classes...", "Szukaj obiektów..."), classSearch, sizeof(classSearch));
                 ImGui::Separator();
 
                 int matchedCards = 0;
@@ -194,8 +195,8 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 spawnCard("Fire VFX",          "Soft Gaussian HDR Particles",      8,  VectorIconType::Sparkles,  IM_COL32(251, 146, 60, 255));
                 if (matchedCards == 0) {
                     ImGui::Spacing();
-                    ImGui::TextDisabled("No actors match your search.");
-                    ImGui::TextDisabled("Try another name, e.g. Player, Light or Sphere.");
+                    ImGui::TextDisabled(editorText("No actors match your search.", "Brak obiektów pasujących do wyszukiwania."));
+                    ImGui::TextDisabled(editorText("Try another name, e.g. Player, Light or Sphere.", "Spróbuj innej nazwy, np. Player, Light lub Sphere."));
                 }
                 ImGui::EndChild();
                 ImGui::EndDisabled();
