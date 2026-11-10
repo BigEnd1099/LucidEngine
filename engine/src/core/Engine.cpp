@@ -1643,6 +1643,9 @@ function update(entities, dt, input, contacts) {
     }
 
     void Engine::stepSimulation(int steps, float dt) {
+        // Single-step is only valid inside an active, paused Play session.
+        // Prevent editor-mode clicks or remote commands from advancing the scene.
+        if (!m_simulationSessionActive || !m_paused || steps <= 0 || dt <= 0.0f) return;
         for (int i = 0; i < steps; ++i) {
             update(dt);
         }
