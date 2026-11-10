@@ -48,6 +48,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                     ImGui::PopID();
                     ImGui::Spacing();
                 }
+                ImGui::EndDisabled();
                 ImGui::End();
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
@@ -57,6 +58,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::SetNextWindowSize(ImVec2(placePanelW, contentH), ImGuiCond_Always);
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.051f, 0.067f, 0.090f, 1.0f));
                 ImGui::Begin("PlaceActorsPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                ImGui::BeginDisabled(simulationSessionActive);
 
                 ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "Place Actors");
                 ImGui::SameLine(placePanelW - 22.0f * uiScale);
