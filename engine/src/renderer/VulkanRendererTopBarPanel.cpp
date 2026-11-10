@@ -365,7 +365,8 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
 
             if (s_showShortcutsWindow) {
                 ImGui::SetNextWindowSize(ImVec2(520.0f * state.uiScale, 440.0f * state.uiScale), ImGuiCond_FirstUseEver);
-                if (ImGui::Begin(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts"), &s_showShortcutsWindow, ImGuiWindowFlags_NoCollapse)) {
+                const std::string shortcutsTitle = std::string(editorText("ui.keyboard_shortcuts", "Keyboard Shortcuts")) + "###KeyboardShortcuts";
+                if (ImGui::Begin(shortcutsTitle.c_str(), &s_showShortcutsWindow, ImGuiWindowFlags_NoCollapse)) {
                     auto shortcutRow = [&](const char* keys, const char* description) {
                         ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", keys);
                         ImGui::SameLine(150.0f * state.uiScale);
