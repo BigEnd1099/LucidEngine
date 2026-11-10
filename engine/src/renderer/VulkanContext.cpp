@@ -28,6 +28,10 @@ namespace engine::renderer {
             if (!m_window) {
                 throw std::runtime_error("glfwCreateWindow failed!");
             }
+            if (m_benchmarkMode) {
+                glfwMaximizeWindow(m_window);
+                glfwPollEvents();
+            }
         }
 #endif
         createInstance();
