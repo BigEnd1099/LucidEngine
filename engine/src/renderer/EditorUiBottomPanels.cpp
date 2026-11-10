@@ -58,8 +58,9 @@ void drawEditorBottomPanels(bool immersivePlay,
         ImGui::Separator();
 
         if (showContentDrawer) {
-            // Blender/BUI inspired file browser navigation bar
             static fs::path s_currentBrowsePath = "engine/assets";
+            static fs::path s_selectedAssetPath;
+            // Blender/BUI inspired file browser navigation bar
             std::error_code pathError;
             if (!fs::is_directory(s_currentBrowsePath, pathError) || pathError) {
                 pathError.clear();
@@ -91,7 +92,6 @@ void drawEditorBottomPanels(bool immersivePlay,
             static fs::path s_cachedBrowsePath;
             static std::vector<fs::directory_entry> s_cachedEntries;
             static std::string s_cachedBrowseError;
-            static fs::path s_selectedAssetPath;
             static bool s_refreshAssets = true;
             if (s_cachedBrowsePath != s_currentBrowsePath) s_refreshAssets = true;
             if (ImGui::SmallButton(editorText("ui.refresh_assets", "Refresh"))) s_refreshAssets = true;
@@ -206,6 +206,19 @@ void drawEditorBottomPanels(bool immersivePlay,
                     }
                 }
 
+                // Only glTF assets are currently connected to the runtime mesh importer.
+                std::string normalizedExt = ext;
+                std::transform(normalizedExt.begin(), normalizedExt.end(), normalizedExt.begin(),
+                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                const bool isImportableModel = !isDirectory && (normalizedExt == ".gltf" || normalizedExt == ".glb");
+                if (isImportableModel && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                    const std::string payloadPath = entry.path().string();
+                    ImGui::SetDragDropPayload("LUCID_ASSET_PATH", payloadPath.c_str(), payloadPath.size() + 1);
+                    ImGui::Text("%s", filename.c_str());
+                    ImGui::TextDisabled("%s", editorText("ui.drop_model_into_viewport", "Drop into the 3D viewport to create an actor"));
+                    ImGui::EndDragDropSource();
+                }
+
                 // Draw selection outline without changing the button's hit target.
                 ImDrawList* dl = ImGui::GetWindowDrawList();
                 if (!isDirectory && s_selectedAssetPath == entry.path()) {
@@ -227,7 +240,12 @@ void drawEditorBottomPanels(bool immersivePlay,
                     } else {
                         const auto fileSize = entry.file_size(ec);
                         if (ec) ec.clear();
-                        ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), fileSize);
+                        if (isImportableModel) {
+                            ImGui::SetTooltip("%s\n%s", filename.c_str(),
+                                editorText("ui.drag_model_tooltip", "Drag this glTF model into the 3D viewport."));
+                        } else {
+                            ImGui::SetTooltip(editorText("ui.file_tooltip", "File: %s\nSize: %zu B"), filename.c_str(), fileSize);
+                        }
                     }
                 }
 
