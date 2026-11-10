@@ -200,7 +200,9 @@ namespace engine::ecs {
                     glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), transform.scale);
             }
             if (m_registry.all_of<HierarchyComponent>(entity)) {
-                const auto children = m_registry.get<HierarchyComponent>(entity).children;
+                // Recursive propagation never edits hierarchy links, so avoid
+                // copying the child list on every traversal.
+                const auto& children = m_registry.get<HierarchyComponent>(entity).children;
                 for (entt::entity child : children)
                     updateWorldRecursive(child, world, visited);
             }
