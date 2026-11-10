@@ -34,6 +34,9 @@ void VulkanRenderer::drawEditorViewportOverlay(EditorViewportOverlayState& state
                 gizmoToolBtn("##GizS", EditorGizmoMode::SCALE,     VectorIconType::Scale);
                 if (ImGui::Button(state.snapEnabled ? " Snap: 0.5m " : " Snap: Off ", ImVec2(0, 22.0f * state.uiScale))) state.snapEnabled = !state.snapEnabled;
                 ImGui::SameLine();
+                } else {
+                    ImGui::TextDisabled("Gizmo disabled in Play mode");
+                    ImGui::SameLine(0.0f, 6.0f * state.uiScale);
                 }
                 if (ImGui::Button((" Cam " + std::to_string(state.cameraSpeed) + " ").c_str(), ImVec2(0, 22.0f * state.uiScale))) state.cameraSpeed = (state.cameraSpeed % 8) + 1;
                 ImGui::EndChild();
