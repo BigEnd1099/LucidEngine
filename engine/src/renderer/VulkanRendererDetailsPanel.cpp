@@ -56,7 +56,12 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 ImGui::BeginDisabled(simulationSessionActive);
 
                 if (m_detailsTab == 0) {
-                    if (selectedEntity == entt::null || !registry.get().valid(selectedEntity)) {
+                    // Clear stale handles before any component access (e.g. after deleting an entity elsewhere).
+                    if (selectedEntity != entt::null && !registry.get().valid(selectedEntity)) {
+                        selectedEntity = entt::null;
+                        if (engine) engine->setSelectedEntity(entt::null);
+                    }
+                    if (selectedEntity == entt::null) {
                         ImGui::Spacing();
                         ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), editorText("ui.select_an_object_in_the_scene", "Select an object in the scene"));
                         ImGui::TextDisabled(editorText("ui.select_any_object_in_the_3d_viewport_or_the_outliner_above", "Select any object in the 3D viewport or the Outliner above,"));
