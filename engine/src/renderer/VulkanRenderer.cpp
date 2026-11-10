@@ -80,7 +80,7 @@ namespace engine::renderer {
             initImGui();
         }
 #endif
-        if (m_context->isHeadless()) {
+        {
             VkFenceCreateInfo headlessFenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
             headlessFenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
             if (vkCreateFence(m_context->getDevice(), &headlessFenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS) {
