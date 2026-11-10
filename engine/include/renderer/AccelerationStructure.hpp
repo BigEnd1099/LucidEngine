@@ -24,7 +24,7 @@ namespace engine::renderer {
         bool isReady() const { return m_ready; }
         VkAccelerationStructureKHR getTLAS() const { return m_tlas.handle; }
 
-        bool ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, const core::MeshAsset& mesh, VkBuffer vertexBuffer, bool dynamicGeometry);
+        bool ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, const core::MeshAsset& mesh, VkBuffer vertexBuffer, bool dynamicGeometry, bool geometryChanged);
         bool buildTLAS(VkCommandBuffer cmd, const std::vector<Instance>& instances, bool* outHandleChanged = nullptr);
         void releaseCompletedScratch();
 
