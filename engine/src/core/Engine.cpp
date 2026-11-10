@@ -30,6 +30,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <unordered_set>
+#include <unordered_map>
 
 namespace engine::core {
 
@@ -754,6 +755,13 @@ namespace engine::core {
 
             for (const auto& entJson : ents) {
                 if (!entJson.is_object()) continue;
+                if (entJson.contains("sourceId")) {
+                    const uint32_t sourceId = entJson["sourceId"].get<uint32_t>();
+                    const uint32_t newId = spawnEntityFromJson(entJson);
+                    validRestoredIds.insert(newId);
+                    restoredEntityMap[sourceId] = static_cast<entt::entity>(newId);
+                    continue;
+                }
                 if (!entJson.contains("id")) {
                     uint32_t newId = spawnEntityFromJson(entJson);
                     validRestoredIds.insert(newId);
@@ -933,7 +941,8 @@ namespace engine::core {
             // This keeps references valid even when EnTT assigns different runtime IDs.
             for (const auto& entJson : ents) {
                 if (!entJson.is_object() || !entJson.contains("id")) continue;
-                const uint32_t savedId = entJson["id"].get<uint32_t>();
+                const uint32_t savedId = entJson.contains("sourceId")
+                    ? entJson["sourceId"].get<uint32_t>() : entJson["id"].get<uint32_t>();
                 auto childIt = restoredEntityMap.find(savedId);
                 if (childIt == restoredEntityMap.end() || !m_registry->get().valid(childIt->second)) continue;
                 const entt::entity child = childIt->second;
@@ -2783,10 +2792,26 @@ function update(entities, dt, input, contacts) {
             }
 
             // 4. Restore entities
+            if (proj.contains("entities") && proj["entities"].is_array()) {
+                for (auto& entityJson : proj["entities"]) {
+                    if (entityJson.is_object() && entityJson.contains("id")) {
+                        entityJson["sourceId"] = entityJson["id"];
+                        entityJson.erase("id");
+                    }
+                }
+            }
             if (proj.contains("entities")) {
                 applySnapshotJson(proj["entities"].dump());
             } else if (proj.contains("scenes") && proj["scenes"].is_array() && !proj["scenes"].empty()) {
                 auto& sc = proj["scenes"][0];
+                if (sc.contains("entities") && sc["entities"].is_array()) {
+                    for (auto& entityJson : sc["entities"]) {
+                        if (entityJson.is_object() && entityJson.contains("id")) {
+                            entityJson["sourceId"] = entityJson["id"];
+                            entityJson.erase("id");
+                        }
+                    }
+                }
                 if (sc.contains("entities")) {
                     applySnapshotJson(sc["entities"].dump());
                 }
