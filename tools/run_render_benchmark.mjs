@@ -405,6 +405,12 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
   // Report throughput from the same measured frame-time window; retain the smoothed value separately.
   averages.fps = averages.frameTimeMs > 0 ? round(1000.0 / averages.frameTimeMs) : 0;
 
+  // FPS is inverse frame time: the useful tail metric is throughput at p95 frame time
+  // (equivalent to a lower-tail FPS value), not the 95th percentile of FPS itself.
+  p95.fpsAtP95FrameTime = p95.frameTimeMs > 0
+    ? round(1000.0 / p95.frameTimeMs)
+    : 0;
+
   const result = {
     name, profile: { id: profile.id, label: profile.label }, settings: actual,
     features: {
@@ -467,11 +473,14 @@ function writeSummary(results, sceneMeta) {
   for (const result of results) {
     lines.push('| ' + result.name + ' | ' + fields.map(key => result.averages[key] ?? 0).join(' | ') + ' |');
   }
-  lines.push('', '## Frame and GPU p95 values', '',
-    '| Test | ' + fields.join(' | ') + ' |',
+  const p95MetricKey = key => key === 'fps' ? 'fpsAtP95FrameTime' : key;
+  const p95MetricLabel = key => key === 'fps' ? 'fpsAtP95FrameTime' : key;
+  lines.push('', '## Sampled profiler snapshot p95 values', '',
+    '| Test | ' + fields.map(p95MetricLabel).join(' | ') + ' |',
     '|---|' + fields.map(() => '---:').join('|') + '|');
   for (const result of results) {
-    lines.push('| ' + result.name + ' | ' + fields.map(key => result.p95[key] ?? 0).join(' | ') + ' |');
+    lines.push('| ' + result.name + ' | ' +
+      fields.map(key => result.p95[p95MetricKey(key)] ?? 0).join(' | ') + ' |');
   }
   lines.push('', '## Screen-space quality settings', '',
     '| Test | GTAO radius | GTAO intensity | SSGI intensity | Ground reflectance | Multi-bounce | Ground color (linear RGB) |',
@@ -521,6 +530,8 @@ function writeSummary(results, sceneMeta) {
     '- Samples are polled over JSON-RPC from a dedicated maximized windowed Vulkan renderer (swapchain + presentation enabled).',
     '- Benchmark mode hides editor UI and disables viewport-driven resolution changes; the offscreen render target stays fixed to the configured benchmark resolution.',
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
+    '- p95 values are percentiles across the approximately 20 profiler snapshots polled at 100 ms intervals; they are not per-frame GPU/frame-time percentiles.',
+    '- fpsAtP95FrameTime is calculated as 1000 / p95(frameTimeMs) across those snapshots; it is a sampled slow-snapshot throughput indicator, not a per-frame 1% low.',
     '- RT stage timings retain inclusive values and additionally expose dispatch-only execution and dependency-gap intervals.',
     '- Dependency-gap intervals are GPU scheduling gaps around synchronization barriers, not direct measurements of barrier instruction cost.',
     '- RT quality telemetry (samples, internal GI resolution, temporal history and SVGF state) is observational; the harness does not change RT quality defaults or reflection algorithms.',
@@ -531,7 +542,7 @@ function writeSummary(results, sceneMeta) {
     'ssgiGroundColorR', 'ssgiGroundColorG', 'ssgiGroundColorB',
     'rtEnabled', 'rtAvailable', 'rtShadowsEnabled', 'rtGiHalfRes', 'rtGiIntensity', 'rtDenoiseEnabled',
     'rtReflectionMinThroughput'])];
-  const p95Fields = csvFields.map(key => 'p95_' + key);
+  const p95Fields = csvFields.map(key => 'p95_' + (key === 'fps' ? 'fpsAtP95FrameTime' : key));
   const csvEscape = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
   const csvHeader = ['test', 'profile', 'settings_json',
     ...csvFields.map(key => 'avg_' + key), ...p95Fields];
@@ -540,7 +551,7 @@ function writeSummary(results, sceneMeta) {
       csvEscape(r.name), csvEscape(r.profile?.id),
       csvEscape(JSON.stringify(r.settings || {})),
       ...csvFields.map(key => r.averages[key] ?? 0),
-      ...csvFields.map(key => r.p95[key] ?? 0)
+      ...csvFields.map(key => r.p95[key === 'fps' ? 'fpsAtP95FrameTime' : key] ?? 0)
     ].join(','))].join('\n') + '\n');
   fs.writeFileSync(path.join(outputDir, 'REPORT.json'), JSON.stringify({
     generatedAt: new Date().toISOString(), executable: EXE, port: PORT,
