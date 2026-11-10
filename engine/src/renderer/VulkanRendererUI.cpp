@@ -159,6 +159,8 @@ namespace engine::renderer {
             double updateCpuMs{0.0};
             double animationCpuMs{0.0};
             double gpuFrameMs{0.0};
+            double drawItems{0.0};
+            double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
             std::unordered_map<std::string, double> cpuScopes;
         };
@@ -176,6 +178,8 @@ namespace engine::renderer {
             sample.updateCpuMs = updateCpuMs;
             sample.animationCpuMs = animationCpuMs;
             sample.gpuFrameMs = gpuFrameMs;
+            sample.drawItems = metrics.value("drawItems", 0.0);
+            sample.rtInstances = metrics.value("rtInstances", 0.0);
 
             const char* gpuMetricNames[] = {
                 "gpuScenePrepMs", "gpuShadowMs", "gpuDepthMs", "gpuGBufferMs",
@@ -226,6 +230,8 @@ namespace engine::renderer {
         const double avgUpdateCpuMs = average([](const ProfilerWindowSample& s) { return s.updateCpuMs; });
         const double avgAnimationCpuMs = average([](const ProfilerWindowSample& s) { return s.animationCpuMs; });
         const double avgGpuFrameMs = average([](const ProfilerWindowSample& s) { return s.gpuFrameMs; });
+        const double avgDrawItems = average([](const ProfilerWindowSample& s) { return s.drawItems; });
+        const double avgRtInstances = average([](const ProfilerWindowSample& s) { return s.rtInstances; });
         auto averageCpuScope = [&](const std::string& name) -> double {
             double sum = 0.0;
             size_t count = 0;
@@ -324,8 +330,10 @@ namespace engine::renderer {
                 report << "\n[SCENE]\n";
                 report << "Registry entities: " << registryEntities << "\n";
                 report << "Mesh entities: " << meshEntities << "\n";
-                report << "Draw items: " << drawItems << "\n";
-                report << "RT instances: " << rtInstances << "\n";
+                report << "Average draw items (1s): " << avgDrawItems << "\n";
+                report << "Average RT instances (1s): " << avgRtInstances << "\n";
+                report << "Current draw items: " << drawItems << "\n";
+                report << "Current RT instances: " << rtInstances << "\n";
                 if (engineStats.contains("loadedCells")) {
                     report << "World cells: " << engineStats.value("loadedCells", uint64_t{0})
                            << " / " << engineStats.value("totalCells", uint64_t{0}) << "\n";
