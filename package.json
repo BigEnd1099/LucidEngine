@@ -23,7 +23,8 @@
     "test": "node tests/test_all.mjs",
     "test:engine": "node tests/test_client.mjs && node tests/test_gltf.mjs",
     "test:mcp": "node tests/test_mcp.mjs",
-    "benchmark:render": "node tools/run_render_benchmark.mjs"
+    "benchmark:render": "node tools/run_render_benchmark.mjs",
+    "debug:rt": "node tools/run_rt_debugger.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",
