@@ -35,6 +35,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                     ImGui::SameLine(0.0f, 14.0f * state.uiScale);
 
                     if (ImGui::BeginMenu("File")) {
+                        ImGui::BeginDisabled(state.simulationSessionActive);
                         if (ImGui::MenuItem("New Level (Nowy poziom)", "Ctrl+N")) {
                             if (engine) { selectedEntity = entt::null; engine->setCurrentPreset("empty"); engine->resetScene("empty"); }
                         }
@@ -60,6 +61,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                                 state.engineNotificationTimer = 5.0f;
                             }
                         }
+                        ImGui::EndDisabled();
                         ImGui::EndMenu();
                     }
                     if (ImGui::BeginMenu("Edit")) {
