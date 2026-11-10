@@ -137,6 +137,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
 
         ImGui::BeginChild("OutlinerTreeScroll", ImVec2(0, 0), false);
         auto view = registry.get().view<ecs::TransformComponent>();
+        int visibleEntityCount = 0;
         for (auto entity : view) {
             const auto& entityRegistry = registry.get();
             switch (s_outlinerCategory) {
@@ -164,10 +165,12 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             }
             if (outlinerFilter[0] != '\0') {
                 std::string f = outlinerFilter, l = label;
-                std::transform(f.begin(), f.end(), f.begin(), ::tolower);
-                std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+                const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+                std::transform(f.begin(), f.end(), f.begin(), toLower);
+                std::transform(l.begin(), l.end(), l.begin(), toLower);
                 if (l.find(f) == std::string::npos) continue;
             }
+            ++visibleEntityCount;
             const bool isSelected = (selectedEntity == entity);
             ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
 
@@ -262,6 +265,13 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                 ImGui::EndPopup();
             }
             ImGui::PopID();
+        }
+        if (visibleEntityCount == 0) {
+            ImGui::Spacing();
+            ImGui::TextDisabled(view.empty() ? "Scene is empty." : "No entities match the current filters.");
+            if (!view.empty() && hasFilter && ImGui::SmallButton("Clear search filter")) {
+                outlinerFilter[0] = 0;
+            }
         }
         ImGui::EndChild();
         ImGui::End();
