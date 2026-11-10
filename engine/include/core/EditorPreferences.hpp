@@ -6,7 +6,9 @@
 
 namespace engine::core {
 
-    struct EditorPreferences {\n        // UI language: "en" (default) or "pl".\n        std::string language{"en"};
+    struct EditorPreferences {
+        // UI language: "en" (default) or "pl".
+        std::string language{"en"};
         // --- UI Layout & Display ---
         float uiScale{1.0f};
         bool showPlaceActors{true};
