@@ -351,6 +351,32 @@ namespace engine::core {
     }
 
     uint32_t AssetManager::loadGLTFAsset(fastgltf::Asset& asset) {
+        const size_t meshCheckpoint = m_meshes.size();
+        const size_t materialCheckpoint = m_materials.size();
+        const size_t textureCheckpoint = m_textures.size();
+        const uint32_t nextMeshCheckpoint = m_nextMeshId;
+        const uint32_t nextMaterialCheckpoint = m_nextMaterialId;
+        const uint32_t nextTextureCheckpoint = m_nextTextureId;
+        auto rollbackImport = [&]() {
+            for (size_t i = textureCheckpoint; i < m_textures.size(); ++i) {
+                auto& texture = m_textures[i];
+                if (texture->imageView) vkDestroyImageView(m_context->getDevice(), texture->imageView, nullptr);
+                if (texture->image) vmaDestroyImage(m_context->getAllocator(), texture->image, texture->allocation);
+            }
+            for (size_t i = meshCheckpoint; i < m_meshes.size(); ++i) {
+                auto& mesh = m_meshes[i];
+                if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
+                if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+            }
+            m_textures.resize(textureCheckpoint);
+            m_meshes.resize(meshCheckpoint);
+            m_materials.resize(materialCheckpoint);
+            m_nextMeshId = nextMeshCheckpoint;
+            m_nextMaterialId = nextMaterialCheckpoint;
+            m_nextTextureId = nextTextureCheckpoint;
+            m_lastImportedInstances.clear();
+            m_lastImportedNodes.clear();
+        };
         try {
             uint32_t rootMeshId = 0;
             
@@ -419,9 +445,15 @@ namespace engine::core {
                 textureAsset->id = m_nextTextureId++;
                 textureAsset->width = static_cast<uint32_t>(width);
                 textureAsset->height = static_cast<uint32_t>(height);
-                uploadTexture(textureAsset->image, textureAsset->allocation, textureAsset->imageView,
-                    pixels.get(), textureAsset->width, textureAsset->height,
-                    srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
+                try {
+                    uploadTexture(textureAsset->image, textureAsset->allocation, textureAsset->imageView,
+                        pixels.get(), textureAsset->width, textureAsset->height,
+                        srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
+                } catch (...) {
+                    if (textureAsset->imageView) vkDestroyImageView(m_context->getDevice(), textureAsset->imageView, nullptr);
+                    if (textureAsset->image) vmaDestroyImage(m_context->getAllocator(), textureAsset->image, textureAsset->allocation);
+                    throw;
+                }
                 const uint32_t id = textureAsset->id;
                 m_textures.push_back(std::move(textureAsset));
                 gltfTextureCache.emplace(cacheKey, id);
@@ -547,8 +579,16 @@ namespace engine::core {
             meshAsset->vertexCount = vertices.size();
             meshAsset->indexCount = indices.size();
             
-            uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(), vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-            uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+            try {
+                uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(),
+                    vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(),
+                    indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+            } catch (...) {
+                if (meshAsset->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->vertexBuffer, meshAsset->vertexAllocation);
+                if (meshAsset->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->indexBuffer, meshAsset->indexAllocation);
+                throw;
+            }
 
             if (rootMeshId == 0) rootMeshId = meshAsset->id;
             
@@ -687,10 +727,12 @@ namespace engine::core {
             }
             return rootMeshId;
         } catch (const std::exception& e) {
-            core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
+            rollbackImport();
+            core::Logger::error(std::string("GLTF asset import rolled back: ") + e.what());
             return 0;
         } catch (...) {
-            core::Logger::error("Unknown GLTF asset import exception");
+            rollbackImport();
+            core::Logger::error("Unknown GLTF asset import exception; import rolled back");
             return 0;
         }
     }
