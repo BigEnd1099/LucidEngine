@@ -101,10 +101,20 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                             ImGui::EndMenu();
                         }
                         if (ImGui::BeginMenu(editorText("ui.interface_scale", "Interface Scale"))) {
-                            if (ImGui::MenuItem(editorText("ui.scale_85", "85% (Compact)"), nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) m_uiScale = 0.85f;
-                            if (ImGui::MenuItem(editorText("ui.scale_100", "100% (Standard)"), nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) m_uiScale = 1.0f;
-                            if (ImGui::MenuItem(editorText("ui.scale_125", "125% (Large)"), nullptr, std::abs(m_uiScale - 1.25f) < 0.05f)) m_uiScale = 1.25f;
-                            if (ImGui::MenuItem(editorText("ui.scale_150", "150% (Extra large / 4K)"), nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) m_uiScale = 1.50f;
+                            auto applyScale = [&](float scale) {
+                                m_uiScale = scale;
+                                state.uiScale = scale;
+                                if (engine) {
+                                    engine->setUiScale(scale);
+                                    auto& preferences = engine->getPreferences();
+                                    preferences.uiScale = scale;
+                                    if (preferences.autoSavePreferences) engine->saveUserPreferences();
+                                }
+                            };
+                            if (ImGui::MenuItem(editorText("ui.scale_85", "85% (Compact)"), nullptr, std::abs(m_uiScale - 0.85f) < 0.05f)) applyScale(0.85f);
+                            if (ImGui::MenuItem(editorText("ui.scale_100", "100% (Standard)"), nullptr, std::abs(m_uiScale - 1.0f) < 0.05f)) applyScale(1.0f);
+                            if (ImGui::MenuItem(editorText("ui.scale_125", "125% (Large)"), nullptr, std::abs(m_uiScale - 1.25f) < 0.05f)) applyScale(1.25f);
+                            if (ImGui::MenuItem(editorText("ui.scale_150", "150% (Extra large / 4K)"), nullptr, std::abs(m_uiScale - 1.50f) < 0.05f)) applyScale(1.50f);
                             ImGui::EndMenu();
                         }
                         if (ImGui::BeginMenu(editorText("ui.render_scale", "Render Scale"))) {
