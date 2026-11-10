@@ -755,6 +755,12 @@ namespace engine::renderer {
                                             meshComponent.meshId = meshId;
                                             meshComponent.materialId = assetManager->getMesh(meshId)->materialId;
                                             registry.get().emplace<ecs::MeshComponent>(primitiveEntity, meshComponent);
+                                            if (registry.get().all_of<ecs::SkinComponent>(nodeEntities[nodeIndex]))
+                                                registry.get().emplace<ecs::SkinComponent>(primitiveEntity,
+                                                    registry.get().get<ecs::SkinComponent>(nodeEntities[nodeIndex]));
+                                            if (registry.get().all_of<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]))
+                                                registry.get().emplace<ecs::MorphWeightsComponent>(primitiveEntity,
+                                                    registry.get().get<ecs::MorphWeightsComponent>(nodeEntities[nodeIndex]));
                                             registry.setParent(primitiveEntity, nodeEntities[nodeIndex]);
                                             ++createdCount;
                                         }
