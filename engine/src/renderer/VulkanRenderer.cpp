@@ -80,6 +80,13 @@ namespace engine::renderer {
             initImGui();
         }
 #endif
+        if (m_context->isHeadless()) {
+            VkFenceCreateInfo headlessFenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            headlessFenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+            if (vkCreateFence(m_context->getDevice(), &headlessFenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create headless frame fence!");
+            }
+        }
     }
 
     VulkanRenderer::~VulkanRenderer() {
@@ -95,6 +102,11 @@ namespace engine::renderer {
                 if (cached.buffer) vmaDestroyBuffer(m_context->getAllocator(), cached.buffer, cached.allocation);
             }
             m_deformedVertexCache.clear();
+
+            if (m_headlessInFlightFence) {
+                vkDestroyFence(dev, m_headlessInFlightFence, nullptr);
+                m_headlessInFlightFence = VK_NULL_HANDLE;
+            }
 
             m_rtDenoiser.cleanup();
             m_accelerationStructure.cleanup();
