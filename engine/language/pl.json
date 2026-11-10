@@ -357,6 +357,15 @@
     "ui.profiler_animation_cpu": "Animacja / Skinning CPU",
     "ui.profiler_timing_note": "Czas GPU dotyczy poprzedniej zakończonej klatki; pomiary CPU są opóźnione o jedną klatkę.",
     "ui.profiler_loop_frame_note": "Czas pętli obejmuje synchronizację FPS i uśpienie wątku — nie jest czystym czasem pracy CPU.",
-    "ui.profiler_collecting_samples": "Zbieranie próbek..."
+    "ui.profiler_collecting_samples": "Zbieranie próbek...",
+    "ui.profiler_gpu_passes": "PODZIAŁ ETAPÓW GPU",
+    "ui.profiler_gpu_pass": "Etap GPU",
+    "ui.profiler_gpu_time": "Czas",
+    "ui.profiler_gpu_scene_prep": "Przygotowanie sceny / budowa RT",
+    "ui.profiler_gpu_shadows": "Mapy cieni",
+    "ui.profiler_gpu_geometry": "Geometria / AO / RT",
+    "ui.profiler_gpu_hdr": "Oświetlenie HDR",
+    "ui.profiler_gpu_post": "Post-processing",
+    "ui.profiler_gpu_ui": "UI + swapchain"
   }
 }
