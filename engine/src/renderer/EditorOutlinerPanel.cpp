@@ -76,6 +76,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Wyczysc filtr");
         }
         ImGui::SameLine();
+        ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
         if (ImGui::Button("+ Spawn", ImVec2(58.0f * uiScale, 0))) {
             auto newEnt = registry.createEntity();
             glm::vec3 sp = cameraPosition + cameraForward * 6.0f;
@@ -86,6 +87,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             selectedEntity = newEnt;
             if (engine) engine->setSelectedEntity(selectedEntity);
         }
+        ImGui::EndDisabled();
         ImGui::Separator();
 
         // Blender duplicate entity helper
@@ -124,7 +126,8 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         };
 
         // Hotkey [Ctrl+D] Duplikuj zaznaczony obiekt
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        if (!(engine && engine->isSimulationSessionActive()) &&
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
             ImGui::IsKeyPressed(ImGuiKey_D) && ImGui::GetIO().KeyCtrl &&
             selectedEntity != entt::null && registry.get().valid(selectedEntity)) {
             selectedEntity = duplicateEntity(selectedEntity);
@@ -177,6 +180,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 0.4f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.15f, 0.25f, 0.6f));
+            ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
             if (ImGui::Button(eyeBtnId, ImVec2(eyeSz, eyeSz))) {
                 if (hasMesh) {
                     auto& mc = registry.get().get<ecs::MeshComponent>(entity);
@@ -184,6 +188,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                 }
             }
             ImGui::PopStyleColor(3);
+            ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(isVis ? "Widoczny w oknie 3D (Kliknij, aby ukryc)" : "Ukryty w oknie 3D (Kliknij, aby pokazac)");
             }
