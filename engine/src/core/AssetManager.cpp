@@ -332,7 +332,7 @@ namespace engine::core {
         m_lastImportedInstances.clear();
         if (data.empty()) return 0;
         try {
-            fastgltf::Parser parser;
+            fastgltf::Parser parser(fastgltf::Extensions::EXT_mesh_gpu_instancing);
             auto buffer = fastgltf::GltfDataBuffer::FromBytes(reinterpret_cast<const std::byte*>(data.data()), data.size());
             if (!buffer) return 0;
             const auto options = fastgltf::Options::DecomposeNodeMatrices |
