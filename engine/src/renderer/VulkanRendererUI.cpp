@@ -623,7 +623,7 @@ namespace engine::renderer {
                                     const std::string modelName = droppedPath.stem().string().empty()
                                         ? std::string("ImportedModel") : droppedPath.stem().string();
                                     const glm::vec3 placementOrigin = camPos + front * 5.0f;
-                                    std::vector<entt::entity> nodeEntities(importedNodes.size(), entt::null);
+                                    std::vector<entt::entity> nodeEntities(importedNodes.size(), static_cast<entt::entity>(entt::null));
                                     entt::entity firstCreated = entt::null;
                                     size_t createdCount = 0;
 
