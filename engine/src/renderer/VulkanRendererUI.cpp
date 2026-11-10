@@ -461,25 +461,28 @@ namespace engine::renderer {
                 m_viewportDescriptor = ImGui_ImplVulkan_AddTexture(
                     m_viewportSampler, m_colorImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             }
-            if (m_viewportDescriptor != VK_NULL_HANDLE && viewportPanelSize.x > 0 && viewportPanelSize.y > 0) {
+            const bool hasViewportImage = m_viewportDescriptor != VK_NULL_HANDLE &&
+                viewportPanelSize.x > 0 && viewportPanelSize.y > 0;
+            if (hasViewportImage) {
                 ImGui::Image((ImTextureID)m_viewportDescriptor, viewportPanelSize);
             }
 
             const ImVec2 vMin = ImGui::GetItemRectMin();
             const ImVec2 vSize = ImGui::GetItemRectSize();
-            const bool isHovered = ImGui::IsItemHovered();
+            const bool isHovered = hasViewportImage && ImGui::IsItemHovered();
             const bool isWindowFocused = ImGui::IsWindowFocused();
 
             // Content Drawer -> Viewport: import glTF/GLB files as new scene actors.
             bool isAssetDropHovered = false;
-            if (ImGui::BeginDragDropTarget()) {
+            if (hasViewportImage && !(engine && engine->isSimulationSessionActive()) &&
+                assetManager && ImGui::BeginDragDropTarget()) {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
                         "LUCID_ASSET_PATH", ImGuiDragDropFlags_AcceptBeforeDelivery)) {
                     isAssetDropHovered = payload->Preview || payload->Delivery;
                     if (payload->Delivery && payload->Data && payload->DataSize > 1) {
                         const char* rawPath = static_cast<const char*>(payload->Data);
                         const char* pathEnd = static_cast<const char*>(std::memchr(rawPath, '\0', static_cast<size_t>(payload->DataSize)));
-                        if (pathEnd && !(engine && engine->isSimulationSessionActive()) && assetManager) {
+                        if (pathEnd) {
                             const std::filesystem::path droppedPath(std::string(rawPath, pathEnd));
                             std::string extension = droppedPath.extension().string();
                             std::transform(extension.begin(), extension.end(), extension.begin(),
