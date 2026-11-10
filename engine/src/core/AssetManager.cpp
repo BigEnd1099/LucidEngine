@@ -497,6 +497,7 @@ namespace engine::core {
                     vertices[positionIndex].normal = glm::vec3(0.0f);
                     vertices[positionIndex].texCoord = glm::vec2(0.0f);
                     vertices[positionIndex].tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                    vertices[positionIndex].color = glm::vec4(1.0f);
                     ++positionIndex;
                 });
 
@@ -526,6 +527,34 @@ namespace engine::core {
                         }
                         ++index;
                     });
+            }
+
+            // glTF COLOR_0 may be VEC3 or VEC4 and may use normalized integer storage.
+            if (auto it = primitive.findAttribute("COLOR_0"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                const auto& colorAccessor = asset.accessors[it->accessorIndex];
+                size_t index = 0;
+                if (colorAccessor.type == fastgltf::AccessorType::Vec3) {
+                    fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, colorAccessor,
+                        [&](const fastgltf::math::fvec3& value) {
+                            if (index < vertices.size()) {
+                                vertices[index].color = glm::vec4(
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), 1.0f);
+                            }
+                            ++index;
+                        });
+                } else if (colorAccessor.type == fastgltf::AccessorType::Vec4) {
+                    fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, colorAccessor,
+                        [&](const fastgltf::math::fvec4& value) {
+                            if (index < vertices.size()) {
+                                vertices[index].color = glm::vec4(
+                                    static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                    static_cast<float>(value[2]), static_cast<float>(value[3]));
+                            }
+                            ++index;
+                        });
+                }
             }
 
             if (auto it = primitive.findAttribute("TANGENT"); it != primitive.attributes.end() &&
