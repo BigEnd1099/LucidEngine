@@ -162,6 +162,9 @@
     "ui.camera_side_scroller": "Side-Scroller",
     "ui.camera_mode_tooltip": "Camera mode: Editor free camera or player tracking (TPP/FPP/Top-Down)",
     "ui.camera_fov_format": "Camera FOV: %.0f deg",
-    "ui.camera_fov_tooltip": "Editor camera field of view (FOV)"
+    "ui.camera_fov_tooltip": "Editor camera field of view (FOV)",
+    "ui.camera_speed_prefix": " Cam ",
+    "ui.playing": "     PLAYING ",
+    "ui.play": "     Play "
   }
 }
