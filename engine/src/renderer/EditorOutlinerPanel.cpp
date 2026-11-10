@@ -240,21 +240,21 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
                     }
                 }
                 ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-                if (ImGui::MenuItem("Zresetuj pozycje (0, 0, 0)")) {
+                if (ImGui::MenuItem(editorText("ui.reset_position_context", "Reset Position (0, 0, 0)"))) {
                     if (registry.get().all_of<ecs::TransformComponent>(entity)) {
                         auto& tc = registry.get().get<ecs::TransformComponent>(entity);
                         tc.position = glm::vec3(0.0f);
                         if (engine) engine->syncEntityTransformPhysics(entity);
                     }
                 }
-                if (ImGui::MenuItem("Duplikuj obiekt [Ctrl+D]")) {
+                if (ImGui::MenuItem(editorText("ui.duplicate_entity_context", "Duplicate Object [Ctrl+D]"))) {
                     selectedEntity = duplicateEntity(entity);
                     if (engine) engine->setSelectedEntity(selectedEntity);
                 }
                 ImGui::Separator();
                 ImGui::EndDisabled();
                 ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-                if (ImGui::MenuItem("Usun obiekt [Delete]")) {
+                if (ImGui::MenuItem(editorText("ui.delete_entity_context", "Delete Object [Delete]"))) {
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(entity)); else registry.get().destroy(entity);
                     if (selectedEntity == entity) selectedEntity = entt::null;
                     if (engine) engine->setSelectedEntity(entt::null);
