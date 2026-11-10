@@ -2,6 +2,7 @@
 #include <entt/entt.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <unordered_set>
 #include "Components.hpp"
@@ -39,9 +40,16 @@ namespace engine::ecs {
         }
 
         bool reparentEntity(entt::entity child, entt::entity parent) {
-            if (!m_registry.valid(child) ||
-                !m_registry.all_of<TransformComponent, LocalTransformComponent>(child)) return false;
+            if (!m_registry.valid(child) || !m_registry.all_of<TransformComponent>(child)) return false;
             const TransformComponent worldBefore = m_registry.get<TransformComponent>(child);
+            if (!m_registry.all_of<LocalTransformComponent>(child)) {
+                LocalTransformComponent local{};
+                local.position = worldBefore.position;
+                local.rotation = worldBefore.rotation;
+                local.scale = worldBefore.scale;
+                local.orientation = worldBefore.orientation;
+                m_registry.emplace<LocalTransformComponent>(child, local);
+            }
             if (!setParent(child, parent)) return false;
             m_registry.get<TransformComponent>(child) = worldBefore;
             syncLocalTransformFromWorld(child);
@@ -51,6 +59,8 @@ namespace engine::ecs {
         bool clearParent(entt::entity child) {
             if (!m_registry.valid(child)) return false;
             detachFromParent(child);
+            if (m_registry.all_of<LocalTransformComponent, TransformComponent>(child))
+                syncLocalTransformFromWorld(child);
             return true;
         }
 
