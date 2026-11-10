@@ -541,6 +541,7 @@ namespace engine::renderer {
                         void* mapped = nullptr;
                         if (vmaMapMemory(m_context->getAllocator(), deformedAllocation, &mapped) == VK_SUCCESS) {
                             std::memcpy(mapped, deformed.data(), deformed.size() * sizeof(Vertex));
+                            vmaFlushAllocation(m_context->getAllocator(), deformedAllocation, 0, VK_WHOLE_SIZE);
                             vmaUnmapMemory(m_context->getAllocator(), deformedAllocation);
                             m_transientVertexBuffers.push_back({deformedBuffer, deformedAllocation});
                             item.vertexBuffer = deformedBuffer;
