@@ -562,8 +562,10 @@ namespace engine::core {
             for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex) {
               const auto& gltfMesh = asset.meshes[meshIndex];
               for (const auto& primitive : gltfMesh.primitives) {
-            if (primitive.type != fastgltf::PrimitiveType::Triangles) {
-                core::Logger::warn("AssetManager: skipping non-triangle glTF primitive");
+            if (primitive.type != fastgltf::PrimitiveType::Triangles &&
+                primitive.type != fastgltf::PrimitiveType::TriangleStrip &&
+                primitive.type != fastgltf::PrimitiveType::TriangleFan) {
+                core::Logger::warn("AssetManager: skipping glTF point/line primitive; renderer currently supports triangle surfaces");
                 continue;
             }
             
@@ -670,6 +672,29 @@ namespace engine::core {
                     [&](uint32_t index) { indices.push_back(index); });
             } else {
                 for (size_t i = 0; i < vertices.size(); ++i) indices.push_back(static_cast<uint32_t>(i));
+            }
+
+            if (primitive.type == fastgltf::PrimitiveType::TriangleStrip ||
+                primitive.type == fastgltf::PrimitiveType::TriangleFan) {
+                std::vector<uint32_t> triangles;
+                if (indices.size() >= 3)
+                    triangles.reserve((indices.size() - 2) * 3);
+                if (primitive.type == fastgltf::PrimitiveType::TriangleStrip) {
+                    for (size_t i = 2; i < indices.size(); ++i) {
+                        const uint32_t a = (i & 1u) ? indices[i - 1] : indices[i - 2];
+                        const uint32_t b = (i & 1u) ? indices[i - 2] : indices[i - 1];
+                        const uint32_t d = indices[i];
+                        if (a != b && b != d && a != d)
+                            triangles.insert(triangles.end(), {a, b, d});
+                    }
+                } else {
+                    for (size_t i = 2; i < indices.size(); ++i) {
+                        const uint32_t a = indices[0], b = indices[i - 1], d = indices[i];
+                        if (a != b && b != d && a != d)
+                            triangles.insert(triangles.end(), {a, b, d});
+                    }
+                }
+                indices = std::move(triangles);
             }
 
             if (vertices.empty() || indices.empty()) continue;
