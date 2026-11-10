@@ -26,6 +26,8 @@ layout(push_constant) uniform PC {
     uvec4 u;
 } pc;
 
+shared uint rtLocalCounters[48];
+
 void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     histogramCounted = false;
     ageBin = 0u;
@@ -189,8 +191,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
     imageStore(imgRefl, px, vec4(result.rgb, 1.0));
 }
-
-shared uint rtLocalCounters[48];
 
 void main() {
     uint lane = gl_LocalInvocationIndex;
