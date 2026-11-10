@@ -687,6 +687,10 @@ namespace engine::renderer {
                                             ecs::SkinComponent skinComponent{};
                                             skinComponent.skinAssetId = sourceSkin.id;
                                             skinComponent.inverseBindMatrices = sourceSkin.inverseBindMatrices;
+                                            skinComponent.jointMatrices.assign(sourceSkin.jointNodeIndices.size(), glm::mat4(1.0f));
+                                            if (skinComponent.inverseBindMatrices.size() != sourceSkin.jointNodeIndices.size()) {
+                                                skinComponent.inverseBindMatrices.resize(sourceSkin.jointNodeIndices.size(), glm::mat4(1.0f));
+                                            }
                                             if (sourceSkin.skeletonNodeIndex >= 0) {
                                                 const auto skeletonIt = sourceNodeEntities.find(static_cast<size_t>(sourceSkin.skeletonNodeIndex));
                                                 if (skeletonIt != sourceNodeEntities.end())
