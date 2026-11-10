@@ -122,6 +122,15 @@ namespace engine::ecs {
 
         void destroyEntity(entt::entity entity) {
             if (!m_registry.valid(entity)) return;
+            } else if (m_registry.all_of<TransformComponent>(entity)) {
+                // A detached child keeps its last evaluated world transform after
+                // its former parent is destroyed.
+                const auto& transform = m_registry.get<TransformComponent>(entity);
+                const glm::quat rotation = glm::length(transform.orientation) > 1e-6f
+                    ? glm::normalize(transform.orientation) : glm::quat(glm::radians(transform.rotation));
+                world = glm::translate(glm::mat4(1.0f), transform.position) *
+                    glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), transform.scale);
+            }
             if (m_registry.all_of<HierarchyComponent>(entity)) {
                 const auto children = m_registry.get<HierarchyComponent>(entity).children;
                 for (entt::entity child : children) {
@@ -154,6 +163,12 @@ namespace engine::ecs {
                                   std::unordered_set<entt::entity>& visited) {
             if (!m_registry.valid(entity) || !visited.insert(entity).second) return;
             glm::mat4 world = parentWorld;
+            if (m_registry.all_of<LocalTransformComponent, TransformComponent, RigidBodyComponent>(entity) &&
+                m_registry.get<RigidBodyComponent>(entity).bodyId != 0xFFFFFFFF) {
+                // Physics writes world-space transforms; fold those changes back into
+                // local space before evaluating the hierarchy for this frame.
+                syncLocalTransformFromWorld(entity);
+            }
             if (m_registry.all_of<LocalTransformComponent, TransformComponent>(entity)) {
                 const auto& local = m_registry.get<LocalTransformComponent>(entity);
                 const glm::quat rotation = glm::length(local.orientation) > 1e-6f
