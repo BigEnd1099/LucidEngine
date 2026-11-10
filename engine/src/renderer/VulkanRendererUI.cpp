@@ -556,8 +556,19 @@ namespace engine::renderer {
                 ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
                 ImGuiWindowFlags_NoBackground;
             if (ImGui::Begin("##LucidBenchmarkViewport", nullptr, benchmarkFlags)) {
-                if (m_viewportDescriptor != VK_NULL_HANDLE && displaySize.x > 0.0f && displaySize.y > 0.0f) {
-                    ImGui::Image((ImTextureID)m_viewportDescriptor, displaySize);
+                if (m_viewportDescriptor != VK_NULL_HANDLE && displaySize.x > 0.0f && displaySize.y > 0.0f &&
+                    m_width > 0 && m_height > 0) {
+                    const float fitScale = std::min(
+                        displaySize.x / static_cast<float>(m_width),
+                        displaySize.y / static_cast<float>(m_height));
+                    const ImVec2 imageSize(
+                        static_cast<float>(m_width) * fitScale,
+                        static_cast<float>(m_height) * fitScale);
+                    const ImVec2 imageOffset(
+                        (displaySize.x - imageSize.x) * 0.5f,
+                        (displaySize.y - imageSize.y) * 0.5f);
+                    ImGui::SetCursorPos(imageOffset);
+                    ImGui::Image((ImTextureID)m_viewportDescriptor, imageSize);
                 }
             }
             ImGui::End();
