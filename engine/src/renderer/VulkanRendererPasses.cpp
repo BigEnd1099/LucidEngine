@@ -966,8 +966,8 @@ namespace engine::renderer {
         const VkViewport fullVp{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
         const VkRect2D fullSc{ {0, 0}, {m_width, m_height} };
 
-        // With no geometry and no screen-space/RT consumers, the depth and
-        // G-buffer prepasses are redundant. The HDR pass clears depth itself.
+        // With no raster draw items and no RT instances, geometry prepasses and
+        // screen-space AO/GI are redundant. The HDR pass clears the depth attachment.
         const bool skipEmptySceneGeometryPasses = drawItems.empty() && rtInstances.empty();
 
         // =========================================================================
@@ -1326,16 +1326,7 @@ namespace engine::renderer {
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
-        if (skipEmptySceneGeometryPasses) {
-            // The depth prepass was skipped; transition/discard the old depth contents
-            // before the HDR pass clears and owns the depth attachment for this frame.
-            transitionImage(m_commandBuffer, m_depthImage,
-                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                            VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
-                            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0,
-                            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-        } else {
+        if (!skipEmptySceneGeometryPasses) {
             transitionImage(m_commandBuffer, m_depthImage,
                             VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1,
