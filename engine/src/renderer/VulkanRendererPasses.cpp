@@ -552,6 +552,10 @@ namespace engine::renderer {
                     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
                     bufferInfo.size = deformed.size() * sizeof(Vertex);
                     bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+                    if (isRayTracingEnabled()) {
+                        bufferInfo.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                    }
                     VmaAllocationCreateInfo allocationInfo{};
                     allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
                     allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
