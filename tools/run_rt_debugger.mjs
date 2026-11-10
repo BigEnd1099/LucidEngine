@@ -14,7 +14,7 @@ const DEBUG_MODES = {
   none: 0, raw: 1, history: 2, normals: 3, depth: 4,
   ao: 5, reflections: 6, variance: 7
 };
-if (!(MODE in DEBUG_MODES)) {
+if (!Object.hasOwn(DEBUG_MODES, MODE)) {
   console.error('[RTDEBUG] Invalid mode. Use: ' + Object.keys(DEBUG_MODES).join(', '));
   process.exit(2);
 }
@@ -131,6 +131,13 @@ async function main() {
     ws.once('error', err => { clearTimeout(timer); reject(err); });
   });
   console.log('[RTDEBUG] Connected to ws://127.0.0.1:' + PORT);
+  const initialStats = await callRpc('engine.getProfilerStats');
+  if (!initialStats || Number(initialStats.gpuTimeMs || 0) <= 0) {
+    throw new Error('GPU timestamps are unavailable. Refusing to create misleading RT timing reports.');
+  }
+  if (Number(initialStats?.metrics?.drawItems || 0) === 0) {
+    console.warn('[RTDEBUG] Warning: no draw items are currently visible. Load AtriumBenchmark for meaningful RT workload measurements.');
+  }
   console.log('[RTDEBUG] Uses the currently loaded scene. Load AtriumBenchmark for comparable RT measurements.');
   console.log('[RTDEBUG] Debug view is applied to the live renderer; close this tool to stop sampling.');
 
