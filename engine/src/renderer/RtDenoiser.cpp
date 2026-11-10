@@ -452,7 +452,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtReflectionTemporalSyncMs", m_gpuTimings.reflTemporalSyncMs);
 
         // Quality telemetry is observational only; it never changes RT settings.
-        profiler.recordMetric("rtGiSamples", samples);
+        profiler.recordMetric("rtGiSamples", std::clamp(params.samples, 1u, 16u));
         profiler.recordMetric("rtGiBounces", params.bounces);
         profiler.recordMetric("rtGiWidth", m_giWidth);
         profiler.recordMetric("rtGiHeight", m_giHeight);
