@@ -414,7 +414,7 @@ namespace engine::renderer {
                 m_gpuTimings.temporalMs     = toMs(2, 4);
                 m_gpuTimings.atrous0Ms      = toMs(4, 6);
                 m_gpuTimings.atrous1Ms      = toMs(6, 7);
-                m_gpuTimings.reflTraceMs    = toMs(8, 10);
+                m_gpuTimings.reflTraceMs    = toMs(7, 10);
                 m_gpuTimings.reflTemporalMs = toMs(10, 12);
                 m_gpuTimings.totalMs        = toMs(0, 12);
 
@@ -425,6 +425,7 @@ namespace engine::renderer {
                 m_gpuTimings.temporalSyncMs     = toMs(3, 4);
                 m_gpuTimings.atrous0ExecMs      = toMs(4, 5);
                 m_gpuTimings.atrous0SyncMs      = toMs(5, 6);
+                m_gpuTimings.reflStartSyncMs    = toMs(7, 8);
                 m_gpuTimings.reflTraceExecMs    = toMs(8, 9);
                 m_gpuTimings.reflTraceSyncMs    = toMs(9, 10);
                 m_gpuTimings.reflTemporalExecMs = toMs(10, 11);
@@ -446,6 +447,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiTemporalSyncMs", m_gpuTimings.temporalSyncMs);
         profiler.recordMetric("rtGiAtrous0ExecMs", m_gpuTimings.atrous0ExecMs);
         profiler.recordMetric("rtGiAtrous0SyncMs", m_gpuTimings.atrous0SyncMs);
+        profiler.recordMetric("rtReflectionStartSyncMs", m_gpuTimings.reflStartSyncMs);
         profiler.recordMetric("rtReflectionTraceExecMs", m_gpuTimings.reflTraceExecMs);
         profiler.recordMetric("rtReflectionTraceSyncMs", m_gpuTimings.reflTraceSyncMs);
         profiler.recordMetric("rtReflectionTemporalExecMs", m_gpuTimings.reflTemporalExecMs);
