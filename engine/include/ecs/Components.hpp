@@ -46,6 +46,12 @@ namespace engine::ecs {
         entt::entity skeleton{entt::null};
         std::vector<entt::entity> joints;
         std::vector<glm::mat4> inverseBindMatrices;
+
+        // Runtime palette: joint world transform * inverse bind * inverse mesh world transform.
+        // Kept on the ECS component so animation and rendering share one evaluated pose.
+        std::vector<glm::mat4> jointMatrices;
+        glm::mat4 inverseMeshTransform{1.0f};
+        bool paletteDirty{true};
     };
 
     struct LODComponent {
