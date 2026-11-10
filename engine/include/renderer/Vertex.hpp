@@ -59,7 +59,7 @@ namespace engine::renderer {
 
     // The RT buffer-reference shader reads this exact packed layout via
     // VK_KHR_buffer_device_address; keep it in sync with RtVertex in pbr_rt.frag.
-    static_assert(sizeof(Vertex) == 64, "Vertex must be tightly packed to 48 bytes for RT buffer references");
+    static_assert(sizeof(Vertex) == 64, "Vertex must be tightly packed to 64 bytes for RT buffer references");
     static_assert(offsetof(Vertex, position) == 0, "Unexpected Vertex::position offset");
     static_assert(offsetof(Vertex, normal) == 12, "Unexpected Vertex::normal offset");
     static_assert(offsetof(Vertex, texCoord) == 24, "Unexpected Vertex::texCoord offset");
