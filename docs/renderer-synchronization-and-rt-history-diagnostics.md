@@ -29,6 +29,10 @@ The buffer is persistently mapped in host-visible memory. `RtDenoiser::record()`
 
 The counters remain diagnostic instrumentation. Shared-memory atomics and two workgroup barriers still have a cost, but global updates are now bounded by the number of non-zero counters per workgroup rather than the number of pixels. Compare identical benchmark captures before and after this optimization. The current host-visible SSBO is a simple fence-safe first implementation, not an optimized device-local staging ring. A device-local counter buffer plus a multi-slot staging/readback ring remains a follow-up if profiling shows host-visible writes are costly.
 
+## Reflection local-light sampling
+
+When reflection stochastic-light sampling is enabled, each reflection hit now selects one local light uniformly and multiplies its contribution by the active-light count. This is an unbiased estimator of the sum of local-light contributions and is applied to the primary reflection hit as well as secondary bounces. Previously, the primary hit evaluated every active local light (up to eight) and could issue a separate shadow ray query for each one, while stochastic selection was restricted to later bounces. The change reduces primary-hit local-light shadow-ray work when multiple local lights are active. It trades per-sample variance for fewer shadow queries; the configured reflection sample count and temporal accumulation remain unchanged. Validate image stability and GPU timings in the same scene with stochastic lights enabled and disabled.
+
 ## Deliberately not enabled: multiple frames in flight
 
 The renderer still has one shared command buffer, shared render targets, shared descriptor sets, shared upload/scratch resources and ping-pong RT histories. Therefore this branch does not pretend to enable 2–3 frames in flight. That requires a per-frame resource ring across the renderer and every pass, not merely more fences. Enabling it without that ownership split would introduce races and invalid image/descriptor reuse.
