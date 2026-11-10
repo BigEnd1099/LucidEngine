@@ -208,6 +208,10 @@ namespace engine::renderer {
             oneSecondSamples.pop_front();
 
         const size_t windowSampleCount = oneSecondSamples.size();
+        const double windowDurationSeconds = windowSampleCount > 1
+            ? oneSecondSamples.back().timeSeconds - oneSecondSamples.front().timeSeconds
+            : 0.0;
+        const bool hasFullSecondWindow = windowDurationSeconds >= 0.95;
         auto average = [&](auto getter) -> double {
             if (windowSampleCount == 0) return 0.0;
             double sum = 0.0;
@@ -271,8 +275,11 @@ namespace engine::renderer {
 
             ImGui::Spacing();
             ImGui::SeparatorText(editorText("ui.profiler_one_second_average", "ONE-SECOND ROLLING AVERAGE"));
-            ImGui::TextDisabled("%s: %zu | %s", editorText("ui.profiler_samples", "Samples"), windowSampleCount,
+            ImGui::TextDisabled("%s: %zu | %.2f s | %s", editorText("ui.profiler_samples", "Samples"), windowSampleCount,
+                windowDurationSeconds,
                 editorText("ui.profiler_average_note", "Averages are calculated from the last 1.0 second of editor frames."));
+            if (!hasFullSecondWindow)
+                ImGui::TextDisabled("%s", editorText("ui.profiler_collecting_one_second", "Collecting a full one-second window..."));
             if (ImGui::BeginTable("##ProfilerOneSecondAverage", 4,
                 ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
                 ImGui::TableNextRow();
@@ -283,10 +290,11 @@ namespace engine::renderer {
                 ImGui::EndTable();
             }
 
+            ImGui::BeginDisabled(!hasFullSecondWindow);
             if (ImGui::Button(editorText("ui.profiler_copy_average", "Copy 1-second average report"))) {
                 std::ostringstream report;
                 report << "LUCID ENGINE - PERFORMANCE PROFILER\n";
-                report << "Capture window: rolling 1.0 second\n";
+                report << "Capture window: " << std::fixed << std::setprecision(3) << windowDurationSeconds << " seconds\n";
                 report << "Samples: " << windowSampleCount << "\n";
                 report << "Graphics API: Vulkan 1.3\n";
                 report << "Render resolution: " << m_width << " x " << m_height << "\n";
@@ -301,7 +309,8 @@ namespace engine::renderer {
                 report << "Average animation / skinning CPU: " << avgAnimationCpuMs << " ms\n";
                 report << "Average GPU command buffer: " << avgGpuFrameMs << " ms\n";
                 report << "\n[CPU STAGES - 1s AVERAGE]\n";
-                for (const auto& [name, value] : cpuStats.items()) {
+                for (auto it = cpuStats.begin(); it != cpuStats.end(); ++it) {
+                    const std::string name = it.key();
                     const double stageAverage = averageCpuScope(name);
                     report << name << ": " << stageAverage << " ms\n";
                 }
@@ -326,6 +335,7 @@ namespace engine::renderer {
                 report << "Loop frame time includes engine frame pacing/sleep; editor FPS uses ImGui frame delta.\n";
                 ImGui::SetClipboardText(report.str().c_str());
             }
+            ImGui::EndDisabled();
             ImGui::SameLine();
             ImGui::TextDisabled("%s", editorText("ui.profiler_copy_hint", "Copies averaged values and scene counters to clipboard."));
 
