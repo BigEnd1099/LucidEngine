@@ -462,7 +462,7 @@ namespace engine::renderer {
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) | (params.giCheckerboard ? 4u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
-        const bool giOrAoActive = params.giEnabled || params.aoEnabled;
+        const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
         if (giOrAoActive) {
             // Timestamp 0 starts the RT GI/AO compute section after the global dependency barrier.
             if (m_timestampsSupported && m_queryPool) {
