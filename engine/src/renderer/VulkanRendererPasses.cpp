@@ -59,10 +59,20 @@ namespace engine::renderer {
         // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
         // be released safely, before any new build commands are recorded.
         m_accelerationStructure.releaseCompletedScratch();
-        for (const auto& transient : m_transientVertexBuffers) {
-            if (transient.buffer) vmaDestroyBuffer(m_context->getAllocator(), transient.buffer, transient.allocation);
+        ++m_deformationFrameCounter;
+        if ((m_deformationFrameCounter % 600u) == 0u) {
+            for (auto it = m_deformedVertexCache.begin(); it != m_deformedVertexCache.end();) {
+                const bool entityGone = !registry.get().valid(it->first);
+                const bool cacheStale = m_deformationFrameCounter - it->second.lastSeenFrame > 600u;
+                if (entityGone || cacheStale) {
+                    if (it->second.buffer)
+                        vmaDestroyBuffer(m_context->getAllocator(), it->second.buffer, it->second.allocation);
+                    it = m_deformedVertexCache.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         }
-        m_transientVertexBuffers.clear();
         updateRayTracingTextureDescriptors(assetManager);
 
         vkResetCommandBuffer(m_commandBuffer, 0);
@@ -493,6 +503,7 @@ namespace engine::renderer {
                 const bool hasMorph = morph && !morph->weights.empty() && !meshAsset->morphTargets.empty();
                 const bool hasSkin = skin && !skin->jointMatrices.empty() && meshAsset->hasSkinInfluences &&
                                      meshAsset->skinInfluences.size() == meshAsset->vertexCount;
+                bool deformedGeometryChanged = false;
                 if ((hasMorph || hasSkin) && meshAsset->vertices.size() == meshAsset->vertexCount) {
                     std::vector<Vertex> deformed = meshAsset->vertices;
                     for (size_t vertexIndex = 0; vertexIndex < deformed.size(); ++vertexIndex) {
@@ -549,31 +560,83 @@ namespace engine::renderer {
                             vertex.tangent = glm::vec4(glm::normalize(tangent), vertex.tangent.w);
                     }
 
-                    VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-                    bufferInfo.size = deformed.size() * sizeof(Vertex);
-                    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-                    if (isRayTracingEnabled()) {
-                        bufferInfo.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                    const VkDeviceSize byteSize = static_cast<VkDeviceSize>(deformed.size() * sizeof(Vertex));
+                    uint64_t contentHash = 1469598103934665603ull;
+                    const auto* vertexBytes = reinterpret_cast<const uint8_t*>(deformed.data());
+                    for (size_t byte = 0; byte < static_cast<size_t>(byteSize); ++byte) {
+                        contentHash ^= vertexBytes[byte];
+                        contentHash *= 1099511628211ull;
                     }
-                    VmaAllocationCreateInfo allocationInfo{};
-                    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
-                    allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-                    VkBuffer deformedBuffer = VK_NULL_HANDLE;
-                    VmaAllocation deformedAllocation = VK_NULL_HANDLE;
-                    if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocationInfo,
-                                        &deformedBuffer, &deformedAllocation, nullptr) == VK_SUCCESS) {
+
+                    const bool wantsRayTracingBuffer = isRayTracingEnabled();
+                    auto cacheIt = m_deformedVertexCache.find(entity);
+                    bool cacheValid = cacheIt != m_deformedVertexCache.end() &&
+                        cacheIt->second.buffer != VK_NULL_HANDLE &&
+                        cacheIt->second.size == byteSize &&
+                        (!wantsRayTracingBuffer || cacheIt->second.rayTracingCapable);
+                    bool geometryChanged = !cacheValid ||
+                        (cacheIt != m_deformedVertexCache.end() && cacheIt->second.contentHash != contentHash);
+
+                    if (cacheValid && geometryChanged) {
                         void* mapped = nullptr;
-                        if (vmaMapMemory(m_context->getAllocator(), deformedAllocation, &mapped) == VK_SUCCESS) {
-                            std::memcpy(mapped, deformed.data(), deformed.size() * sizeof(Vertex));
-                            vmaFlushAllocation(m_context->getAllocator(), deformedAllocation, 0, VK_WHOLE_SIZE);
-                            vmaUnmapMemory(m_context->getAllocator(), deformedAllocation);
-                            m_transientVertexBuffers.push_back({deformedBuffer, deformedAllocation});
-                            item.vertexBuffer = deformedBuffer;
-                            deformedVertexBuffers[entity] = deformedBuffer;
+                        if (vmaMapMemory(m_context->getAllocator(), cacheIt->second.allocation, &mapped) == VK_SUCCESS) {
+                            std::memcpy(mapped, deformed.data(), static_cast<size_t>(byteSize));
+                            vmaFlushAllocation(m_context->getAllocator(), cacheIt->second.allocation, 0, VK_WHOLE_SIZE);
+                            vmaUnmapMemory(m_context->getAllocator(), cacheIt->second.allocation);
                         } else {
-                            vmaDestroyBuffer(m_context->getAllocator(), deformedBuffer, deformedAllocation);
+                            cacheValid = false;
                         }
+                    }
+
+                    if (!cacheValid) {
+                        VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+                        bufferInfo.size = byteSize;
+                        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+                        if (wantsRayTracingBuffer) {
+                            bufferInfo.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                        }
+                        VmaAllocationCreateInfo allocationInfo{};
+                        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+                        allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+                        VkBuffer newBuffer = VK_NULL_HANDLE;
+                        VmaAllocation newAllocation = VK_NULL_HANDLE;
+                        if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocationInfo,
+                                            &newBuffer, &newAllocation, nullptr) == VK_SUCCESS) {
+                            void* mapped = nullptr;
+                            if (vmaMapMemory(m_context->getAllocator(), newAllocation, &mapped) == VK_SUCCESS) {
+                                std::memcpy(mapped, deformed.data(), static_cast<size_t>(byteSize));
+                                vmaFlushAllocation(m_context->getAllocator(), newAllocation, 0, VK_WHOLE_SIZE);
+                                vmaUnmapMemory(m_context->getAllocator(), newAllocation);
+                                if (cacheIt != m_deformedVertexCache.end() && cacheIt->second.buffer)
+                                    vmaDestroyBuffer(m_context->getAllocator(), cacheIt->second.buffer, cacheIt->second.allocation);
+                                DeformedVertexCache cache{};
+                                cache.buffer = newBuffer;
+                                cache.allocation = newAllocation;
+                                cache.size = byteSize;
+                                cache.contentHash = contentHash;
+                                cache.lastSeenFrame = m_deformationFrameCounter;
+                                cache.rayTracingCapable = wantsRayTracingBuffer;
+                                if (cacheIt == m_deformedVertexCache.end())
+                                    m_deformedVertexCache.emplace(entity, cache);
+                                else
+                                    cacheIt->second = cache;
+                                cacheIt = m_deformedVertexCache.find(entity);
+                                cacheValid = true;
+                                geometryChanged = true;
+                            } else {
+                                vmaDestroyBuffer(m_context->getAllocator(), newBuffer, newAllocation);
+                            }
+                        }
+                    }
+
+                    if (cacheValid) {
+                        auto& cache = cacheIt->second;
+                        cache.contentHash = contentHash;
+                        cache.lastSeenFrame = m_deformationFrameCounter;
+                        item.vertexBuffer = cache.buffer;
+                        deformedVertexBuffers[entity] = cache.buffer;
+                        deformedGeometryChanged = geometryChanged;
                     }
                 }
 
@@ -591,7 +654,8 @@ namespace engine::renderer {
                            static_cast<uint64_t>(meshComp.meshId))
                         : static_cast<uint64_t>(meshComp.meshId);
                     if (m_accelerationStructure.ensureBLAS(m_commandBuffer, blasId, *meshAsset,
-                                                            item.vertexBuffer, hasDeformedRtGeometry)) {
+                                                            item.vertexBuffer, hasDeformedRtGeometry,
+                                                            deformedGeometryChanged)) {
                         VkBufferDeviceAddressInfo vertexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
                         vertexAddressInfo.buffer = item.vertexBuffer;
                         VkBufferDeviceAddressInfo indexAddressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
