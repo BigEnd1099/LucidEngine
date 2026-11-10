@@ -80,7 +80,7 @@ namespace engine::core {
         uint32_t loadGLTF(const std::string& path);
         uint32_t loadGLTFFromMemory(const std::vector<uint8_t>& data);
         
-        uint32_t loadTextureFromFile(const std::string& path, bool generateMips = true);
+        uint32_t loadTextureFromFile(const std::string& path, bool generateMips = true, bool srgb = false);
         uint32_t createProceduralTexture(const std::string& presetName, const std::string& mapType);
         uint32_t createMaterial(const MaterialAsset& mat);
         void updateMaterial(uint32_t materialId, const MaterialAsset& mat);
