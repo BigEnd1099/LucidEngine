@@ -127,6 +127,11 @@ namespace engine::renderer {
         std::array<Image, 2> m_imgReflHist{}; // reflection temporal ping-pong
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
 
+        VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_diagnosticsAllocation{VK_NULL_HANDLE};
+        uint32_t* m_diagnosticsMapped{nullptr};
+        bool m_diagnosticsCoherent{false};
+
         VkSampler m_sampler{VK_NULL_HANDLE};
         VkDescriptorSetLayout m_setLayout{VK_NULL_HANDLE};
         VkDescriptorPool m_pool{VK_NULL_HANDLE};

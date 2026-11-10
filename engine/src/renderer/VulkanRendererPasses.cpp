@@ -65,7 +65,12 @@ namespace engine::renderer {
         }
 #endif
 
-        // The frame fence (or headless queue-idle) guarantees the previous timestamp set
+        if (m_context->isHeadless()) {
+            core::Profiler::ScopedSample waitFenceSample("Vulkan Fence Wait");
+            vkWaitForFences(m_context->getDevice(), 1, &m_headlessInFlightFence, VK_TRUE, UINT64_MAX);
+        }
+
+        // The frame fence guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
             uint64_t timestamps[11]{};
@@ -100,9 +105,8 @@ namespace engine::renderer {
             }
         }
 
-        // The previous frame has completed (fence on the window path, queue-idle
-        // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
-        // be released safely, before any new build commands are recorded.
+        // The previous frame has completed (window or headless fence). Scratch buffers
+        // from its BLAS/TLAS builds can now be released safely.
         m_accelerationStructure.releaseCompletedScratch();
         ++m_deformationFrameCounter;
         if ((m_deformationFrameCounter % 600u) == 0u) {
@@ -1868,16 +1872,28 @@ namespace engine::renderer {
                 m_context->recreateSwapchain();
             }
         } else {
-            const VkResult submitResult =
-                vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+            vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
+            const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
             m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
-            vkQueueWaitIdle(m_context->getGraphicsQueue());
+            if (submitResult != VK_SUCCESS) {
+                vkDestroyFence(m_context->getDevice(), m_headlessInFlightFence, nullptr);
+                VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+                fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+                if (vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS)
+                    throw std::runtime_error("failed to recover headless frame fence after queue submission failure");
+            }
         }
 #else
-        const VkResult submitResult =
-            vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+        vkResetFences(m_context->getDevice(), 1, &m_headlessInFlightFence);
+        const VkResult submitResult = vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_headlessInFlightFence);
         m_timestampQueryPending = m_timestampQueryPool && submitResult == VK_SUCCESS;
-        vkQueueWaitIdle(m_context->getGraphicsQueue());
+        if (submitResult != VK_SUCCESS) {
+            vkDestroyFence(m_context->getDevice(), m_headlessInFlightFence, nullptr);
+            VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+            if (vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &m_headlessInFlightFence) != VK_SUCCESS)
+                throw std::runtime_error("failed to recover headless frame fence after queue submission failure");
+        }
 #endif
     }
 }

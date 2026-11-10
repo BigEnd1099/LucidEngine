@@ -46,6 +46,8 @@ layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: m
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
 
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[16]; } rtDiag;
+
 
 
 layout(push_constant) uniform PC {
@@ -72,9 +74,11 @@ void main() {
 
 
 
+    atomicAdd(rtDiag.counters[0], 1u);
     vec4 geom = imageLoad(imgGeomCur, px);
 
     if (geom.z < 0.0) { // sky
+        atomicAdd(rtDiag.counters[2], 1u);
 
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
@@ -138,7 +142,7 @@ void main() {
 
             ivec2 tp = base + o;
 
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) continue;
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtDiag.counters[3], 1u); continue; }
 
             vec4 g = imageLoad(imgGeomPrev, tp);
 
@@ -146,9 +150,9 @@ void main() {
 
             // Disocclusion tests: depth of the same surface point in the previous frame + normal.
 
-            if (abs(g.z - pClip.w) > 0.04 * pClip.w + 0.01) continue;
+            if (abs(g.z - pClip.w) > 0.04 * pClip.w + 0.01) { atomicAdd(rtDiag.counters[4], 1u); continue; }
 
-            if (dot(rtOctDecode(g.xy), N) < 0.8) continue;
+            if (dot(rtOctDecode(g.xy), N) < 0.8) { atomicAdd(rtDiag.counters[5], 1u); continue; }
 
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
 
@@ -188,6 +192,7 @@ void main() {
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
+            atomicAdd(rtDiag.counters[6], 1u);
             // Full temporal reuse from the alternating frame when this pixel was traced
             hist /= wSum;
             histMoments /= wSum;
@@ -196,6 +201,7 @@ void main() {
             newLen = min(histLen + spp, maxHist);
             outMoments = histMoments;
         } else {
+            atomicAdd(rtDiag.counters[7], 1u);
             // Disocclusion / invalid history: bilateral reconstruction from the 4 active neighbors
             vec4 neighborSum = vec4(0.0);
             float weightSum = 0.0;
@@ -229,6 +235,7 @@ void main() {
         }
     } else {
         if (wSum > 0.05) {
+            atomicAdd(rtDiag.counters[1], 1u);
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
@@ -273,6 +280,7 @@ void main() {
             float variance = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
+            atomicAdd(rtDiag.counters[2], 1u);
             newLen = min(spp, maxHist);
             result = raw;
 
