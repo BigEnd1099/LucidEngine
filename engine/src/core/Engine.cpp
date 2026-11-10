@@ -1231,9 +1231,16 @@ namespace engine::core {
                 if (!m_paused) {
                     try {
                         update(dt_real);
-                        if (m_registry) updateSkinPalettes(*m_registry);
                     } catch (const std::exception& e) {
                         core::Logger::error(std::string("Update exception: ") + e.what());
+                    }
+                }
+                // Hierarchy and skin palettes must also refresh while the editor is paused,
+                // because gizmo edits and imported scene changes still modify local transforms.
+                if (m_registry) {
+                    try { updateSkinPalettes(*m_registry); }
+                    catch (const std::exception& e) {
+                        core::Logger::error(std::string("Skin palette update exception: ") + e.what());
                     }
                 }
                 if (!m_headless) {
