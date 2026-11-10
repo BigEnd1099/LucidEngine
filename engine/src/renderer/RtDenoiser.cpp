@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -144,6 +145,9 @@ namespace engine::renderer {
             ((diagnosticsMemoryProperties.memoryTypes[diagnosticsAllocationInfo.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0);
         if (!m_diagnosticsMapped)
             throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
+        std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * 16u);
+        if (!m_diagnosticsCoherent)
+            vmaFlushAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * 16u);
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
 
         const auto& props = m_context->getPhysicalDeviceProperties();
@@ -432,8 +436,9 @@ namespace engine::renderer {
                 "rtReflectionPixels", "rtReflectionHistoryAccepted", "rtReflectionHistoryRejected", "rtReflectionOutOfBounds",
                 "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback"
             };
-            for (uint32_t i = 0; i < 16; ++i) core::Profiler::get().recordMetric(names[i], m_diagnosticsMapped[i]);
-        }
+            auto& diagnosticsProfiler = core::Profiler::get();
+            for (uint32_t i = 0; i < 16; ++i)
+                diagnosticsProfiler.recordMetric(names[i], m_diagnosticsMapped[i]);
         }
 
         // Retrieve previous frame's GPU timestamps if available
