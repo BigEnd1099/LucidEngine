@@ -63,7 +63,12 @@ inline bool loadEditorLanguage(std::string_view locale) {
 
 inline bool setEditorLanguage(std::string_view locale) {
     if (loadEditorLanguage(locale)) return true;
+
     if (locale != "en" && loadEditorLanguage("en")) return false;
+
+    // Never leave the previous locale active if even the English catalog is unavailable.
+    activeEditorTranslations().clear();
+    activeEditorLocale() = "en";
     return false;
 }
 
