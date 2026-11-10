@@ -19,7 +19,20 @@
 
 The current renderer uses shared images and buffers across the complete frame graph. A correct multi-frame implementation must make every resource that can be written by one frame while sampled/read by another either per-frame or explicitly synchronized. This includes the RT ping-pong images and their descriptor sets; merely duplicating the primary command buffer and fence is insufficient.
 
-The RT rejection counters should be a dedicated storage buffer (not packed into GI geometry alpha or the public reflection output). Reset and write operations need explicit transfer/compute barriers. Readback must use a fence-safe staging ring and consume only completed slots; it must not introduce `vkQueueWaitIdle` or synchronous GPU readback in the normal render path.
+## Implemented RT diagnostics
+
+A dedicated 16-counter storage buffer is bound at set 1 / binding 15. It is reset with `vkCmdFillBuffer`, followed by a transfer-to-compute barrier. GI and reflection temporal shaders update independent counters with atomics; the counters never reuse GI geometry alpha or the public reflection validity alpha.
+
+The buffer is persistently mapped in host-visible memory. `RtDenoiser::record()` consumes the previous frame's values only after the renderer's frame fence has completed, invalidating non-coherent memory when required. A compute-to-host buffer barrier closes the producer side. This avoids a blocking queue-idle call and a separate synchronous GPU readback request. Counter names are exported as profiler metrics:
+
+- GI: `rtGiPixels`, `rtGiHistoryAccepted`, `rtGiHistoryRejected`, `rtGiOutOfBounds`, `rtGiDepthRejected`, `rtGiNormalRejected`, `rtGiCheckerboardReuse`, `rtGiSpatialFallback`.
+- Reflections: the matching `rtReflection*` metrics.
+
+The counters are diagnostic instrumentation and atomics add GPU work; compare benchmark runs with the instrumentation change in mind. The current host-visible SSBO is a simple fence-safe first implementation, not an optimized device-local staging ring. A device-local counter buffer plus a multi-slot staging/readback ring remains a follow-up if profiling shows host-visible writes are costly.
+
+## Deliberately not enabled: multiple frames in flight
+
+The renderer still has one shared command buffer, shared render targets, shared descriptor sets, shared upload/scratch resources and ping-pong RT histories. Therefore this branch does not pretend to enable 2–3 frames in flight. That requires a per-frame resource ring across the renderer and every pass, not merely more fences. Enabling it without that ownership split would introduce races and invalid image/descriptor reuse.
 
 ## Validation
 
