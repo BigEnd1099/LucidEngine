@@ -502,6 +502,10 @@ namespace engine::renderer {
                 return true;
             };
 
+            const bool isSimulationRunning = (engine != nullptr && !engine->isPaused());
+            const bool gizmoEnabled = !isSimulationRunning;
+            if (!gizmoEnabled) s_draggingGizmoAxis = 0;
+
             if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
                 const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
@@ -550,10 +554,6 @@ namespace engine::renderer {
                     }
                 }
             }
-
-            const bool isSimulationRunning = (engine != nullptr && !engine->isPaused());
-            const bool gizmoEnabled = !isSimulationRunning;
-            if (!gizmoEnabled) s_draggingGizmoAxis = 0;
 
             int hoveredGizmoAxis = 0;
             ImVec2 originScreen(0, 0), ptX(0, 0), ptY(0, 0), ptZ(0, 0);
