@@ -2782,11 +2782,18 @@ function update(entities, dt, input, contacts) {
 
     bool Engine::liveReloadScript(const std::string& scriptCode) {
         core::Logger::info("Live Coding: Hot-reloading script...");
-        m_currentScriptCode = scriptCode;
-        if (m_scriptContext) {
-            return m_scriptContext->evaluate(scriptCode, "live_reload.js");
+        if (!m_scriptContext) {
+            core::Logger::error("Live Coding failed: QuickJS context is unavailable.");
+            return false;
         }
-        return false;
+
+        if (!m_scriptContext->evaluate(scriptCode, "live_reload.js")) {
+            core::Logger::error("Live Coding failed; keeping the previous script source.");
+            return false;
+        }
+
+        m_currentScriptCode = scriptCode;
+        return true;
     }
 
     void Engine::queueSubTickInput(uint32_t buttonMask, float yaw, float pitch) {
