@@ -643,16 +643,22 @@ namespace engine::core {
 
     void Engine::update(float dt) {
         LUCID_PROFILE_SCOPE("FrameUpdate");
-        float clampedDt = std::min(dt, 0.1f);
-        m_physicsAccumulator += clampedDt;
-
+        const float clampedDt = std::min(dt, 0.1f);
         {
             LUCID_PROFILE_SCOPE("Physics");
-            if (m_physicsSystem && m_registry) {
+            const bool hasPhysicsBodies = m_registry &&
+                !m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>().empty();
+            if (m_physicsSystem && hasPhysicsBodies) {
+                m_physicsAccumulator += clampedDt;
                 while (m_physicsAccumulator >= FIXED_TIMESTEP) {
                     m_physicsSystem->update(m_registry.get(), FIXED_TIMESTEP);
                     m_physicsAccumulator -= FIXED_TIMESTEP;
                 }
+            } else {
+                // Do not accumulate simulation time while there is nothing for
+                // the ECS physics system to simulate; this also avoids a catch-up
+                // burst when a body is added after a long idle period.
+                m_physicsAccumulator = 0.0f;
             }
         }
 
