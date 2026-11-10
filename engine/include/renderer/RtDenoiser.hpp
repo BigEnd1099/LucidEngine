@@ -80,6 +80,8 @@ namespace engine::renderer {
         void cleanup();
 
         bool isReady() const { return m_ready; }
+        uint32_t getGiWidth() const { return m_giWidth; }
+        uint32_t getGiHeight() const { return m_giHeight; }
         // Call when a frame was rendered without RT indirect (history would be stale).
         void invalidateHistory() { m_historyValid = false; m_giHistoryValid = false; }
 
