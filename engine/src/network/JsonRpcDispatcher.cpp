@@ -864,6 +864,16 @@ namespace engine::network {
                         renderer->setSsgiGroundReflectance(options["ssgiGroundReflectance"].get<float>());
                     if (options.contains("ssgiMultiBounce") && options["ssgiMultiBounce"].is_number())
                         renderer->setSsgiMultiBounce(options["ssgiMultiBounce"].get<float>());
+                    if (options.contains("ssgiGroundColor") && options["ssgiGroundColor"].is_array() &&
+                        options["ssgiGroundColor"].size() >= 3 &&
+                        options["ssgiGroundColor"][0].is_number() &&
+                        options["ssgiGroundColor"][1].is_number() &&
+                        options["ssgiGroundColor"][2].is_number()) {
+                        renderer->setSsgiGroundColor(glm::vec3(
+                            options["ssgiGroundColor"][0].get<float>(),
+                            options["ssgiGroundColor"][1].get<float>(),
+                            options["ssgiGroundColor"][2].get<float>()));
+                    }
 
                     auto& rt = renderer->getRtSettings();
                     setBool(options, "rtEnabled", rt.enabled);
@@ -924,6 +934,11 @@ namespace engine::network {
                         {"ssgiIntensity", renderer->getSsgiIntensity()},
                         {"ssgiGroundReflectance", renderer->getSsgiGroundReflectance()},
                         {"ssgiMultiBounce", renderer->getSsgiMultiBounce()},
+                        {"ssgiGroundColor", {
+                            renderer->getSsgiGroundColor().r,
+                            renderer->getSsgiGroundColor().g,
+                            renderer->getSsgiGroundColor().b
+                        }},
                         {"quality", actualQuality}
                     };
                     nlohmann::json response = {
