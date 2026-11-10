@@ -127,6 +127,7 @@ namespace engine::core {
     // Sample glTF animation tracks and apply the pose to local ECS transforms/morph weights.
     static void updateAnimationPlayers(ecs::Registry& registry, float deltaTime) {
         auto view = registry.get().view<ecs::AnimationPlayerComponent>();
+        if (view.empty()) return;
         for (const entt::entity playerEntity : view) {
             auto& player = view.get<ecs::AnimationPlayerComponent>(playerEntity);
             if (player.clips.empty() || player.activeClip >= player.clips.size()) continue;
