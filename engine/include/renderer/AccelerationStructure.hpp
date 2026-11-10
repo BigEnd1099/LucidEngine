@@ -66,6 +66,7 @@ namespace engine::renderer {
         uint64_t m_lastInstanceHash{0};
         VkDeviceAddress m_minScratchAlignment{64};
         bool m_tlasBuiltOnce{false};
+        bool m_blasChangedSinceTlas{false};
 
         std::vector<std::pair<VkBuffer, VmaAllocation>> m_retainedScratch;
     };
