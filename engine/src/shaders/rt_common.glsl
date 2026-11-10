@@ -67,6 +67,7 @@ struct RtVertex {
     vec3 normal;
     vec2 texCoord;
     vec4 tangent;
+    vec4 color;
 };
 layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer RtVertexBuffer {
     RtVertex values[];
