@@ -6,11 +6,13 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec4 inTangent;
+layout(location = 4) in vec4 inColor;
 
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec4 fragTangent;
+layout(location = 4) out vec4 fragColor;
 
 struct OccluderData {
     vec4 centerRadius;
@@ -63,6 +65,7 @@ void main() {
     vec3 N = normalize(normalMat * inNormal);
     fragNormal = N;
     fragTexCoord = inTexCoord;
+    fragColor = inColor;
 
     if (dot(inTangent.xyz, inTangent.xyz) > 1e-4) {
         vec3 T = normalize(mat3(pcs.model) * inTangent.xyz);
