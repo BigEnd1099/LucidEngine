@@ -711,6 +711,7 @@ namespace engine::renderer {
                                     // Bind imported animation channels to the ECS entities created above.
                                     const auto& importedAnimations = assetManager->getLastImportedAnimations();
                                     ecs::AnimationPlayerComponent animationPlayer{};
+                                    animationPlayer.rootTranslationOffset = placementOrigin;
                                     for (const auto& sourceClip : importedAnimations) {
                                         ecs::AnimationClipRuntime clip{};
                                         clip.name = sourceClip.name;
