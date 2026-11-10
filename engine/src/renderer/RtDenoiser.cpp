@@ -127,7 +127,7 @@ namespace engine::renderer {
         if (m_timestampsSupported) {
             VkQueryPoolCreateInfo qpci{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
             qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-            qpci.queryCount = 7;
+            qpci.queryCount = 13;
             if (vkCreateQueryPool(dev, &qpci, nullptr, &m_queryPool) != VK_SUCCESS) {
                 m_queryPool = VK_NULL_HANDLE;
                 m_timestampsSupported = false;
@@ -393,22 +393,43 @@ namespace engine::renderer {
         }
         m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
-            uint64_t timestamps[7]{};
-            VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 7,
+            uint64_t timestamps[13]{};
+            VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 13,
                                                  sizeof(timestamps), timestamps, sizeof(uint64_t),
                                                  VK_QUERY_RESULT_64_BIT);
             if (res == VK_SUCCESS) {
-                const float period = m_context->getPhysicalDeviceProperties().limits.timestampPeriod;
-                auto toMs = [&](uint64_t t0, uint64_t t1) -> float {
-                    return (t1 > t0) ? static_cast<float>(t1 - t0) * period * 1e-6f : 0.0f;
+                const uint32_t validBits = m_context->getTimestampValidBits();
+                const uint64_t mask = validBits >= 64
+                    ? UINT64_MAX
+                    : ((uint64_t{1} << validBits) - 1u);
+                const double periodNs = static_cast<double>(
+                    m_context->getPhysicalDeviceProperties().limits.timestampPeriod);
+                auto toMs = [&](uint32_t begin, uint32_t end) -> float {
+                    const uint64_t ticks = (timestamps[end] - timestamps[begin]) & mask;
+                    return static_cast<float>(static_cast<double>(ticks) * periodNs * 1e-6);
                 };
-                m_gpuTimings.traceMs        = toMs(timestamps[0], timestamps[1]);
-                m_gpuTimings.temporalMs     = toMs(timestamps[1], timestamps[2]);
-                m_gpuTimings.atrous0Ms      = toMs(timestamps[2], timestamps[3]);
-                m_gpuTimings.atrous1Ms      = toMs(timestamps[3], timestamps[4]);
-                m_gpuTimings.reflTraceMs    = toMs(timestamps[4], timestamps[5]);
-                m_gpuTimings.reflTemporalMs = toMs(timestamps[5], timestamps[6]);
-                m_gpuTimings.totalMs        = toMs(timestamps[0], timestamps[6]);
+
+                // Inclusive stage times preserve existing profiler/report semantics.
+                m_gpuTimings.traceMs        = toMs(0, 2);
+                m_gpuTimings.temporalMs     = toMs(2, 4);
+                m_gpuTimings.atrous0Ms      = toMs(4, 6);
+                m_gpuTimings.atrous1Ms      = toMs(6, 7);
+                m_gpuTimings.reflTraceMs    = toMs(7, 10);
+                m_gpuTimings.reflTemporalMs = toMs(10, 12);
+                m_gpuTimings.totalMs        = toMs(0, 12);
+
+                // Dispatch execution excludes the following dependency barrier.
+                m_gpuTimings.traceExecMs        = toMs(0, 1);
+                m_gpuTimings.traceSyncMs        = toMs(1, 2);
+                m_gpuTimings.temporalExecMs     = toMs(2, 3);
+                m_gpuTimings.temporalSyncMs     = toMs(3, 4);
+                m_gpuTimings.atrous0ExecMs      = toMs(4, 5);
+                m_gpuTimings.atrous0SyncMs      = toMs(5, 6);
+                m_gpuTimings.reflStartSyncMs    = toMs(7, 8);
+                m_gpuTimings.reflTraceExecMs    = toMs(8, 9);
+                m_gpuTimings.reflTraceSyncMs    = toMs(9, 10);
+                m_gpuTimings.reflTemporalExecMs = toMs(10, 11);
+                m_gpuTimings.reflTemporalSyncMs = toMs(11, 12);
             }
         }
         auto& profiler = core::Profiler::get();
@@ -420,9 +441,45 @@ namespace engine::renderer {
         profiler.recordMetric("rtReflectionTemporalMs", m_gpuTimings.reflTemporalMs);
         profiler.recordMetric("rtComputeTotalMs", m_gpuTimings.totalMs);
 
+        profiler.recordMetric("rtGiTraceExecMs", m_gpuTimings.traceExecMs);
+        profiler.recordMetric("rtGiTraceSyncMs", m_gpuTimings.traceSyncMs);
+        profiler.recordMetric("rtGiTemporalExecMs", m_gpuTimings.temporalExecMs);
+        profiler.recordMetric("rtGiTemporalSyncMs", m_gpuTimings.temporalSyncMs);
+        profiler.recordMetric("rtGiAtrous0ExecMs", m_gpuTimings.atrous0ExecMs);
+        profiler.recordMetric("rtGiAtrous0SyncMs", m_gpuTimings.atrous0SyncMs);
+        profiler.recordMetric("rtReflectionStartSyncMs", m_gpuTimings.reflStartSyncMs);
+        profiler.recordMetric("rtReflectionTraceExecMs", m_gpuTimings.reflTraceExecMs);
+        profiler.recordMetric("rtReflectionTraceSyncMs", m_gpuTimings.reflTraceSyncMs);
+        profiler.recordMetric("rtReflectionTemporalExecMs", m_gpuTimings.reflTemporalExecMs);
+        profiler.recordMetric("rtReflectionTemporalSyncMs", m_gpuTimings.reflTemporalSyncMs);
+
+        // Quality telemetry is observational only; it never changes RT settings.
+        profiler.recordMetric("rtGiSamples", std::clamp(params.samples, 1u, 16u));
+        profiler.recordMetric("rtGiBounces", params.bounces);
+        profiler.recordMetric("rtGiWidth", m_giWidth);
+        profiler.recordMetric("rtGiHeight", m_giHeight);
+        profiler.recordMetric("rtMaxHistory", params.maxHistory);
+        profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
+        profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiCheckerboard", params.giCheckerboard ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiHistoryValid",
+            (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionHistoryValid",
+            params.reflectionsEnabled && m_historyValid ? 1.0 : 0.0);
+        profiler.recordMetric("rtHistoryInvalidatedByLightChange", params.lightChanged ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
+        profiler.recordMetric("rtReflectionBounces", params.reflectionBounces);
+        profiler.recordMetric("rtReflectionInfiniteBounces", params.reflectionInfiniteBounces ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionMaxRoughness", params.reflectionMaxRoughness);
+        profiler.recordMetric("rtReflectionCheckerboard", params.reflectionCheckerboard ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionStochasticLights", params.reflectionStochasticLights ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionLodBias", params.reflectionLodBias ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionHalfRes", params.reflectionHalfRes ? 1.0 : 0.0);
+        profiler.recordMetric("rtDebugMode", static_cast<uint32_t>(params.debugMode));
+
         // Reset query pool before recording timestamps
         if (m_timestampsSupported && m_queryPool) {
-            vkCmdResetQueryPool(cmd, m_queryPool, 0, 7);
+            vkCmdResetQueryPool(cmd, m_queryPool, 0, 13);
         }
 
         // Depth (prepass) + everything the previous frame left behind -> this frame's compute.
@@ -464,43 +521,41 @@ namespace engine::renderer {
 
         const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
         if (giOrAoActive) {
-            // Timestamp 0 starts the RT GI/AO compute section after the global dependency barrier.
-            if (m_timestampsSupported && m_queryPool) {
+            if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
-            }
 
-            bindGI(m_tracePipelineHandle, pd);   // 1. trace
-            sync();
-            if (m_timestampsSupported && m_queryPool) {
+            bindGI(m_tracePipelineHandle, pd); // 1. trace
+            if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
-            }
+            sync();
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
 
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
             sync();
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
-            }
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
 
-            // Pass 3: Atrous step 1 (hist -> A)
+            // Pass 3: Atrous step 1 (hist -> A).
             pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
             pd.f.y = std::max(params.maxHistory, 1.0f);
-            pd.u[0] = 0u; // PASS 0: no debug override, continue filtering to imgA
+            pd.u[0] = 0u;
             bindGI(m_atrousPipelines[0], pd);
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
             sync();
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
-            }
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 6);
 
             // Pass 4: Atrous step 2 (A -> S, final output).
-            // Here we pass the requested debug mode to pd.u[0]!
             pd.u[0] = static_cast<uint32_t>(params.debugMode);
             bindGI(m_atrousPipelines[1], pd);
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
-            }
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 7);
             m_giHistoryValid = true;
         } else {
-            // GI and AO are both disabled: avoid trace, temporal and both a-trous dispatches.
             // Keep the sampled output valid and neutral for the PBR combine (rgb=0, visibility=1).
             VkImageMemoryBarrier2 toClear{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
             toClear.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -518,9 +573,6 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &clearBefore);
 
             VkClearColorValue neutralGi{};
-            neutralGi.float32[0] = 0.0f;
-            neutralGi.float32[1] = 0.0f;
-            neutralGi.float32[2] = 0.0f;
             neutralGi.float32[3] = 1.0f;
             const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             vkCmdClearColorImage(cmd, m_imgS.image, VK_IMAGE_LAYOUT_GENERAL, &neutralGi, 1, &colorRange);
@@ -541,18 +593,21 @@ namespace engine::renderer {
             clearAfter.pImageMemoryBarriers = &afterClear;
             vkCmdPipelineBarrier2(cmd, &clearAfter);
 
-            // Keep all six timestamp boundaries valid while reporting zero GI/AO work.
+            // Fill unused GI boundaries with equal timestamps; the profiler reports zero work.
             if (m_timestampsSupported && m_queryPool) {
-                for (uint32_t query = 0; query <= 4; ++query) {
+                for (uint32_t query = 0; query <= 7; ++query)
                     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, query);
-                }
             }
             m_giHistoryValid = false;
         }
 
-        // Pass 5 & 6: RT Reflections (trace -> specular temporal filter)
+        // Reflection work starts after the GI output dependency. Keep this barrier explicit
+        // and measure its scheduling gap separately from the reflection dispatch itself.
         if (params.reflectionsEnabled && m_reflPipeline && m_reflTemporalPipeline) {
             sync();
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 8);
+
             PushData reflPd{};
             reflPd.m = m_prevViewProj;
             reflPd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(params.reflectionSamples),
@@ -562,32 +617,30 @@ namespace engine::renderer {
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
 
             uint32_t reflFlags = 0;
-            if (params.reflectionCheckerboard)     reflFlags |= (1u << 8);  // 0x100
-            if (params.reflectionStochasticLights) reflFlags |= (1u << 9);  // 0x200
-            if (params.reflectionLodBias)          reflFlags |= (1u << 10); // 0x400
-            if (params.reflectionHalfRes)          reflFlags |= (1u << 11); // 0x800
-
+            if (params.reflectionCheckerboard)     reflFlags |= (1u << 8);
+            if (params.reflectionStochasticLights) reflFlags |= (1u << 9);
+            if (params.reflectionLodBias)          reflFlags |= (1u << 10);
+            if (params.reflectionHalfRes)          reflFlags |= (1u << 11);
             reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
 
-
             bindRefl(m_reflPipeline, reflPd);
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 9);
             sync();
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
-            }
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 10);
 
             bindRefl(m_reflTemporalPipeline, reflPd);
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 11);
             sync();
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 6);
-            }
-        } else {
-            if (m_timestampsSupported && m_queryPool) {
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
-                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 6);
-            }
+            if (m_timestampsSupported && m_queryPool)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 12);
+        } else if (m_timestampsSupported && m_queryPool) {
+            for (uint32_t query = 8; query <= 12; ++query)
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, query);
         }
 
         memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,

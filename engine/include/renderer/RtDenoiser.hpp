@@ -42,13 +42,28 @@ namespace engine::renderer {
         };
 
         struct GpuTimings {
+            // Inclusive stage timings retain the historical profiler semantics:
+            // each stage includes the dependency barrier immediately following it.
             float traceMs{0.0f};
-            float reflTraceMs{0.0f};
             float temporalMs{0.0f};
-            float reflTemporalMs{0.0f};
             float atrous0Ms{0.0f};
             float atrous1Ms{0.0f};
+            float reflTraceMs{0.0f};
+            float reflTemporalMs{0.0f};
             float totalMs{0.0f};
+
+            // Dispatch-only time and the following GPU dependency gap are reported separately.
+            float traceExecMs{0.0f};
+            float traceSyncMs{0.0f};
+            float temporalExecMs{0.0f};
+            float temporalSyncMs{0.0f};
+            float atrous0ExecMs{0.0f};
+            float atrous0SyncMs{0.0f};
+            float reflStartSyncMs{0.0f};
+            float reflTraceExecMs{0.0f};
+            float reflTraceSyncMs{0.0f};
+            float reflTemporalExecMs{0.0f};
+            float reflTemporalSyncMs{0.0f};
         };
 
         bool init(VulkanContext* context, VkDescriptorSetLayout sceneSetLayout,
@@ -65,6 +80,8 @@ namespace engine::renderer {
         void cleanup();
 
         bool isReady() const { return m_ready; }
+        uint32_t getGiWidth() const { return m_giWidth; }
+        uint32_t getGiHeight() const { return m_giHeight; }
         // Call when a frame was rendered without RT indirect (history would be stale).
         void invalidateHistory() { m_historyValid = false; m_giHistoryValid = false; }
 

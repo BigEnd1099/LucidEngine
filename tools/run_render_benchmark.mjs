@@ -315,7 +315,38 @@ async function captureScenario(name, features, meta = {}) {
       rtGiAtrous1Ms: Number(metrics.rtGiAtrous1Ms || 0),
       rtReflectionTraceMs: Number(metrics.rtReflectionTraceMs || 0),
       rtReflectionTemporalMs: Number(metrics.rtReflectionTemporalMs || 0),
-      rtComputeTotalMs: Number(metrics.rtComputeTotalMs || 0)
+      rtComputeTotalMs: Number(metrics.rtComputeTotalMs || 0),
+      rtGiTraceExecMs: Number(metrics.rtGiTraceExecMs || 0),
+      rtGiTraceSyncMs: Number(metrics.rtGiTraceSyncMs || 0),
+      rtGiTemporalExecMs: Number(metrics.rtGiTemporalExecMs || 0),
+      rtGiTemporalSyncMs: Number(metrics.rtGiTemporalSyncMs || 0),
+      rtGiAtrous0ExecMs: Number(metrics.rtGiAtrous0ExecMs || 0),
+      rtGiAtrous0SyncMs: Number(metrics.rtGiAtrous0SyncMs || 0),
+      rtReflectionStartSyncMs: Number(metrics.rtReflectionStartSyncMs || 0),
+      rtReflectionTraceExecMs: Number(metrics.rtReflectionTraceExecMs || 0),
+      rtReflectionTraceSyncMs: Number(metrics.rtReflectionTraceSyncMs || 0),
+      rtReflectionTemporalExecMs: Number(metrics.rtReflectionTemporalExecMs || 0),
+      rtReflectionTemporalSyncMs: Number(metrics.rtReflectionTemporalSyncMs || 0),
+      rtGiSamples: Number(metrics.rtGiSamples || 0),
+      rtGiBounces: Number(metrics.rtGiBounces || 0),
+      rtGiWidth: Number(metrics.rtGiWidth || 0),
+      rtGiHeight: Number(metrics.rtGiHeight || 0),
+      rtMaxHistory: Number(metrics.rtMaxHistory || 0),
+      rtSpatialStrength: Number(metrics.rtSpatialStrength || 0),
+      rtSvgfEnabled: Number(metrics.rtSvgfEnabled || 0),
+      rtGiCheckerboard: Number(metrics.rtGiCheckerboard || 0),
+      rtGiHistoryValid: Number(metrics.rtGiHistoryValid || 0),
+      rtReflectionHistoryValid: Number(metrics.rtReflectionHistoryValid || 0),
+      rtHistoryInvalidatedByLightChange: Number(metrics.rtHistoryInvalidatedByLightChange || 0),
+      rtReflectionSamples: Number(metrics.rtReflectionSamples || 0),
+      rtReflectionBounces: Number(metrics.rtReflectionBounces || 0),
+      rtReflectionInfiniteBounces: Number(metrics.rtReflectionInfiniteBounces || 0),
+      rtReflectionMaxRoughness: Number(metrics.rtReflectionMaxRoughness || 0),
+      rtReflectionCheckerboard: Number(metrics.rtReflectionCheckerboard || 0),
+      rtReflectionStochasticLights: Number(metrics.rtReflectionStochasticLights || 0),
+      rtReflectionLodBias: Number(metrics.rtReflectionLodBias || 0),
+      rtReflectionHalfRes: Number(metrics.rtReflectionHalfRes || 0),
+      rtDebugMode: Number(metrics.rtDebugMode || 0)
     });
     await sleep(SAMPLE_INTERVAL_MS);
   }
@@ -363,6 +394,18 @@ function writeSummary(results, sceneMeta) {
     'rtGiTraceMs', 'rtGiTemporalMs', 'rtGiAtrous0Ms', 'rtGiAtrous1Ms',
     'rtReflectionTraceMs', 'rtReflectionTemporalMs', 'rtComputeTotalMs'
   ];
+  const rtDiagnosticFields = [
+    'rtGiTraceExecMs', 'rtGiTraceSyncMs', 'rtGiTemporalExecMs', 'rtGiTemporalSyncMs',
+    'rtGiAtrous0ExecMs', 'rtGiAtrous0SyncMs', 'rtReflectionStartSyncMs',
+    'rtReflectionTraceExecMs', 'rtReflectionTraceSyncMs',
+    'rtReflectionTemporalExecMs', 'rtReflectionTemporalSyncMs',
+    'rtGiSamples', 'rtGiBounces', 'rtGiWidth', 'rtGiHeight', 'rtMaxHistory',
+    'rtSpatialStrength', 'rtSvgfEnabled', 'rtGiCheckerboard', 'rtGiHistoryValid',
+    'rtReflectionHistoryValid', 'rtHistoryInvalidatedByLightChange',
+    'rtReflectionSamples', 'rtReflectionBounces', 'rtReflectionInfiniteBounces',
+    'rtReflectionMaxRoughness', 'rtReflectionCheckerboard', 'rtReflectionStochasticLights',
+    'rtReflectionLodBias', 'rtReflectionHalfRes', 'rtDebugMode'
+  ];
   const lines = [
     '# Lucid Engine Render Benchmark', '',
     '- Date: ' + new Date().toISOString(),
@@ -378,15 +421,50 @@ function writeSummary(results, sceneMeta) {
   for (const result of results) {
     lines.push('| ' + result.name + ' | ' + fields.map(key => result.averages[key] ?? 0).join(' | ') + ' |');
   }
+  lines.push('', '## RT pass execution and dependency gaps', '',
+    '| Test | GI trace exec | GI trace gap | Temporal exec | Temporal gap | A-trous 0 exec | A-trous 0 gap | GI→reflection gap | Reflection trace exec | Reflection trace gap | Reflection temporal exec | Reflection temporal gap |',
+    '|---|' + Array(11).fill('---:').join('|') + '|');
+  for (const result of results) {
+    lines.push('| ' + result.name + ' | ' + rtDiagnosticFields.slice(0, 11).map(key => result.averages[key] ?? 0).join(' | ') + ' |');
+  }
+  lines.push('', '## RT quality and temporal-history telemetry', '',
+    '| Test | GI samples | GI bounces | GI internal resolution | History capacity | Spatial strength | SVGF | Checkerboard | GI history valid | Reflection history valid | History reset by light/camera | Reflection samples |',
+    '|---|' + Array(11).fill('---:').join('|') + '|');
+  for (const result of results) {
+    const a = result.averages;
+    lines.push('| ' + result.name + ' | ' + [
+      a.rtGiSamples ?? 0, a.rtGiBounces ?? 0,
+      String(a.rtGiWidth ?? 0) + ' × ' + String(a.rtGiHeight ?? 0),
+      a.rtMaxHistory ?? 0, a.rtSpatialStrength ?? 0,
+      a.rtSvgfEnabled ?? 0, a.rtGiCheckerboard ?? 0, a.rtGiHistoryValid ?? 0,
+      a.rtReflectionHistoryValid ?? 0, a.rtHistoryInvalidatedByLightChange ?? 0,
+      a.rtReflectionSamples ?? 0
+    ].join(' | ') + ' |');
+  }
+  lines.push('', '## RT reflection quality settings', '',
+    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Stochastic lights | LOD bias | Half resolution | Debug mode ID |',
+    '|---|' + Array(9).fill('---:').join('|') + '|');
+  for (const result of results) {
+    const a = result.averages;
+    lines.push('| ' + result.name + ' | ' + [
+      a.rtReflectionSamples ?? 0, a.rtReflectionBounces ?? 0,
+      a.rtReflectionInfiniteBounces ?? 0, a.rtReflectionMaxRoughness ?? 0,
+      a.rtReflectionCheckerboard ?? 0, a.rtReflectionStochasticLights ?? 0,
+      a.rtReflectionLodBias ?? 0, a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
+    ].join(' | ') + ' |');
+  }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
     '- Samples are polled over JSON-RPC from a dedicated maximized windowed Vulkan renderer (swapchain + presentation enabled).',
     '- Benchmark mode hides editor UI and disables viewport-driven resolution changes; the offscreen render target stays fixed to the configured benchmark resolution.',
     '- Compare runs only with the same GPU driver, render resolution, build configuration and scene.',
-    '- The harness does not alter RT reflection algorithms or quality defaults.', '');
+    '- RT stage timings retain inclusive values and additionally expose dispatch-only execution and dependency-gap intervals.',
+    '- Dependency-gap intervals are GPU scheduling gaps around synchronization barriers, not direct measurements of barrier instruction cost.',
+    '- RT quality telemetry (samples, internal GI resolution, temporal history and SVGF state) is observational; the harness does not change RT quality defaults or reflection algorithms.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
+  const csvFields = [...fields, ...rtDiagnosticFields];
   fs.writeFileSync(path.join(outputDir, 'REPORT.csv'),
-    ['test,' + fields.join(','), ...results.map(r => [r.name, ...fields.map(k => r.averages[k] ?? 0)].join(','))].join('\n') + '\n');
+    ['test,' + csvFields.join(','), ...results.map(r => [r.name, ...csvFields.map(k => r.averages[k] ?? 0)].join(','))].join('\n') + '\n');
   fs.writeFileSync(path.join(outputDir, 'REPORT.json'), JSON.stringify({
     generatedAt: new Date().toISOString(), executable: EXE, port: PORT,
     resolution: { width: WIDTH, height: HEIGHT }, scene: sceneMeta,

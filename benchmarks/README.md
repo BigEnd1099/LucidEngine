@@ -49,4 +49,10 @@ Every run creates `benchmark-results/run-<timestamp>/` containing:
 - `atrium-benchmark.jpg` — scene capture
 - `AtriumBenchmark/` — saved editable project (`.uproject`, `project.json`, `game.json` and project folders)
 
-GPU subpass values are nested inside the AO + RT aggregate; do not add them to the parent stage. RT reflection algorithms and quality defaults are not modified by the benchmark harness.
+GPU subpass values are nested inside the AO + RT aggregate; do not add them to the parent stage.
+
+RT pass timings retain inclusive stage values and also report dispatch-only execution plus GPU dependency-gap intervals around barriers. Dependency gaps are scheduling intervals, not direct measurements of barrier instruction cost.
+
+Reports include observational RT quality telemetry: GI sample count, internal GI resolution, GI and reflection bounce counts, temporal-history capacity/validity, history invalidation by camera/light changes, SVGF state, checkerboard state, reflection roughness threshold, stochastic-light/LOD options and reflection resolution.
+
+RT reflection algorithms, shaders and quality defaults are not modified by the benchmark harness.

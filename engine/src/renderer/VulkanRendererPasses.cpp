@@ -1304,6 +1304,7 @@ namespace engine::renderer {
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;
                 rtp.lightChanged = rtLightOrCameraMoved;
                 rtp.debugMode = m_rtSettings.debugMode;
+                core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
             } else {
                 m_rtDenoiser.invalidateHistory();
@@ -1312,8 +1313,45 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("rtGiAtrous0Ms", 0.0);
                 core::Profiler::get().recordMetric("rtGiAtrous1Ms", 0.0);
                 core::Profiler::get().recordMetric("rtReflectionTraceMs", 0.0);
-                core::Profiler::get().recordMetric("rtReflectionTemporalMs", 0.0);
-                core::Profiler::get().recordMetric("rtComputeTotalMs", 0.0);
+                auto& rtProfiler = core::Profiler::get();
+                rtProfiler.recordMetric("rtReflectionTemporalMs", 0.0);
+                rtProfiler.recordMetric("rtComputeTotalMs", 0.0);
+                rtProfiler.recordMetric("rtGiTraceExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiTraceSyncMs", 0.0);
+                rtProfiler.recordMetric("rtGiTemporalExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiTemporalSyncMs", 0.0);
+                rtProfiler.recordMetric("rtGiAtrous0ExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiAtrous0SyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionStartSyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTraceExecMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTraceSyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTemporalExecMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTemporalSyncMs", 0.0);
+
+                // Keep the quality snapshot current even when the RT dispatch is inactive.
+                rtProfiler.recordMetric("rtGiSamples", std::clamp(m_rtSettings.giSamples, 1, 16));
+                rtProfiler.recordMetric("rtGiBounces", std::clamp(m_rtSettings.giBounces, 1, 15));
+                rtProfiler.recordMetric("rtGiWidth", m_rtDenoiser.getGiWidth());
+                rtProfiler.recordMetric("rtGiHeight", m_rtDenoiser.getGiHeight());
+                rtProfiler.recordMetric("rtMaxHistory", m_rtSettings.denoiseEnabled
+                    ? static_cast<double>(m_rtSettings.maxHistory) : 1.0);
+                rtProfiler.recordMetric("rtSpatialStrength", m_rtSettings.denoiseEnabled
+                    ? static_cast<double>(m_rtSettings.spatialStrength) : 0.0);
+                rtProfiler.recordMetric("rtSvgfEnabled",
+                    m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
+                rtProfiler.recordMetric("rtReflectionHistoryValid", 0.0);
+                rtProfiler.recordMetric("rtHistoryInvalidatedByLightChange", 0.0);
+                rtProfiler.recordMetric("rtReflectionSamples", std::clamp(m_rtSettings.reflectionSamples, 1, 16));
+                rtProfiler.recordMetric("rtReflectionBounces", std::clamp(m_rtSettings.reflectionBounces, 2, 4));
+                rtProfiler.recordMetric("rtReflectionInfiniteBounces", m_rtSettings.reflectionInfiniteBounces ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionMaxRoughness", m_rtSettings.reflectionMaxRoughness);
+                rtProfiler.recordMetric("rtReflectionCheckerboard", m_rtSettings.reflectionCheckerboard ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionStochasticLights", m_rtSettings.reflectionStochasticLights ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionLodBias", m_rtSettings.reflectionLodBias ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));
             }
         }
 
