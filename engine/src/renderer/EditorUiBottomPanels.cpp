@@ -85,6 +85,13 @@ void drawEditorBottomPanels(bool immersivePlay,
                 if (ImGui::Button(editorText("ui.scripts_folder", " scripts/ "))) s_currentBrowsePath = "scripts";
                 ImGui::SameLine();
             }
+            static fs::path s_cachedBrowsePath;
+            static std::vector<fs::directory_entry> s_cachedEntries;
+            static std::string s_cachedBrowseError;
+            static bool s_refreshAssets = true;
+            if (s_cachedBrowsePath != s_currentBrowsePath) s_refreshAssets = true;
+            if (ImGui::SmallButton(editorText("ui.refresh_assets", "Refresh"))) s_refreshAssets = true;
+            ImGui::SameLine();
 
             // Filter chips
             static int s_assetFilterCategory = 0;
@@ -118,30 +125,33 @@ void drawEditorBottomPanels(bool immersivePlay,
             int colIdx = 0;
             int visibleAssetCount = 0;
             std::error_code ec;
-            std::vector<fs::directory_entry> entries;
-            std::string browseError;
-            try {
-                fs::directory_iterator it(s_currentBrowsePath, fs::directory_options::skip_permission_denied, ec);
-                const fs::directory_iterator end;
-                while (!ec && it != end) {
-                    entries.push_back(*it);
-                    it.increment(ec);
+            if (s_refreshAssets) {
+                s_cachedEntries.clear();
+                s_cachedBrowseError.clear();
+                try {
+                    fs::directory_iterator it(s_currentBrowsePath, fs::directory_options::skip_permission_denied, ec);
+                    const fs::directory_iterator end;
+                    while (!ec && it != end) {
+                        s_cachedEntries.push_back(*it);
+                        it.increment(ec);
+                    }
+                    if (ec) s_cachedBrowseError = ec.message();
+                } catch (const fs::filesystem_error& error) {
+                    s_cachedBrowseError = error.what();
                 }
-                if (ec) browseError = ec.message();
-            } catch (const fs::filesystem_error& error) {
-                browseError = error.what();
+
+                std::sort(s_cachedEntries.begin(), s_cachedEntries.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
+                    std::error_code aError, bError;
+                    const bool aDirectory = a.is_directory(aError);
+                    const bool bDirectory = b.is_directory(bError);
+                    if (aDirectory != bDirectory) return aDirectory;
+                    return a.path().filename().string() < b.path().filename().string();
+                });
+                s_cachedBrowsePath = s_currentBrowsePath;
+                s_refreshAssets = false;
             }
 
-            // Sort folders first; tolerate inaccessible entries instead of aborting the panel.
-            std::sort(entries.begin(), entries.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
-                std::error_code aError, bError;
-                const bool aDirectory = a.is_directory(aError);
-                const bool bDirectory = b.is_directory(bError);
-                if (aDirectory != bDirectory) return aDirectory;
-                return a.path().filename().string() < b.path().filename().string();
-            });
-
-            for (const auto& entry : entries) {
+            for (const auto& entry : s_cachedEntries) {
                 const std::string filename = entry.path().filename().string();
                 const std::string ext = entry.path().extension().string();
                 std::error_code entryError;
@@ -218,8 +228,8 @@ void drawEditorBottomPanels(bool immersivePlay,
                 ImGui::PopID();
             }
 
-            if (!browseError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s: %s", editorText("ui.asset_read_error", "Cannot read directory"), browseError.c_str());
-            if (visibleAssetCount == 0 && browseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
+            if (!s_cachedBrowseError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s: %s", editorText("ui.asset_read_error", "Cannot read directory"), s_cachedBrowseError.c_str());
+            if (visibleAssetCount == 0 && s_cachedBrowseError.empty()) ImGui::TextDisabled(editorText("ui.asset_no_results", "No assets match this search."));
             ImGui::EndChild();
         } else {
             static bool s_autoScroll = true;
