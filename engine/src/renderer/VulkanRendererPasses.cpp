@@ -1138,6 +1138,9 @@ namespace engine::renderer {
         core::Profiler::get().recordMetric("ssgiIntensity", m_lightBounceIntensity);
         core::Profiler::get().recordMetric("ssgiGroundReflectance", m_lightBounceGroundReflectance);
         core::Profiler::get().recordMetric("ssgiMultiBounce", m_lightBounceMultiBounce);
+        core::Profiler::get().recordMetric("ssgiGroundColorR", m_lightBounceGroundColor.r);
+        core::Profiler::get().recordMetric("ssgiGroundColorG", m_lightBounceGroundColor.g);
+        core::Profiler::get().recordMetric("ssgiGroundColorB", m_lightBounceGroundColor.b);
         m_screenSpaceAoGiPassActive = (m_gtaoEnabled || m_lightBounceEnabled) &&
             m_gtaoPipeline && m_gtaoBlurPipeline && !drawItems.empty();
         if (m_screenSpaceAoGiPassActive) {
