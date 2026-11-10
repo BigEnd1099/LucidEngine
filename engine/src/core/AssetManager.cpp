@@ -47,7 +47,7 @@ namespace engine::core {
         m_lastImportedSkins.clear();
         m_lastImportedAnimations.clear();
         try {
-            fastgltf::Parser parser;
+            fastgltf::Parser parser(fastgltf::Extensions::EXT_mesh_gpu_instancing);
             auto buffer = fastgltf::GltfDataBuffer::FromPath(path);
             if (!buffer) {
                 core::Logger::error("AssetManager: unable to read glTF file: " + path);
@@ -842,7 +842,78 @@ namespace engine::core {
                         importedNode.rotation = glm::normalize(localRotation);
                         importedNode.scale = localScale;
                     }
+                    const std::string sourceNodeName = importedNode.name;
+                    const std::vector<uint32_t> instancedMeshIds = importedNode.meshIds;
+                    const bool hasGpuInstances = !node.instancingAttributes.empty() && !instancedMeshIds.empty();
+                    if (hasGpuInstances)
+                        importedNode.meshIds.clear();
                     m_lastImportedNodes.push_back(std::move(importedNode));
+
+                    // EXT_mesh_gpu_instancing supplies per-instance TRS accessors. Expand
+                    // them into child scene nodes for the current ECS renderer, preserving
+                    // the source node as the transform parent. Geometry remains shared.
+                    if (hasGpuInstances) {
+                        size_t instanceCount = 0;
+                        if (const auto* translationAttribute = node.findInstancingAttribute("TRANSLATION");
+                            translationAttribute && translationAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[translationAttribute->accessorIndex].count;
+                        else if (const auto* rotationAttribute = node.findInstancingAttribute("ROTATION");
+                            rotationAttribute && rotationAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[rotationAttribute->accessorIndex].count;
+                        else if (const auto* scaleAttribute = node.findInstancingAttribute("SCALE");
+                            scaleAttribute && scaleAttribute->accessorIndex < asset.accessors.size())
+                            instanceCount = asset.accessors[scaleAttribute->accessorIndex].count;
+
+                        std::vector<glm::vec3> translations(instanceCount, glm::vec3(0.0f));
+                        std::vector<glm::quat> rotations(instanceCount, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                        std::vector<glm::vec3> scales(instanceCount, glm::vec3(1.0f));
+                        if (const auto* attribute = node.findInstancingAttribute("TRANSLATION");
+                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec3& value) {
+                                    if (index < translations.size())
+                                        translations[index] = glm::vec3(
+                                            static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                    ++index;
+                                });
+                        }
+                        if (const auto* attribute = node.findInstancingAttribute("ROTATION");
+                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec4& value) {
+                                    if (index < rotations.size())
+                                        rotations[index] = glm::normalize(glm::quat(
+                                            static_cast<float>(value[3]), static_cast<float>(value[0]),
+                                            static_cast<float>(value[1]), static_cast<float>(value[2])));
+                                    ++index;
+                                });
+                        }
+                        if (const auto* attribute = node.findInstancingAttribute("SCALE");
+                            attribute && attribute->accessorIndex < asset.accessors.size()) {
+                            size_t index = 0;
+                            fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[attribute->accessorIndex],
+                                [&](const fastgltf::math::fvec3& value) {
+                                    if (index < scales.size())
+                                        scales[index] = glm::vec3(
+                                            static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
+                                    ++index;
+                                });
+                        }
+
+                        for (size_t instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex) {
+                            ImportedSceneNode instanceNode;
+                            instanceNode.nodeIndex = nodeIndex;
+                            instanceNode.parentNodeIndex = static_cast<int64_t>(importedNodePosition);
+                            instanceNode.name = sourceNodeName + "_Instance_" + std::to_string(instanceIndex + 1);
+                            instanceNode.translation = translations[instanceIndex];
+                            instanceNode.rotation = rotations[instanceIndex];
+                            instanceNode.scale = scales[instanceIndex];
+                            instanceNode.meshIds = instancedMeshIds;
+                            m_lastImportedNodes.push_back(std::move(instanceNode));
+                        }
+                    }
 
                     const glm::mat4 world = parentTransform * local;
                     if (node.meshIndex.has_value() && node.meshIndex.value() < importedMeshIds.size()) {
