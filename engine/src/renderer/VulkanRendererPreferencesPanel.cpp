@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <cstdio>
+#include <string>
 #ifdef USE_GLFW
 #include "imgui.h"
 namespace engine::renderer {
@@ -111,7 +112,8 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         ImGui::Separator();
 
                         static int s_themeChoice = 0;
-                        if (ImGui::Combo(editorText("ui.editor_theme", "Editor Theme"), &s_themeChoice, editorText("settings.theme_unreal_dark", "Unreal Slate (Dark Graphite)") + "\0" + editorText("ui.blender_dark_pro", "Blender Dark Pro (BUI Palette)") + "\0\0")) {
+                        const std::string themeOptions = std::string(editorText("settings.theme_unreal_dark", "Unreal Slate (Dark Graphite)")) + '\0' + editorText("ui.blender_dark_pro", "Blender Dark Pro (BUI Palette)") + '\0' + '\0';
+                        if (ImGui::Combo(editorText("ui.editor_theme", "Editor Theme"), &s_themeChoice, themeOptions.c_str())) {
                             applyEditorUiTheme(s_themeChoice == 1 ? EditorThemePreset::BlenderDarkPro : EditorThemePreset::UnrealSlate);
                         }
 
