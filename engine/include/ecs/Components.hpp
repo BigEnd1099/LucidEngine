@@ -41,6 +41,30 @@ namespace engine::ecs {
         std::vector<float> weights;
     };
 
+    struct AnimationTrackRuntime {
+        entt::entity target{entt::null};
+        uint8_t path{0};          // fastgltf AnimationPath
+        uint8_t interpolation{0}; // fastgltf AnimationInterpolation
+        uint32_t componentsPerKey{0};
+        std::vector<float> keyframeTimes;
+        std::vector<float> values; // CUBICSPLINE stores in/value/out triplets per key
+    };
+
+    struct AnimationClipRuntime {
+        std::string name;
+        float duration{0.0f};
+        std::vector<AnimationTrackRuntime> tracks;
+    };
+
+    struct AnimationPlayerComponent {
+        std::vector<AnimationClipRuntime> clips;
+        uint32_t activeClip{0};
+        float time{0.0f};
+        float speed{1.0f};
+        bool playing{true};
+        bool loop{true};
+    };
+
     struct SkinComponent {
         uint32_t skinAssetId{0};
         entt::entity skeleton{entt::null};
