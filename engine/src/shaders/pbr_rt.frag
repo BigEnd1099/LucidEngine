@@ -10,6 +10,7 @@ layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec4 fragTangent;
+layout(location = 4) in vec4 fragColor;
 
 layout(location = 0) out vec4 outColor;
 
@@ -280,7 +281,7 @@ void main() {
 
     vec4 texSample = texture(albedoMap, fragTexCoord);
     vec3 texLinear = texSample.rgb;
-    vec3 albedo = clamp(pcs.baseColorFactor.rgb * texLinear, vec3(0.0), vec3(1.0));
+    vec3 albedo = clamp(pcs.baseColorFactor.rgb * texLinear * fragColor.rgb, vec3(0.0), vec3(1.0));
 
     vec3 orm = texture(ormMap, fragTexCoord).rgb;
     float metallic = clamp(pcs.normalCol0.w * orm.b, 0.0, 1.0);
