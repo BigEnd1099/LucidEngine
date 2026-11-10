@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <algorithm>
 #include <filesystem>
 #include <string>
@@ -470,12 +471,15 @@ namespace engine::renderer {
             const bool isWindowFocused = ImGui::IsWindowFocused();
 
             // Content Drawer -> Viewport: import glTF/GLB files as new scene actors.
+            bool isAssetDropHovered = false;
             if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LUCID_ASSET_PATH")) {
-                    if (payload->Data && payload->DataSize > 1) {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+                        "LUCID_ASSET_PATH", ImGuiDragDropFlags_AcceptBeforeDelivery)) {
+                    isAssetDropHovered = payload->Preview || payload->Delivery;
+                    if (payload->Delivery && payload->Data && payload->DataSize > 1) {
                         const char* rawPath = static_cast<const char*>(payload->Data);
                         const char* pathEnd = static_cast<const char*>(std::memchr(rawPath, '\0', static_cast<size_t>(payload->DataSize)));
-                        if (pathEnd && ! (engine && engine->isSimulationSessionActive()) && assetManager) {
+                        if (pathEnd && !(engine && engine->isSimulationSessionActive()) && assetManager) {
                             const std::filesystem::path droppedPath(std::string(rawPath, pathEnd));
                             std::string extension = droppedPath.extension().string();
                             std::transform(extension.begin(), extension.end(), extension.begin(),
@@ -512,6 +516,17 @@ namespace engine::renderer {
 
             const ImVec2 mousePos = ImGui::GetIO().MousePos;
             ImDrawList* drawList = ImGui::GetWindowDrawList();
+            if (isAssetDropHovered) {
+                drawList->AddRectFilled(vMin, ImVec2(vMin.x + vSize.x, vMin.y + vSize.y),
+                    IM_COL32(20, 115, 210, 42));
+                drawList->AddRect(vMin, ImVec2(vMin.x + vSize.x, vMin.y + vSize.y),
+                    IM_COL32(75, 175, 255, 230), 0.0f, 0, 3.0f);
+                const char* dropHint = editorText("ui.drop_model_into_viewport", "Drop model to create actor");
+                const ImVec2 hintSize = ImGui::CalcTextSize(dropHint);
+                drawList->AddText(ImVec2(vMin.x + (vSize.x - hintSize.x) * 0.5f,
+                                         vMin.y + (vSize.y - hintSize.y) * 0.5f),
+                                  IM_COL32(235, 245, 255, 255), dropHint);
+            }
 
             const float aspect = (m_viewportAspectRatio <= 0.1f) ? (16.0f / 9.0f) : m_viewportAspectRatio;
             glm::mat4 curProj = glm::perspective(glm::radians(camFov), aspect, 0.1f, 1000.0f);
