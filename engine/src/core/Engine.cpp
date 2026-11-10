@@ -729,6 +729,9 @@ namespace engine::core {
         }
 
         {
+            // Evaluate parent-relative transforms before publishing the frame snapshot.
+            if (m_registry) m_registry->updateWorldTransforms();
+
             LUCID_PROFILE_SCOPE("Netcode");
             if (m_replicationGraph && m_registry) {
                 m_replicationGraph->recordSnapshot(++m_currentTick, m_registry.get());
@@ -1342,7 +1345,7 @@ namespace engine::core {
             }
         }
 
-        m_registry->get().destroy(entity);
+        m_registry->destroyEntity(entity);
         return true;
     }
 
