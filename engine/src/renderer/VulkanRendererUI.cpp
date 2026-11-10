@@ -801,7 +801,7 @@ namespace engine::renderer {
                 }
                 if (!isSimulationSessionActive && ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(selectedEnt));
-                    else registry.get().destroy(selectedEnt);
+                    else registry.destroyEntity(selectedEnt);
                     selectedEnt = entt::null;
                     if (engine) engine->setSelectedEntity(entt::null);
                 }
