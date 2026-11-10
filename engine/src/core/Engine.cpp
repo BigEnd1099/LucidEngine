@@ -981,7 +981,7 @@ namespace engine::core {
                     auto& skin = m_registry->get().get_or_emplace<ecs::SkinComponent>(child);
                     skin.skinAssetId = skinJson.value("skinAssetId", 0u);
                     const uint32_t skeletonSavedId = skinJson.value("skeleton", 0u);
-                    if (skeletonSavedId != 0u) {
+                    if (skinJson.value("hasSkeleton", false)) {
                         const auto skeletonIt = restoredEntityMap.find(skeletonSavedId);
                         skin.skeleton = skeletonIt != restoredEntityMap.end()
                             ? skeletonIt->second : static_cast<entt::entity>(entt::null);
@@ -1952,7 +1952,8 @@ function update(entities, dt, input, contacts) {
                 }
                 entJson["skin"] = {
                     {"skinAssetId", skin.skinAssetId},
-                    {"skeleton", skin.skeleton == entt::null ? 0u : static_cast<uint32_t>(skin.skeleton)},
+                    {"hasSkeleton", skin.skeleton != entt::null},
+                    {"skeleton", static_cast<uint32_t>(skin.skeleton)},
                     {"joints", std::move(joints)},
                     {"inverseBindMatrices", std::move(inverseBindMatrices)}
                 };
