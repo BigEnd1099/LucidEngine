@@ -46,7 +46,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImGui::TextDisabled("[%zu]", viewAll.size());
         ImGui::SameLine(ImGui::GetWindowWidth() - 24.0f * uiScale);
         if (ImGui::SmallButton(">")) { showOutliner = false; showDetails = false; }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Zwin prawy panel inspektora");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Collapse the inspector panel", "Zwiń panel inspektora"));
 
         static int s_outlinerCategory = 0; // 0: Wszystko, 1: Siatki, 2: Swiatla, 3: Fizyka, 4: Gracz
         auto drawFilterChip = [&](const char* name, int cIdx) {
@@ -195,7 +195,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             ImGui::PopStyleColor(3);
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(isVis ? "Widoczny w oknie 3D (Kliknij, aby ukryc)" : "Ukryty w oknie 3D (Kliknij, aby pokazac)");
+                ImGui::SetTooltip(isVis ? editorText("Visible in the 3D viewport (click to hide)", "Widoczny w oknie 3D (kliknij, aby ukryć)") : editorText("Hidden in the 3D viewport (click to show)", "Ukryty w oknie 3D (kliknij, aby pokazać)"));
             }
             const ImU32 eyeCol = isVis ? IM_COL32(200, 215, 235, 240) : IM_COL32(110, 115, 125, 150);
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(eyeP.x + eyeSz * 0.5f, eyeP.y + eyeSz * 0.5f), 4.2f * uiScale, isVis ? VectorIconType::Eye : VectorIconType::EyeClosed, eyeCol);
