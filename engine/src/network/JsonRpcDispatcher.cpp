@@ -618,6 +618,18 @@ namespace engine::network {
                     };
                     eng->sendWsMessage(client, res.dump());
                 });
+            } else if (method == "engine.saveCurrentProject") {
+                std::string folderPath = "projects/AtriumBenchmark";
+                if (json.contains("params") && json["params"].is_object())
+                    folderPath = json["params"].value("path", folderPath);
+                queue.push([folderPath, client, id](core::Engine* eng) {
+                    const bool success = eng->saveCurrentProject(folderPath);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"success", success}, {"path", folderPath}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
             } else if (method == "engine.getProfilerStats") {
                 queue.push([client, id](core::Engine* eng) {
                     nlohmann::json stats = eng->getProfilerStats();
