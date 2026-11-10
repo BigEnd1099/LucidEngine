@@ -514,6 +514,8 @@ namespace engine::renderer {
         uint32_t m_rtTextureDescriptorCount{UINT32_MAX};
 
         VkCommandBuffer m_commandBuffer{VK_NULL_HANDLE};
+        // Headless submissions use a deferred fence instead of blocking the queue at frame end.
+        VkFence m_headlessInFlightFence{VK_NULL_HANDLE};
 
         // Eleven timestamp queries split the GPU command buffer and screen-space AO/GI subpasses.
         VkQueryPool m_timestampQueryPool{VK_NULL_HANDLE};
