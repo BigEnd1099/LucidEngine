@@ -646,8 +646,12 @@ namespace engine::core {
         const float clampedDt = std::min(dt, 0.1f);
         {
             LUCID_PROFILE_SCOPE("Physics");
-            const bool hasPhysicsBodies = m_registry &&
-                !m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>().empty();
+            bool hasPhysicsBodies = false;
+            if (m_registry) {
+                const auto physicsView =
+                    m_registry->get().view<ecs::TransformComponent, ecs::RigidBodyComponent>();
+                hasPhysicsBodies = physicsView.begin() != physicsView.end();
+            }
             if (m_physicsSystem && hasPhysicsBodies) {
                 m_physicsAccumulator += clampedDt;
                 while (m_physicsAccumulator >= FIXED_TIMESTEP) {
