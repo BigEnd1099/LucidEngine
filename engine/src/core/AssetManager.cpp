@@ -383,13 +383,16 @@ namespace engine::core {
                     if (positionIndex >= vertices.size()) return;
                     vertices[positionIndex].position = glm::vec3(
                         static_cast<float>(value[0]), static_cast<float>(value[1]), static_cast<float>(value[2]));
-                    vertices[positionIndex].normal = glm::vec3(0, 1, 0);
-                    vertices[positionIndex].texCoord = glm::vec2(0, 0);
+                    vertices[positionIndex].normal = glm::vec3(0.0f);
+                    vertices[positionIndex].texCoord = glm::vec2(0.0f);
+                    vertices[positionIndex].tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
                     ++positionIndex;
                 });
 
+            bool hasNormals = false;
             if (auto it = primitive.findAttribute("NORMAL"); it != primitive.attributes.end() &&
                 it->accessorIndex < asset.accessors.size()) {
+                hasNormals = true;
                 size_t index = 0;
                 fastgltf::iterateAccessor<fastgltf::math::fvec3>(asset, asset.accessors[it->accessorIndex],
                     [&](const fastgltf::math::fvec3& value) {
@@ -414,6 +417,20 @@ namespace engine::core {
                     });
             }
 
+            if (auto it = primitive.findAttribute("TANGENT"); it != primitive.attributes.end() &&
+                it->accessorIndex < asset.accessors.size()) {
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[it->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < vertices.size()) {
+                            vertices[index].tangent = glm::vec4(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                static_cast<float>(value[2]), static_cast<float>(value[3]));
+                        }
+                        ++index;
+                    });
+            }
+
             if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
                 fastgltf::iterateAccessor<uint32_t>(asset, asset.accessors[primitive.indicesAccessor.value()],
                     [&](uint32_t index) { indices.push_back(index); });
@@ -429,6 +446,21 @@ namespace engine::core {
             if (indices.size() % 3 != 0) {
                 core::Logger::warn("AssetManager: skipping triangle primitive with an invalid index count");
                 continue;
+            }
+            if (!hasNormals) {
+                for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+                    const uint32_t i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+                    const glm::vec3 edgeA = vertices[i1].position - vertices[i0].position;
+                    const glm::vec3 edgeB = vertices[i2].position - vertices[i0].position;
+                    const glm::vec3 faceNormal = glm::cross(edgeA, edgeB);
+                    vertices[i0].normal += faceNormal;
+                    vertices[i1].normal += faceNormal;
+                    vertices[i2].normal += faceNormal;
+                }
+                for (auto& vertex : vertices) {
+                    vertex.normal = glm::length(vertex.normal) > 1e-6f
+                        ? glm::normalize(vertex.normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+                }
             }
 
             auto meshAsset = std::make_unique<MeshAsset>();
