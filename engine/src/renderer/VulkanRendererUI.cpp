@@ -708,6 +708,35 @@ namespace engine::renderer {
                                                 ecs::MorphWeightsComponent{node.morphWeights});
                                     }
 
+                                    // Bind imported animation channels to the ECS entities created above.
+                                    const auto& importedAnimations = assetManager->getLastImportedAnimations();
+                                    ecs::AnimationPlayerComponent animationPlayer{};
+                                    for (const auto& sourceClip : importedAnimations) {
+                                        ecs::AnimationClipRuntime clip{};
+                                        clip.name = sourceClip.name;
+                                        clip.duration = sourceClip.duration;
+                                        for (const auto& sourceTrack : sourceClip.tracks) {
+                                            const auto targetIt = sourceNodeEntities.find(sourceTrack.nodeIndex);
+                                            if (targetIt == sourceNodeEntities.end()) continue;
+                                            ecs::AnimationTrackRuntime track{};
+                                            track.target = targetIt->second;
+                                            track.path = sourceTrack.path;
+                                            track.interpolation = sourceTrack.interpolation;
+                                            track.componentsPerKey = sourceTrack.componentsPerKey;
+                                            track.keyframeTimes = sourceTrack.keyframeTimes;
+                                            track.values = sourceTrack.values;
+                                            if (!track.keyframeTimes.empty() && track.componentsPerKey > 0)
+                                                clip.tracks.push_back(std::move(track));
+                                        }
+                                        if (!clip.tracks.empty()) animationPlayer.clips.push_back(std::move(clip));
+                                    }
+                                    if (!animationPlayer.clips.empty()) {
+                                        registry.get().emplace<ecs::AnimationPlayerComponent>(firstCreated,
+                                            std::move(animationPlayer));
+                                        core::Logger::info("Imported " + std::to_string(importedAnimations.size()) +
+                                            " glTF animation clip(s) for " + modelName);
+                                    }
+
                                     // A glTF mesh may contain several primitives. The first
                                     // primitive lives on the node; additional primitives get
                                     // identity child entities so no geometry is discarded.
