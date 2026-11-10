@@ -115,6 +115,7 @@ if (ubo.rtParams.x < 0.5) {
 const int baseSamples = int(clamp(pc.u.x, 1u, 16u));
 const uint frame = pc.u.y;
 const bool doGI = (pc.u.z & 1u) != 0u;
+const bool doAO = (pc.u.z & 2u) != 0u;
 const bool useCheckerboard = (pc.u.z & 4u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
@@ -164,7 +165,7 @@ for (int s = 0; s < samples; ++s) {
         bool found = traceSceneSurface(rayOrigin, dir, MAX_RAY_DIST,
             hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance);
 
-        if (b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
+        if (doAO && b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
 
         // Environment lighting is owned exclusively by the IBL switch (skyboxMode bit 1)
         // in the PBR pass and in shadeRtHit(). A visible skybox must never light the
