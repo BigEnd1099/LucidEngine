@@ -39,14 +39,14 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         ImVec2 oHdrPos = ImGui::GetCursorScreenPos();
         drawEditorVectorIcon(odl, ImVec2(oHdrPos.x + 8.0f * uiScale, oHdrPos.y + 9.0f * uiScale), 5.5f * uiScale, VectorIconType::Folder, IM_COL32(245, 158, 11, 255));
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18.0f * uiScale);
-        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("Scene Outliner", "Hierarchia sceny"));
+        ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), editorText("ui.scene_outliner", "Scene Outliner", "Hierarchia sceny"));
 
         auto viewAll = registry.get().view<ecs::TransformComponent>();
         ImGui::SameLine(ImGui::GetWindowWidth() - 95.0f * uiScale);
         ImGui::TextDisabled("[%zu]", viewAll.size());
         ImGui::SameLine(ImGui::GetWindowWidth() - 24.0f * uiScale);
         if (ImGui::SmallButton(">")) { showOutliner = false; showDetails = false; }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Collapse the inspector panel", "Zwiń panel inspektora"));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.collapse_the_inspector_panel", "Collapse the inspector panel", "Zwiń panel inspektora"));
 
         static int s_outlinerCategory = 0; // 0: Wszystko, 1: Siatki, 2: Swiatla, 3: Fizyka, 4: Gracz
         auto drawFilterChip = [&](const char* name, int cIdx) {
@@ -68,17 +68,17 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         const bool hasFilter = (outlinerFilter[0] != '\0');
         const float searchExtraW = (hasFilter ? 84.0f : 62.0f) * uiScale;
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - searchExtraW);
-        ImGui::InputTextWithHint("##OutlinerSearch", editorText("Search scene...", "Filtruj scenę..."), outlinerFilter, sizeof(outlinerFilter));
+        ImGui::InputTextWithHint("##OutlinerSearch", editorText("ui.search_scene", "Search scene...", "Filtruj scenę..."), outlinerFilter, sizeof(outlinerFilter));
         if (hasFilter) {
             ImGui::SameLine();
             if (ImGui::SmallButton("x##ClearOutlinerFilter")) {
                 outlinerFilter[0] = '\0';
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("Clear filter", "Wyczyść filtr"));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.clear_filter", "Clear filter", "Wyczyść filtr"));
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(engine && engine->isSimulationSessionActive());
-        if (ImGui::Button(editorText("+ Spawn", "+ Dodaj"), ImVec2(58.0f * uiScale, 0))) {
+        if (ImGui::Button(editorText("ui.spawn", "+ Spawn", "+ Dodaj"), ImVec2(58.0f * uiScale, 0))) {
             auto newEnt = registry.createEntity();
             glm::vec3 sp = cameraPosition + cameraForward * 6.0f;
             if (sp.y < 0.5f) sp.y = 0.5f;
@@ -195,7 +195,7 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
             ImGui::PopStyleColor(3);
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(isVis ? editorText("Visible in the 3D viewport (click to hide)", "Widoczny w oknie 3D (kliknij, aby ukryć)") : editorText("Hidden in the 3D viewport (click to show)", "Ukryty w oknie 3D (kliknij, aby pokazać)"));
+                ImGui::SetTooltip(isVis ? editorText("ui.visible_in_the_3d_viewport_click_to_hide", "Visible in the 3D viewport (click to hide)", "Widoczny w oknie 3D (kliknij, aby ukryć)") : editorText("ui.hidden_in_the_3d_viewport_click_to_show", "Hidden in the 3D viewport (click to show)", "Ukryty w oknie 3D (kliknij, aby pokazać)"));
             }
             const ImU32 eyeCol = isVis ? IM_COL32(200, 215, 235, 240) : IM_COL32(110, 115, 125, 150);
             drawEditorVectorIcon(ImGui::GetWindowDrawList(), ImVec2(eyeP.x + eyeSz * 0.5f, eyeP.y + eyeSz * 0.5f), 4.2f * uiScale, isVis ? VectorIconType::Eye : VectorIconType::EyeClosed, eyeCol);
@@ -269,8 +269,8 @@ void drawEditorOutlinerPanel(ecs::Registry& registry,
         }
         if (visibleEntityCount == 0) {
             ImGui::Spacing();
-            ImGui::TextDisabled(view.empty() ? editorText("Scene is empty.", "Scena jest pusta.") : editorText("No entities match the current filters.", "Brak obiektów pasujących do filtrów."));
-            if (!view.empty() && hasFilter && ImGui::SmallButton(editorText("Clear search filter", "Wyczyść filtr"))) {
+            ImGui::TextDisabled(view.empty() ? editorText("ui.scene_is_empty", "Scene is empty.", "Scena jest pusta.") : editorText("ui.no_entities_match_the_current_filters", "No entities match the current filters.", "Brak obiektów pasujących do filtrów."));
+            if (!view.empty() && hasFilter && ImGui::SmallButton(editorText("ui.clear_search_filter", "Clear search filter", "Wyczyść filtr"))) {
                 outlinerFilter[0] = 0;
             }
         }
