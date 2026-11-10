@@ -330,6 +330,7 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
     const stats = await callRpc('engine.getProfilerStats');
     const metrics = stats?.metrics || {};
     samples.push({
+      profilerSamples: stats?.samples || {},
       timestamp: new Date().toISOString(),
       frameTimeMs: Number(stats?.frameTimeMs || 0),
       profilerSmoothedFps: Number(stats?.fps || 0),
@@ -411,6 +412,23 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
     ? round(1000.0 / p95.frameTimeMs)
     : 0;
 
+  // CPU-side profiler scopes are captured independently from GPU timestamp queries.
+  // Keep the last-sample distribution separate from rolling averages to expose stalls.
+  const cpuStageNames = [...new Set(samples.flatMap(sample =>
+    Object.keys(sample.profilerSamples || {})))].sort();
+  const cpuStageStats = {};
+  for (const stage of cpuStageNames) {
+    const values = samples
+      .map(sample => Number(sample.profilerSamples?.[stage]?.lastMs))
+      .filter(Number.isFinite);
+    if (!values.length) continue;
+    cpuStageStats[stage] = {
+      averageMs: round(mean(values)),
+      p95Ms: round(percentile(values, 0.95)),
+      maxMs: round(Math.max(...values))
+    };
+  }
+
   const result = {
     name, profile: { id: profile.id, label: profile.label }, settings: actual,
     features: {
@@ -418,7 +436,7 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
       rtGi: actual.rtGi, rtAo: actual.rtAo, rtReflections: actual.rtReflections
     },
     sampleCount: samples.length, captureMs: CAPTURE_MS, warmupMs: WARMUP_MS,
-    averages, p95, rawSamples: samples, ...meta
+    averages, p95, cpuStageStats, rawSamples: samples, ...meta
   };
   fs.writeFileSync(path.join(outputDir, name + '.json'), JSON.stringify(result, null, 2));
   console.log('[RESULT] ' + name + ': ' + averages.fps.toFixed(1) + ' FPS | frame ' +
@@ -482,7 +500,21 @@ function writeSummary(results, sceneMeta) {
     lines.push('| ' + result.name + ' | ' +
       fields.map(key => result.p95[p95MetricKey(key)] ?? 0).join(' | ') + ' |');
   }
-  lines.push('', '## Screen-space quality settings', '',
+  const cpuStageNames = [...new Set(results.flatMap(r => Object.keys(r.cpuStageStats || {})))].sort();
+  lines.push('', '## CPU profiler scopes (sampled)', '',
+    '| Test | Scope | Average ms | P95 ms | Max ms |',
+    '|---|---|---:|---:|---:|');
+  for (const result of results) {
+    for (const stage of cpuStageNames) {
+      const stats = result.cpuStageStats?.[stage];
+      if (!stats) continue;
+      lines.push('| ' + result.name + ' | ' + stage + ' | ' +
+        stats.averageMs + ' | ' + stats.p95Ms + ' | ' + stats.maxMs + ' |');
+    }
+  }
+  lines.push('', 'CPU scopes are polled snapshots of the latest completed scope, not per-frame percentiles.',
+    'Vulkan Fence Wait, Vulkan Acquire Image and Vulkan Submit + Present isolate host-side synchronization/presentation costs.',
+    '', '## Screen-space quality settings', '',
     '| Test | GTAO radius | GTAO intensity | SSGI intensity | Ground reflectance | Multi-bounce | Ground color (linear RGB) |',
     '|---|---:|---:|---:|---:|---:|---|');
   for (const result of results) {

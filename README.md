@@ -161,3 +161,22 @@ The debugger attaches to the currently running editor; it does not launch or clo
 ### Temporal diagnostics status
 
 The History Length debug view visualizes the renderer's existing per-pixel GI history length. The RT Debugger records existing profiler telemetry without additional GPU readback. Per-pixel history-age histograms, reflection-specific history age, and rejection counters by cause are **not yet implemented**; they require dedicated shader instrumentation and a fence-safe asynchronous GPU readback path. They are intentionally not represented as available metrics in these reports.
+
+
+---
+
+## ⚙️ CPU / Vulkan Frame Profiling
+
+The native profiler now records CPU scope timings in benchmark JSON/Markdown output. The renderer exposes three host-side synchronization scopes:
+
+- `Vulkan Fence Wait` — time the CPU blocks waiting for the previous submitted frame to complete.
+- `Vulkan Acquire Image` — time spent acquiring a swapchain image.
+- `Vulkan Submit + Present` — CPU time spent submitting the command buffer and calling presentation.
+
+The Render Benchmark and RT Debugger preserve the sampled `stats.samples` data and report average, sampled P95 and maximum values for each CPU scope. These are polled snapshots of the latest completed scope, **not per-frame percentiles**.
+
+The scoped profiler was also changed to use a monotonic clock and to update each scope with one mutex acquisition rather than separate begin/end locks. Profiling telemetry failures are contained so they cannot terminate the engine.
+
+Use the three empty-scene cases (`empty_all_off`, `empty_all_flags_on`, `empty_environment_only`) and compare the CPU scopes with GPU time. A high fence wait points to serialized frame execution; a high acquire/present time points to swapchain or presentation behavior; high CPU time outside those scopes points toward scene preparation, editor, ECS, or main-loop work.
+
+This instrumentation is diagnostic. It does not yet implement multi-frame-in-flight command-buffer/resource rings or claim a measured FPS improvement; those changes must be based on the new measurements and validated on the target Vulkan driver.

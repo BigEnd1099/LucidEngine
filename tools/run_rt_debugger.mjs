@@ -74,6 +74,18 @@ function summarize(samples) {
       p95: round(sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * 0.95))])
     };
   }
+  const stageNames = [...new Set(samples.flatMap(s => Object.keys(s.profilerSamples || {})))].sort();
+  result.cpuStages = {};
+  for (const stage of stageNames) {
+    const values = samples.map(s => Number(s.profilerSamples?.[stage]?.lastMs)).filter(Number.isFinite);
+    if (!values.length) continue;
+    const sorted = [...values].sort((a,b) => a-b);
+    result.cpuStages[stage] = {
+      averageMs: round(values.reduce((a,b) => a+b, 0) / values.length),
+      p95Ms: round(sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * 0.95))]),
+      maxMs: round(sorted.at(-1))
+    };
+  }
   return result;
 }
 
@@ -112,6 +124,7 @@ async function captureCase(name, flags, profile) {
       timestamp: new Date().toISOString(),
       frameTimeMs: Number(stats?.frameTimeMs || 0),
       fps: Number(stats?.fps || 0),
+      profilerSamples: stats?.samples || {},
       gpuTimeMs: Number(stats?.gpuTimeMs || 0),
       metrics: stats?.metrics || {}
     });
@@ -188,7 +201,21 @@ async function main() {
       (m.rtGiTraceMs?.average ?? 0) + ' | ' + (m.rtReflectionTraceMs?.average ?? 0) + ' | ' +
       (m.rtComputeTotalMs?.average ?? 0) + ' |');
   }
-  lines.push('', '## Methodology', '',
+  const cpuStageNames = [...new Set(results.flatMap(result =>
+    Object.keys(result.summary.cpuStages || {})))].sort();
+  lines.push('', '## CPU profiler scopes (sampled)', '',
+    '| Case | Scope | Average ms | P95 ms | Max ms |',
+    '|---|---|---:|---:|---:|');
+  for (const result of results) {
+    for (const stage of cpuStageNames) {
+      const stats = result.summary.cpuStages?.[stage];
+      if (!stats) continue;
+      lines.push('| ' + result.name + ' | ' + stage + ' | ' +
+        stats.averageMs + ' | ' + stats.p95Ms + ' | ' + stats.maxMs + ' |');
+    }
+  }
+  lines.push('', 'CPU scopes are sampled snapshots, not per-frame percentiles.',
+    '', '## Methodology', '',
     '- Reads existing renderer profiler snapshots through JSON-RPC; does not perform GPU readback.',
     '- The selected debug view is rendered live and may alter the visual output.',
     '- Percentiles are across polled snapshots, not per-frame percentiles.',

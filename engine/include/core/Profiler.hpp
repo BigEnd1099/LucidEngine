@@ -28,27 +28,40 @@ namespace engine::core {
 
         class ScopedSample {
         public:
-            explicit ScopedSample(const std::string& name) : m_name(name) {
-                Profiler::get().beginSample(m_name);
+            explicit ScopedSample(const std::string& name)
+                : m_name(name), m_start(std::chrono::steady_clock::now()) {}
+            ~ScopedSample() noexcept {
+                try {
+                    const double elapsedMs =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_start).count();
+                    Profiler::get().recordSampleDuration(m_name, elapsedMs);
+                } catch (...) {
+                    // Profiling must never terminate the engine if telemetry allocation fails.
+                }
             }
-            ~ScopedSample() {
-                Profiler::get().endSample(m_name);
-            }
+            ScopedSample(const ScopedSample&) = delete;
+            ScopedSample& operator=(const ScopedSample&) = delete;
+            ScopedSample(ScopedSample&&) = delete;
+            ScopedSample& operator=(ScopedSample&&) = delete;
+
         private:
             std::string m_name;
+            std::chrono::steady_clock::time_point m_start;
         };
 
     private:
         Profiler() = default;
+        void recordSampleDuration(const std::string& name, double elapsedMs);
 
+        using Clock = std::chrono::steady_clock;
         std::mutex m_mutex;
-        std::chrono::high_resolution_clock::time_point m_frameStartTime;
+        Clock::time_point m_frameStartTime;
         float m_lastFrameTimeMs{16.6f};
         float m_avgFps{60.0f};
         float m_gpuTimeMs{0.0f};
 
         struct SampleData {
-            std::chrono::high_resolution_clock::time_point start;
+            Clock::time_point start;
             double elapsedMs{0.0};
             double rollingAvgMs{0.0};
         };
