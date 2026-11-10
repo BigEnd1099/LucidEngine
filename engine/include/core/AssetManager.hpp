@@ -92,15 +92,28 @@ namespace engine::core {
         std::vector<ImportedAnimationTrack> tracks;
     };
 
+    // Kept in a separate stream so the established Vertex/RT packed layout is unchanged.
+    // Each vertex carries up to eight glTF influences (JOINTS_0/1 + WEIGHTS_0/1).
+    struct SkinVertexInfluence {
+        glm::uvec4 joints0{0u};
+        glm::vec4 weights0{1.0f, 0.0f, 0.0f, 0.0f};
+        glm::uvec4 joints1{0u};
+        glm::vec4 weights1{0.0f};
+    };
+
     struct MeshAsset {
         uint32_t id{0};
         VkBuffer vertexBuffer{VK_NULL_HANDLE};
         VmaAllocation vertexAllocation{VK_NULL_HANDLE};
         VkBuffer indexBuffer{VK_NULL_HANDLE};
         VmaAllocation indexAllocation{VK_NULL_HANDLE};
+        VkBuffer skinInfluenceBuffer{VK_NULL_HANDLE};
+        VmaAllocation skinInfluenceAllocation{VK_NULL_HANDLE};
         uint32_t indexCount{0};
         uint32_t vertexCount{0};
         uint32_t materialId{0};
+        bool hasSkinInfluences{false};
+        std::vector<SkinVertexInfluence> skinInfluences;
         std::vector<ImportedMorphTarget> morphTargets;
     };
 
