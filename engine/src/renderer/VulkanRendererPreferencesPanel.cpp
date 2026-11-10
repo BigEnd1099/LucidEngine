@@ -312,8 +312,12 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                             s_projBufInit = true;
                             std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
                         }
-                        if (ImGui::InputText(editorText("settings.last_project", "Last Project"), projPathBuf, sizeof(projPathBuf))) {
+                        const bool projectPathEdited = ImGui::InputText(editorText("settings.last_project", "Last Project"), projPathBuf, sizeof(projPathBuf));
+                        if (projectPathEdited) {
                             pref.lastProjectPath = projPathBuf;
+                        } else if (!ImGui::IsItemActive() && pref.lastProjectPath != projPathBuf) {
+                            std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
+                            projPathBuf[sizeof(projPathBuf) - 1] = '\0';
                         }
                         ImGui::Checkbox(editorText("settings.load_last_project", "Automatically load the last project on startup"), &pref.loadLastProjectOnStartup);
 
