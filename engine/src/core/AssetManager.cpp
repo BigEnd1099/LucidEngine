@@ -31,6 +31,7 @@ namespace engine::core {
         for (auto& mesh : m_meshes) {
             if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
             if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+            if (mesh->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->skinInfluenceBuffer, mesh->skinInfluenceAllocation);
         }
     }
 
@@ -667,6 +668,73 @@ namespace engine::core {
                     });
             }
 
+            // glTF skinning attributes are per-vertex and independent of the render Vertex
+            // ABI. Keep them in a dedicated stream so ray-tracing buffer references and all
+            // existing graphics pipelines retain their exact packed vertex layout.
+            std::vector<SkinVertexInfluence> skinInfluences(vertices.size());
+            auto readJointSet = [&](const char* semantic, bool secondSet) {
+                auto attribute = primitive.findAttribute(semantic);
+                if (attribute == primitive.attributes.end() || attribute->accessorIndex >= asset.accessors.size())
+                    return false;
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < skinInfluences.size()) {
+                            glm::uvec4 joints(
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[0])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[1])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[2])))),
+                                static_cast<uint32_t>(std::max(0.0f, std::round(static_cast<float>(value[3])))));
+                            if (secondSet) skinInfluences[index].joints1 = joints;
+                            else skinInfluences[index].joints0 = joints;
+                        }
+                        ++index;
+                    });
+                return true;
+            };
+            auto readWeightSet = [&](const char* semantic, bool secondSet) {
+                auto attribute = primitive.findAttribute(semantic);
+                if (attribute == primitive.attributes.end() || attribute->accessorIndex >= asset.accessors.size())
+                    return false;
+                size_t index = 0;
+                fastgltf::iterateAccessor<fastgltf::math::fvec4>(asset, asset.accessors[attribute->accessorIndex],
+                    [&](const fastgltf::math::fvec4& value) {
+                        if (index < skinInfluences.size()) {
+                            glm::vec4 weights(
+                                static_cast<float>(value[0]), static_cast<float>(value[1]),
+                                static_cast<float>(value[2]), static_cast<float>(value[3]));
+                            if (secondSet) skinInfluences[index].weights1 = weights;
+                            else skinInfluences[index].weights0 = weights;
+                        }
+                        ++index;
+                    });
+                return true;
+            };
+            const bool hasJoints0 = readJointSet("JOINTS_0", false);
+            const bool hasWeights0 = readWeightSet("WEIGHTS_0", false);
+            const bool hasJoints1 = readJointSet("JOINTS_1", true);
+            const bool hasWeights1 = readWeightSet("WEIGHTS_1", true);
+            const bool hasSkinAttributes = hasJoints0 && hasWeights0;
+            if ((hasJoints0 != hasWeights0) || (hasJoints1 != hasWeights1)) {
+                core::Logger::warn("AssetManager: incomplete glTF JOINTS/WEIGHTS attribute pair; missing pair will use identity influence");
+            }
+            if (hasSkinAttributes) {
+                for (auto& influence : skinInfluences) {
+                    float total = glm::dot(influence.weights0, glm::vec4(1.0f)) +
+                                  glm::dot(influence.weights1, glm::vec4(1.0f));
+                    if (!std::isfinite(total) || total <= 1e-8f) {
+                        influence.joints0 = glm::uvec4(0u);
+                        influence.weights0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                        influence.joints1 = glm::uvec4(0u);
+                        influence.weights1 = glm::vec4(0.0f);
+                    } else {
+                        const float invTotal = 1.0f / total;
+                        influence.weights0 *= invTotal;
+                        influence.weights1 *= invTotal;
+                    }
+                }
+            }
+
             if (primitive.indicesAccessor.has_value() && primitive.indicesAccessor.value() < asset.accessors.size()) {
                 fastgltf::iterateAccessor<uint32_t>(asset, asset.accessors[primitive.indicesAccessor.value()],
                     [&](uint32_t index) { indices.push_back(index); });
@@ -726,6 +794,9 @@ namespace engine::core {
             meshAsset->id = m_nextMeshId++;
             meshAsset->vertexCount = vertices.size();
             meshAsset->indexCount = indices.size();
+            meshAsset->hasSkinInfluences = hasSkinAttributes && skinInfluences.size() == vertices.size();
+            if (meshAsset->hasSkinInfluences)
+                meshAsset->skinInfluences = std::move(skinInfluences);
 
             // Preserve all morph target deltas on CPU. They are indexed per primitive
             // and can be uploaded to a dedicated deformation stream by the animation renderer.
@@ -757,9 +828,16 @@ namespace engine::core {
                     vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(),
                     indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+                if (meshAsset->hasSkinInfluences) {
+                    uploadBuffer(meshAsset->skinInfluenceBuffer, meshAsset->skinInfluenceAllocation,
+                        meshAsset->skinInfluences.data(),
+                        meshAsset->skinInfluences.size() * sizeof(SkinVertexInfluence),
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                }
             } catch (...) {
                 if (meshAsset->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->vertexBuffer, meshAsset->vertexAllocation);
                 if (meshAsset->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->indexBuffer, meshAsset->indexAllocation);
+                if (meshAsset->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), meshAsset->skinInfluenceBuffer, meshAsset->skinInfluenceAllocation);
                 throw;
             }
 
