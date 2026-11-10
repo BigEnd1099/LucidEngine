@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
+#include <limits>
 #include <functional>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -353,6 +355,81 @@ namespace engine::core {
             uint32_t rootMeshId = 0;
             
             if (asset.meshes.empty()) return 0;
+            // Decode/upload glTF images lazily and cache by source image + color space.
+            // Base-color/emissive data is sRGB; normal/metallic-roughness/occlusion is linear.
+            std::unordered_map<uint64_t, uint32_t> gltfTextureCache;
+            auto getGltfTextureId = [&](size_t textureIndex, bool srgb) -> uint32_t {
+                if (textureIndex >= asset.textures.size()) return 0;
+                const auto& gltfTexture = asset.textures[textureIndex];
+                if (!gltfTexture.imageIndex.has_value() || gltfTexture.imageIndex.value() >= asset.images.size()) return 0;
+                const size_t imageIndex = gltfTexture.imageIndex.value();
+                const uint64_t cacheKey = (static_cast<uint64_t>(imageIndex) << 1u) | (srgb ? 1ull : 0ull);
+                if (const auto cached = gltfTextureCache.find(cacheKey); cached != gltfTextureCache.end())
+                    return cached->second;
+
+                const auto& image = asset.images[imageIndex];
+                const uint8_t* rawBytes = nullptr;
+                size_t rawSize = 0;
+                if (const auto* bufferViewSource = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
+                    if (bufferViewSource->bufferViewIndex < asset.bufferViews.size()) {
+                        const auto& bufferView = asset.bufferViews[bufferViewSource->bufferViewIndex];
+                        if (bufferView.bufferIndex < asset.buffers.size()) {
+                            const auto& buffer = asset.buffers[bufferView.bufferIndex];
+                            const uint8_t* bufferStart = nullptr;
+                            size_t bufferSize = 0;
+                            if (const auto* vectorSource = std::get_if<fastgltf::sources::Vector>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(vectorSource->bytes.data());
+                                bufferSize = vectorSource->bytes.size();
+                            } else if (const auto* arraySource = std::get_if<fastgltf::sources::Array>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(arraySource->bytes.data());
+                                bufferSize = arraySource->bytes.size();
+                            } else if (const auto* byteViewSource = std::get_if<fastgltf::sources::ByteView>(&buffer.data)) {
+                                bufferStart = reinterpret_cast<const uint8_t*>(byteViewSource->bytes.data());
+                                bufferSize = byteViewSource->bytes.size();
+                            }
+                            if (bufferStart && bufferView.byteOffset <= bufferSize &&
+                                bufferView.byteLength <= bufferSize - bufferView.byteOffset) {
+                                rawBytes = bufferStart + bufferView.byteOffset;
+                                rawSize = bufferView.byteLength;
+                            }
+                        }
+                    }
+                } else if (const auto* vectorSource = std::get_if<fastgltf::sources::Vector>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(vectorSource->bytes.data());
+                    rawSize = vectorSource->bytes.size();
+                } else if (const auto* byteViewSource = std::get_if<fastgltf::sources::ByteView>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(byteViewSource->bytes.data());
+                    rawSize = byteViewSource->bytes.size();
+                } else if (const auto* arraySource = std::get_if<fastgltf::sources::Array>(&image.data)) {
+                    rawBytes = reinterpret_cast<const uint8_t*>(arraySource->bytes.data());
+                    rawSize = arraySource->bytes.size();
+                }
+
+                if (!rawBytes || rawSize == 0 || rawSize > static_cast<size_t>(std::numeric_limits<int>::max()))
+                    return 0;
+                int width = 0, height = 0, channels = 0;
+                stbi_uc* decoded = stbi_load_from_memory(rawBytes, static_cast<int>(rawSize), &width, &height, &channels, 4);
+                if (!decoded || width <= 0 || height <= 0) {
+                    if (decoded) stbi_image_free(decoded);
+                    core::Logger::warn("AssetManager: failed to decode glTF image " + std::to_string(imageIndex));
+                    return 0;
+                }
+                std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(decoded, &stbi_image_free);
+                auto textureAsset = std::make_unique<TextureAsset>();
+                textureAsset->id = m_nextTextureId++;
+                textureAsset->width = static_cast<uint32_t>(width);
+                textureAsset->height = static_cast<uint32_t>(height);
+                uploadTexture(textureAsset->image, textureAsset->allocation, textureAsset->imageView,
+                    pixels.get(), textureAsset->width, textureAsset->height,
+                    srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
+                const uint32_t id = textureAsset->id;
+                m_textures.push_back(std::move(textureAsset));
+                gltfTextureCache.emplace(cacheKey, id);
+                core::Logger::info("Uploaded cached glTF image " + std::to_string(imageIndex) +
+                    (srgb ? " (sRGB)" : " (linear)"));
+                return id;
+            };
+
             // Import every mesh primitive. glTF meshes may contain multiple primitives,
             // each with its own material and index/vertex streams.
             std::vector<std::vector<uint32_t>> importedMeshIds(asset.meshes.size());
@@ -475,63 +552,6 @@ namespace engine::core {
 
             if (rootMeshId == 0) rootMeshId = meshAsset->id;
             
-            // --- Load Textures from glTF ---
-            std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
-            for (size_t t = 0; t < asset.textures.size(); ++t) {
-                const auto& gltfTex = asset.textures[t];
-                if (!gltfTex.imageIndex.has_value() || gltfTex.imageIndex.value() >= asset.images.size()) continue;
-
-                const auto& image = asset.images[gltfTex.imageIndex.value()];
-                const uint8_t* rawBytes = nullptr;
-                size_t rawSize = 0;
-
-                if (auto* bv = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
-                    if (bv->bufferViewIndex < asset.bufferViews.size()) {
-                        const auto& bufferView = asset.bufferViews[bv->bufferViewIndex];
-                        if (bufferView.bufferIndex < asset.buffers.size()) {
-                            const auto& buf = asset.buffers[bufferView.bufferIndex];
-                            const uint8_t* bufferStart = nullptr;
-                            if (auto* vb = std::get_if<fastgltf::sources::Vector>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(vb->bytes.data());
-                            } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(ab->bytes.data());
-                            } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&buf.data)) {
-                                bufferStart = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
-                            }
-                            if (bufferStart) {
-                                rawBytes = bufferStart + bufferView.byteOffset;
-                                rawSize = bufferView.byteLength;
-                            }
-                        }
-                    }
-                } else if (auto* vb = std::get_if<fastgltf::sources::Vector>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(vb->bytes.data());
-                    rawSize = vb->bytes.size();
-                } else if (auto* bvb = std::get_if<fastgltf::sources::ByteView>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(bvb->bytes.data());
-                    rawSize = bvb->bytes.size();
-                } else if (auto* ab = std::get_if<fastgltf::sources::Array>(&image.data)) {
-                    rawBytes = reinterpret_cast<const uint8_t*>(ab->bytes.data());
-                    rawSize = ab->bytes.size();
-                }
-
-                if (rawBytes && rawSize > 0) {
-                    int w = 0, h = 0, comp = 0;
-                    stbi_uc* pixels = stbi_load_from_memory(rawBytes, static_cast<int>(rawSize), &w, &h, &comp, 4);
-                    if (pixels) {
-                        auto texAsset = std::make_unique<TextureAsset>();
-                        texAsset->id = m_nextTextureId++;
-                        texAsset->width = static_cast<uint32_t>(w);
-                        texAsset->height = static_cast<uint32_t>(h);
-                        uploadTexture(texAsset->image, texAsset->allocation, texAsset->imageView, pixels, texAsset->width, texAsset->height, VK_FORMAT_R8G8B8A8_UNORM, true);
-                        stbi_image_free(pixels);
-                        textureIdMap[t] = texAsset->id;
-                        m_textures.push_back(std::move(texAsset));
-                        core::Logger::info("Uploaded glTF texture " + std::to_string(t) + " (" + std::to_string(w) + "x" + std::to_string(h) + ")");
-                    }
-                }
-            }
-
             if (primitive.materialIndex.has_value() && primitive.materialIndex.value() < asset.materials.size()) {
                 auto& mat = asset.materials[primitive.materialIndex.value()];
                 auto materialAsset = std::make_unique<MaterialAsset>();
@@ -545,24 +565,12 @@ namespace engine::core {
                 materialAsset->metallicFactor = mat.pbrData.metallicFactor;
                 materialAsset->roughnessFactor = mat.pbrData.roughnessFactor;
 
-                if (mat.pbrData.baseColorTexture.has_value()) {
-                    size_t texIdx = mat.pbrData.baseColorTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->albedoTextureId = textureIdMap[texIdx];
-                    }
-                }
-                if (mat.normalTexture.has_value()) {
-                    size_t texIdx = mat.normalTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->normalTextureId = textureIdMap[texIdx];
-                    }
-                }
-                if (mat.pbrData.metallicRoughnessTexture.has_value()) {
-                    size_t texIdx = mat.pbrData.metallicRoughnessTexture.value().textureIndex;
-                    if (texIdx < textureIdMap.size()) {
-                        materialAsset->ormTextureId = textureIdMap[texIdx];
-                    }
-                }
+                if (mat.pbrData.baseColorTexture.has_value())
+                    materialAsset->albedoTextureId = getGltfTextureId(mat.pbrData.baseColorTexture->textureIndex, true);
+                if (mat.normalTexture.has_value())
+                    materialAsset->normalTextureId = getGltfTextureId(mat.normalTexture->textureIndex, false);
+                if (mat.pbrData.metallicRoughnessTexture.has_value())
+                    materialAsset->ormTextureId = getGltfTextureId(mat.pbrData.metallicRoughnessTexture->textureIndex, false);
                 meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
