@@ -28,27 +28,37 @@ namespace engine::core {
 
         class ScopedSample {
         public:
-            explicit ScopedSample(const std::string& name) : m_name(name) {
-                Profiler::get().beginSample(m_name);
-            }
+            explicit ScopedSample(const std::string& name)
+                : m_name(name), m_start(Clock::now()) {}
             ~ScopedSample() {
-                Profiler::get().endSample(m_name);
+                const double elapsedMs =
+                    std::chrono::duration<double, std::milli>(Clock::now() - m_start).count();
+                Profiler::get().recordSampleDuration(m_name, elapsedMs);
             }
+            ScopedSample(const ScopedSample&) = delete;
+            ScopedSample& operator=(const ScopedSample&) = delete;
+            ScopedSample(ScopedSample&&) = delete;
+            ScopedSample& operator=(ScopedSample&&) = delete;
+
         private:
+            using Clock = std::chrono::steady_clock;
             std::string m_name;
+            Clock::time_point m_start;
         };
 
     private:
         Profiler() = default;
+        void recordSampleDuration(const std::string& name, double elapsedMs);
 
+        using Clock = std::chrono::steady_clock;
         std::mutex m_mutex;
-        std::chrono::high_resolution_clock::time_point m_frameStartTime;
+        Clock::time_point m_frameStartTime;
         float m_lastFrameTimeMs{16.6f};
         float m_avgFps{60.0f};
         float m_gpuTimeMs{0.0f};
 
         struct SampleData {
-            std::chrono::high_resolution_clock::time_point start;
+            Clock::time_point start;
             double elapsedMs{0.0};
             double rollingAvgMs{0.0};
         };
