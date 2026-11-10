@@ -488,7 +488,7 @@ namespace engine::renderer {
                             std::transform(extension.begin(), extension.end(), extension.begin(),
                                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
                             std::error_code dropError;
-                            const bool supportedModel = extension == ".glb";
+                            const bool supportedModel = extension == ".glb" || extension == ".gltf";
                             const bool fileExists = std::filesystem::is_regular_file(droppedPath, dropError) && !dropError;
                             if (supportedModel && fileExists) {
                                 const uint32_t meshId = assetManager->loadGLTF(droppedPath.string());
@@ -507,7 +507,7 @@ namespace engine::renderer {
                                     core::Logger::error("Viewport drop failed to import model: " + droppedPath.string());
                                 }
                             } else if (!supportedModel) {
-                                core::Logger::warn("Viewport drop currently supports binary .glb models only: " + droppedPath.string());
+                                core::Logger::warn("Viewport drop supports .glb and .gltf models; import failed: " + droppedPath.string());
                             } else {
                                 core::Logger::error("Viewport drop file is no longer available: " + droppedPath.string());
                             }
