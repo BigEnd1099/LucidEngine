@@ -210,7 +210,7 @@ void drawEditorBottomPanels(bool immersivePlay,
                 std::string normalizedExt = ext;
                 std::transform(normalizedExt.begin(), normalizedExt.end(), normalizedExt.begin(),
                     [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-                const bool isImportableModel = !isDirectory && (normalizedExt == ".glb");
+                const bool isImportableModel = !isDirectory && ((normalizedExt == ".glb" || normalizedExt == ".gltf"));
                 if (isImportableModel && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
                     const std::string payloadPath = entry.path().string();
                     ImGui::SetDragDropPayload("LUCID_ASSET_PATH", payloadPath.c_str(), payloadPath.size() + 1);
