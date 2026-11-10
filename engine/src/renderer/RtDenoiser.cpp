@@ -517,7 +517,11 @@ namespace engine::renderer {
             clearBefore.pImageMemoryBarriers = &toClear;
             vkCmdPipelineBarrier2(cmd, &clearBefore);
 
-            const VkClearColorValue neutralGi{ {0.0f, 0.0f, 0.0f, 1.0f} };
+            VkClearColorValue neutralGi{};
+            neutralGi.float32[0] = 0.0f;
+            neutralGi.float32[1] = 0.0f;
+            neutralGi.float32[2] = 0.0f;
+            neutralGi.float32[3] = 1.0f;
             const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             vkCmdClearColorImage(cmd, m_imgS.image, VK_IMAGE_LAYOUT_GENERAL, &neutralGi, 1, &colorRange);
 
