@@ -30,6 +30,16 @@ namespace engine::core {
         uint32_t albedoTextureId{0};
         uint32_t normalTextureId{0};
         uint32_t ormTextureId{0};
+        uint32_t occlusionTextureId{0};
+        uint32_t emissiveTextureId{0};
+        glm::vec3 emissiveFactor{0.0f};
+        float emissiveStrength{1.0f};
+        float normalScale{1.0f};
+        float occlusionStrength{1.0f};
+        float alphaCutoff{0.5f};
+        uint32_t alphaMode{0}; // 0 = OPAQUE, 1 = MASK, 2 = BLEND
+        bool doubleSided{false};
+        bool unlit{false};
     };
 
     struct ImportedMeshInstance {
