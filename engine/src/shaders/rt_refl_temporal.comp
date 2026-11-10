@@ -99,6 +99,7 @@ void main() {
             result = vec4((hist / wSum).rgb, 1.0);
             historyAge = hist.a / wSum;
         } else {
+            atomicAdd(rtDiag.counters[15], 1u);
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors
             vec3 neighborSum = vec3(0.0);
             float weightSum = 0.0;
