@@ -1342,6 +1342,14 @@ namespace engine::renderer {
                 rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
                 rtProfiler.recordMetric("rtReflectionSamples", std::clamp(m_rtSettings.reflectionSamples, 1, 16));
+                rtProfiler.recordMetric("rtReflectionBounces", std::clamp(m_rtSettings.reflectionBounces, 2, 4));
+                rtProfiler.recordMetric("rtReflectionInfiniteBounces", m_rtSettings.reflectionInfiniteBounces ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionMaxRoughness", m_rtSettings.reflectionMaxRoughness);
+                rtProfiler.recordMetric("rtReflectionCheckerboard", m_rtSettings.reflectionCheckerboard ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionStochasticLights", m_rtSettings.reflectionStochasticLights ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionLodBias", m_rtSettings.reflectionLodBias ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));
             }
         }
 
