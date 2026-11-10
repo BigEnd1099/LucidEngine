@@ -30,10 +30,14 @@ namespace engine::core {
         public:
             explicit ScopedSample(const std::string& name)
                 : m_name(name), m_start(std::chrono::steady_clock::now()) {}
-            ~ScopedSample() {
-                const double elapsedMs =
-                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_start).count();
-                Profiler::get().recordSampleDuration(m_name, elapsedMs);
+            ~ScopedSample() noexcept {
+                try {
+                    const double elapsedMs =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_start).count();
+                    Profiler::get().recordSampleDuration(m_name, elapsedMs);
+                } catch (...) {
+                    // Profiling must never terminate the engine if telemetry allocation fails.
+                }
             }
             ScopedSample(const ScopedSample&) = delete;
             ScopedSample& operator=(const ScopedSample&) = delete;
