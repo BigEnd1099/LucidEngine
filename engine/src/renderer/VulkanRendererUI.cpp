@@ -366,6 +366,8 @@ namespace engine::renderer {
                 }
                 report << "\n[NOTES]\n";
                 report << "GPU timestamps refer to the previous completed command buffer.\n";
+                report << "Screen-space and RT subpass timings are nested inside the AO + RT aggregate; do not add them to the aggregate.\n";
+                report << "GTAO and SSGI share one fragment shader pass and are reported together.\n";
                 report << "Loop frame time includes engine frame pacing/sleep; editor FPS uses ImGui frame delta.\n";
                 ImGui::SetClipboardText(report.str().c_str());
             }
