@@ -1313,8 +1313,35 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("rtGiAtrous0Ms", 0.0);
                 core::Profiler::get().recordMetric("rtGiAtrous1Ms", 0.0);
                 core::Profiler::get().recordMetric("rtReflectionTraceMs", 0.0);
-                core::Profiler::get().recordMetric("rtReflectionTemporalMs", 0.0);
-                core::Profiler::get().recordMetric("rtComputeTotalMs", 0.0);
+                auto& rtProfiler = core::Profiler::get();
+                rtProfiler.recordMetric("rtReflectionTemporalMs", 0.0);
+                rtProfiler.recordMetric("rtComputeTotalMs", 0.0);
+                rtProfiler.recordMetric("rtGiTraceExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiTraceSyncMs", 0.0);
+                rtProfiler.recordMetric("rtGiTemporalExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiTemporalSyncMs", 0.0);
+                rtProfiler.recordMetric("rtGiAtrous0ExecMs", 0.0);
+                rtProfiler.recordMetric("rtGiAtrous0SyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionStartSyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTraceExecMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTraceSyncMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTemporalExecMs", 0.0);
+                rtProfiler.recordMetric("rtReflectionTemporalSyncMs", 0.0);
+
+                // Keep the quality snapshot current even when the RT dispatch is inactive.
+                rtProfiler.recordMetric("rtGiSamples", std::clamp(m_rtSettings.giSamples, 1, 16));
+                rtProfiler.recordMetric("rtGiBounces", std::clamp(m_rtSettings.giBounces, 1, 15));
+                rtProfiler.recordMetric("rtGiWidth", m_rtDenoiser.getGiWidth());
+                rtProfiler.recordMetric("rtGiHeight", m_rtDenoiser.getGiHeight());
+                rtProfiler.recordMetric("rtMaxHistory", m_rtSettings.denoiseEnabled
+                    ? static_cast<double>(m_rtSettings.maxHistory) : 1.0);
+                rtProfiler.recordMetric("rtSpatialStrength", m_rtSettings.denoiseEnabled
+                    ? static_cast<double>(m_rtSettings.spatialStrength) : 0.0);
+                rtProfiler.recordMetric("rtSvgfEnabled",
+                    m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
+                rtProfiler.recordMetric("rtReflectionSamples", std::clamp(m_rtSettings.reflectionSamples, 1, 16));
             }
         }
 
