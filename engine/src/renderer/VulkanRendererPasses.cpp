@@ -59,6 +59,10 @@ namespace engine::renderer {
         // on the headless path). Scratch buffers from its BLAS/TLAS builds can now
         // be released safely, before any new build commands are recorded.
         m_accelerationStructure.releaseCompletedScratch();
+        for (const auto& transient : m_transientVertexBuffers) {
+            if (transient.buffer) vmaDestroyBuffer(m_context->getAllocator(), transient.buffer, transient.allocation);
+        }
+        m_transientVertexBuffers.clear();
         updateRayTracingTextureDescriptors(assetManager);
 
         vkResetCommandBuffer(m_commandBuffer, 0);
@@ -361,6 +365,7 @@ namespace engine::renderer {
             static_cast<glm::mat4*>(m_motionBufferMapped)[0] = m_prevViewProj;
         }
         std::vector<DrawItem> drawItems;
+        std::unordered_map<entt::entity, VkBuffer> deformedVertexBuffers;
         std::vector<AccelerationStructure::Instance> rtInstances;
         std::vector<RtInstanceGpuData> rtGpuInstances;
         if (assetManager) {
@@ -465,7 +470,87 @@ namespace engine::renderer {
                 const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(model)));
                 DrawItem item{};
                 item.mesh = meshAsset;
+                item.vertexBuffer = meshAsset->vertexBuffer;
+                item.entity = entity;
                 item.materialId = activeMaterialId != 0 ? activeMaterialId : meshAsset->materialId;
+
+                // CPU deformation keeps the established Vertex/RT ABI unchanged.
+                // Every animated instance gets an independent transient vertex stream.
+                const ecs::SkinComponent* skin = registry.get().all_of<ecs::SkinComponent>(entity)
+                    ? &registry.get().get<ecs::SkinComponent>(entity) : nullptr;
+                const ecs::MorphWeightsComponent* morph = registry.get().all_of<ecs::MorphWeightsComponent>(entity)
+                    ? &registry.get().get<ecs::MorphWeightsComponent>(entity) : nullptr;
+                const bool hasMorph = morph && !morph->weights.empty() && !meshAsset->morphTargets.empty();
+                const bool hasSkin = skin && !skin->jointMatrices.empty() && meshAsset->hasSkinInfluences &&
+                                     meshAsset->skinInfluences.size() == meshAsset->vertexCount;
+                if ((hasMorph || hasSkin) && meshAsset->vertices.size() == meshAsset->vertexCount) {
+                    std::vector<Vertex> deformed = meshAsset->vertices;
+                    for (size_t vertexIndex = 0; vertexIndex < deformed.size(); ++vertexIndex) {
+                        Vertex& vertex = deformed[vertexIndex];
+                        if (hasMorph) {
+                            const size_t targetCount = std::min(morph->weights.size(), meshAsset->morphTargets.size());
+                            for (size_t targetIndex = 0; targetIndex < targetCount; ++targetIndex) {
+                                const float weight = std::isfinite(morph->weights[targetIndex]) ? morph->weights[targetIndex] : 0.0f;
+                                if (std::abs(weight) < 1e-6f) continue;
+                                const auto& target = meshAsset->morphTargets[targetIndex];
+                                if (vertexIndex < target.positionDeltas.size()) vertex.position += target.positionDeltas[vertexIndex] * weight;
+                                if (vertexIndex < target.normalDeltas.size()) vertex.normal += target.normalDeltas[vertexIndex] * weight;
+                                if (vertexIndex < target.tangentDeltas.size()) vertex.tangent += glm::vec4(target.tangentDeltas[vertexIndex] * weight, 0.0f);
+                            }
+                        }
+                        if (hasSkin) {
+                            glm::vec4 skinnedPosition(0.0f);
+                            glm::vec3 skinnedNormal(0.0f);
+                            glm::vec3 skinnedTangent(0.0f);
+                            float totalWeight = 0.0f;
+                            const auto& influence = meshAsset->skinInfluences[vertexIndex];
+                            auto applyInfluence = [&](uint32_t jointIndex, float weight) {
+                                if (!std::isfinite(weight) || weight <= 0.0f || jointIndex >= skin->jointMatrices.size()) return;
+                                const glm::mat4& jointMatrix = skin->jointMatrices[jointIndex];
+                                const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(jointMatrix)));
+                                skinnedPosition += (jointMatrix * glm::vec4(vertex.position, 1.0f)) * weight;
+                                skinnedNormal += (normalMatrix * vertex.normal) * weight;
+                                skinnedTangent += (normalMatrix * glm::vec3(vertex.tangent)) * weight;
+                                totalWeight += weight;
+                            };
+                            for (int k = 0; k < 4; ++k) {
+                                applyInfluence(influence.joints0[k], influence.weights0[k]);
+                                applyInfluence(influence.joints1[k], influence.weights1[k]);
+                            }
+                            if (totalWeight > 1e-6f) {
+                                vertex.position = glm::vec3(skinnedPosition) / totalWeight;
+                                vertex.normal = skinnedNormal / totalWeight;
+                                const glm::vec3 tangent = skinnedTangent / totalWeight;
+                                if (glm::dot(tangent, tangent) > 1e-8f)
+                                    vertex.tangent = glm::vec4(glm::normalize(tangent), vertex.tangent.w);
+                            }
+                        }
+                        if (glm::dot(vertex.normal, vertex.normal) > 1e-8f) vertex.normal = glm::normalize(vertex.normal);
+                    }
+
+                    VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+                    bufferInfo.size = deformed.size() * sizeof(Vertex);
+                    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+                    VmaAllocationCreateInfo allocationInfo{};
+                    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+                    allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+                    VkBuffer deformedBuffer = VK_NULL_HANDLE;
+                    VmaAllocation deformedAllocation = VK_NULL_HANDLE;
+                    if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocationInfo,
+                                        &deformedBuffer, &deformedAllocation, nullptr) == VK_SUCCESS) {
+                        void* mapped = nullptr;
+                        if (vmaMapMemory(m_context->getAllocator(), deformedAllocation, &mapped) == VK_SUCCESS) {
+                            std::memcpy(mapped, deformed.data(), deformed.size() * sizeof(Vertex));
+                            vmaUnmapMemory(m_context->getAllocator(), deformedAllocation);
+                            m_transientVertexBuffers.push_back({deformedBuffer, deformedAllocation});
+                            item.vertexBuffer = deformedBuffer;
+                            deformedVertexBuffers[entity] = deformedBuffer;
+                        } else {
+                            vmaDestroyBuffer(m_context->getAllocator(), deformedBuffer, deformedAllocation);
+                        }
+                    }
+                }
+
                 item.pcs.model = model;
                 item.pcs.normalCol0 = glm::vec4(normalMat[0], metallic);
                 item.pcs.normalCol1 = glm::vec4(normalMat[1], roughness);
@@ -625,7 +710,10 @@ namespace engine::renderer {
                         vkCmdPushConstants(m_commandBuffer, m_shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &lsMvp);
 
                         VkDeviceSize offset = 0;
-                        vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &meshAsset->vertexBuffer, &offset);
+                        VkBuffer shadowVertexBuffer = meshAsset->vertexBuffer;
+                        if (auto deformedIt = deformedVertexBuffers.find(entity); deformedIt != deformedVertexBuffers.end())
+                            shadowVertexBuffer = deformedIt->second;
+                        vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &shadowVertexBuffer, &offset);
                         vkCmdBindIndexBuffer(m_commandBuffer, meshAsset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                         vkCmdDrawIndexed(m_commandBuffer, meshAsset->indexCount, 1, 0, 0, 0);
                     }
@@ -700,7 +788,10 @@ namespace engine::renderer {
                         vkCmdPushConstants(m_commandBuffer, m_shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &mvp);
 
                         VkDeviceSize offset = 0;
-                        vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &mesh->vertexBuffer, &offset);
+                        VkBuffer shadowVertexBuffer = mesh->vertexBuffer;
+                        if (auto deformedIt = deformedVertexBuffers.find(entity); deformedIt != deformedVertexBuffers.end())
+                            shadowVertexBuffer = deformedIt->second;
+                        vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &shadowVertexBuffer, &offset);
                         vkCmdBindIndexBuffer(m_commandBuffer, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                         vkCmdDrawIndexed(m_commandBuffer, mesh->indexCount, 1, 0, 0, 0);
                     }
@@ -750,7 +841,7 @@ namespace engine::renderer {
                 for (const auto& item : drawItems) {
                     vkCmdPushConstants(m_commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PbrPushConstants), &item.pcs);
                     VkDeviceSize offset = 0;
-                    vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.mesh->vertexBuffer, &offset);
+                    vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.vertexBuffer, &offset);
                     vkCmdBindIndexBuffer(m_commandBuffer, item.mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(m_commandBuffer, item.mesh->indexCount, 1, 0, 0, 0);
                 }
@@ -835,7 +926,7 @@ namespace engine::renderer {
                 }
                 vkCmdPushConstants(m_commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PbrPushConstants), &item.pcs);
                 VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.mesh->vertexBuffer, &offset);
+                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.vertexBuffer, &offset);
                 vkCmdBindIndexBuffer(m_commandBuffer, item.mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdDrawIndexed(m_commandBuffer, item.mesh->indexCount, 1, 0, 0, drawIdx);
             }
@@ -1092,7 +1183,7 @@ namespace engine::renderer {
                     }
                     vkCmdPushConstants(m_commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PbrPushConstants), &item.pcs);
                     VkDeviceSize offset = 0;
-                    vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.mesh->vertexBuffer, &offset);
+                    vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &item.vertexBuffer, &offset);
                     vkCmdBindIndexBuffer(m_commandBuffer, item.mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(m_commandBuffer, item.mesh->indexCount, 1, 0, 0, 0);
                 }
