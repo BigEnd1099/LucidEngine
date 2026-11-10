@@ -162,6 +162,9 @@
     "ui.camera_side_scroller": "Przewijanie boczne",
     "ui.camera_mode_tooltip": "Tryb kamery: wolna kamera edytora lub śledzenie gracza (TPP/FPP/z góry)",
     "ui.camera_fov_format": "Pole widzenia: %.0f°",
-    "ui.camera_fov_tooltip": "Kąt widzenia kamery edytora (FOV)"
+    "ui.camera_fov_tooltip": "Kąt widzenia kamery edytora (FOV)",
+    "ui.camera_speed_prefix": " Kamera ",
+    "ui.playing": "     W GRZE ",
+    "ui.play": "     Graj "
   }
 }
