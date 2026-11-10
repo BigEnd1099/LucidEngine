@@ -1,4 +1,5 @@
 #include "renderer/EditorUiControls.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -36,7 +37,7 @@ bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValu
             changed = true;
         }
         ImGui::PopStyleColor(3);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Kliknij, aby zresetowac do %.1f\n[Alt] Zresetuj wszystkie osie", resetValue);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(editorText("ui.vector_reset_tooltip", "Click to reset to %.1f\n[Alt] Reset all axes"), resetValue);
         ImGui::SameLine();
 
         ImGui::SetNextItemWidth(itemWidth);
@@ -57,7 +58,7 @@ bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValu
             changed = true;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("[Shift] Precyzja (10x wolniej)\n[Ctrl] Przyciaganie (0.5m)\n[Alt] Zmieniaj wszystkie 3 osie rownoczesnie");
+            ImGui::SetTooltip(editorText("ui.vector_drag_tooltip", "[Shift] Precision (10x slower)\n[Ctrl] Snap (0.5m)\n[Alt] Adjust all 3 axes together"));
         }
     };
 
