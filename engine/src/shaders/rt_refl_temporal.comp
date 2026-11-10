@@ -84,11 +84,15 @@ void main() {
 
     bool isCheckerSkipped = (raw.a > 0.1 && raw.a < 0.4);
     vec4 result;
+    float historyAge = 0.0;
+    float sampleCount = max(pc.f.y, 1.0);
+    float maxHistory = max(pc.f.x, 1.0);
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             // Re-use full history from previous frame when this pixel was active
             result = vec4((hist / wSum).rgb, 1.0);
+            historyAge = hist.a / wSum;
         } else {
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors
             vec3 neighborSum = vec3(0.0);
@@ -119,6 +123,7 @@ void main() {
             } else {
                 result = vec4(0.0);
             }
+            // Checkerboard reconstruction has no new ray sample; preserve age only when history was accepted.
         }
     } else {
         if (wSum > 0.05) {
@@ -157,11 +162,15 @@ void main() {
             // Accumulation factor (keep ~85% history for smooth specular without excessive lag)
             float alpha = (pc.f.z > 0.5) ? clamp(4.0 / max(pc.f.x, 1.0), 0.03, 0.15) : 1.0;
             result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
+            historyAge = min(hist.a + sampleCount, maxHistory);
         } else {
             result = raw;
+            historyAge = sampleCount;
         }
     }
 
-    imageStore(imgReflHistCur, px, result);
-    imageStore(imgRefl, px, result);
+    // Alpha of the private history image stores effective accumulated sample age.
+    // The public reflection output keeps alpha=1 as its validity mask for PBR.
+    imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
+    imageStore(imgRefl, px, vec4(result.rgb, 1.0));
 }
