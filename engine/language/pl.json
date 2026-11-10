@@ -330,6 +330,6 @@
     "ui.asset_size": "Rozmiar",
     "ui.asset_select_hint": "Wybierz plik, aby zobaczyć jego metadane.",
     "ui.drop_model_into_viewport": "Upuść model w widoku 3D, aby utworzyć obiekt",
-    "ui.drag_model_tooltip": "Przeciągnij model glTF do widoku 3D."
+    "ui.drag_model_tooltip": "Przeciągnij model GLB do widoku 3D."
   }
 }
