@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <filesystem>
 #include <glm/gtc/constants.hpp>
 #include "core/Logger.hpp"
 #include "utils/FileIO.hpp"
@@ -442,8 +443,7 @@ namespace engine::core {
             uploadBuffer(meshAsset->vertexBuffer, meshAsset->vertexAllocation, vertices.data(), vertices.size() * sizeof(renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
             uploadBuffer(meshAsset->indexBuffer, meshAsset->indexAllocation, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
-            m_meshes.push_back(std::move(meshAsset));
-            rootMeshId = m_nextMeshId - 1;
+            rootMeshId = meshAsset->id;
             
             // --- Load Textures from glTF ---
             std::vector<uint32_t> textureIdMap(asset.textures.size(), 0);
@@ -536,6 +536,8 @@ namespace engine::core {
                 meshAsset->materialId = materialAsset->id;
                 m_materials.push_back(std::move(materialAsset));
             }
+            // Keep the mesh alive until its material assignment is complete.
+            m_meshes.push_back(std::move(meshAsset));
             return rootMeshId;
         } catch (const std::exception& e) {
             core::Logger::error(std::string("GLTF asset import exception: ") + e.what());
