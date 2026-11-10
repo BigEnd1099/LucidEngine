@@ -44,6 +44,43 @@ namespace engine::ecs {
             return true;
         }
 
+        // Convert an edited world-space TransformComponent back to the entity's
+        // parent-relative local transform (used by the viewport gizmo).
+        void syncLocalTransformFromWorld(entt::entity entity) {
+            if (!m_registry.valid(entity) ||
+                !m_registry.all_of<LocalTransformComponent, TransformComponent>(entity)) return;
+            const auto& worldTransform = m_registry.get<TransformComponent>(entity);
+            const glm::quat worldRotation = glm::length(worldTransform.orientation) > 1e-6f
+                ? glm::normalize(worldTransform.orientation) : glm::quat(glm::radians(worldTransform.rotation));
+            const glm::mat4 world = glm::translate(glm::mat4(1.0f), worldTransform.position) *
+                glm::mat4_cast(worldRotation) * glm::scale(glm::mat4(1.0f), worldTransform.scale);
+
+            glm::mat4 local = world;
+            if (m_registry.all_of<HierarchyComponent>(entity)) {
+                const entt::entity parent = m_registry.get<HierarchyComponent>(entity).parent;
+                if (parent != entt::null && m_registry.valid(parent) &&
+                    m_registry.all_of<TransformComponent>(parent)) {
+                    const auto& parentTransform = m_registry.get<TransformComponent>(parent);
+                    const glm::quat parentRotation = glm::length(parentTransform.orientation) > 1e-6f
+                        ? glm::normalize(parentTransform.orientation) : glm::quat(glm::radians(parentTransform.rotation));
+                    const glm::mat4 parentWorld = glm::translate(glm::mat4(1.0f), parentTransform.position) *
+                        glm::mat4_cast(parentRotation) * glm::scale(glm::mat4(1.0f), parentTransform.scale);
+                    local = glm::inverse(parentWorld) * world;
+                }
+            }
+
+            glm::vec3 skew(0.0f), translation(0.0f), scale(1.0f);
+            glm::vec4 perspective(0.0f);
+            glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+            if (glm::decompose(local, scale, orientation, translation, skew, perspective)) {
+                auto& localTransform = m_registry.get<LocalTransformComponent>(entity);
+                localTransform.position = translation;
+                localTransform.scale = scale;
+                localTransform.orientation = glm::normalize(orientation);
+                localTransform.rotation = glm::degrees(glm::eulerAngles(localTransform.orientation));
+            }
+        }
+
         void updateWorldTransforms() {
             std::unordered_set<entt::entity> visited;
             auto view = m_registry.view<TransformComponent>();
