@@ -73,7 +73,7 @@ inline bool setEditorLanguage(std::string_view locale) {
 }
 
 // Prefer stable IDs so translation wording can evolve independently from source code.
-inline const char* editorText(const char* key, const char* english, const char* legacyPolish = nullptr) {
+inline const char* editorText(const char* key, const char* english, const char* legacyPolish) {
     const auto& translations = activeEditorTranslations();
     const auto it = translations.find(key ? key : "");
     if (it != translations.end()) return it->second.c_str();
