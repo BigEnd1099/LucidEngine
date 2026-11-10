@@ -1,6 +1,7 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorTopBarPanel.hpp"
 #include "renderer/EditorUiStyle.hpp"
+#include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
 #include <cmath>
@@ -34,19 +35,19 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                     ImGui::TextColored(ImVec4(0.95f, 0.97f, 1.0f, 1.0f), "LUCID");
                     ImGui::SameLine(0.0f, 14.0f * state.uiScale);
 
-                    if (ImGui::BeginMenu("File")) {
+                    if (ImGui::BeginMenu(editorText("File", "Plik"))) {
                         ImGui::BeginDisabled(state.simulationSessionActive);
-                        if (ImGui::MenuItem("New Level (Nowy poziom)", "Ctrl+N")) {
+                        if (ImGui::MenuItem(editorText("New Level", "Nowy poziom"), "Ctrl+N")) {
                             if (engine) { selectedEntity = entt::null; engine->setCurrentPreset("empty"); engine->resetScene("empty"); }
                         }
-                        if (ImGui::MenuItem("Open Project... (Otworz z dysku)", "Ctrl+O")) {
+                        if (ImGui::MenuItem(editorText("Open Project...", "Otwórz projekt..."), "Ctrl+O")) {
                             state.loadProject("");
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("Save Project (Zapisz)", "Ctrl+S")) {
+                        if (ImGui::MenuItem(editorText("Save Project", "Zapisz projekt"), "Ctrl+S")) {
                             state.saveProject(false);
                         }
-                        if (ImGui::MenuItem("Save Project As... (Zapisz jako...)", "Ctrl+Shift+S")) {
+                        if (ImGui::MenuItem(editorText("Save Project As...", "Zapisz projekt jako..."), "Ctrl+Shift+S")) {
                             state.saveProject(true);
                         }
                         if (ImGui::BeginMenu("Szybki wybor")) {
@@ -64,21 +65,21 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::EndDisabled();
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Edit")) {
-                        if (ImGui::MenuItem("Editor Preferences... (Preferencje)", "Ctrl+,")) {
+                    if (ImGui::BeginMenu(editorText("Edit", "Edycja"))) {
+                        if (ImGui::MenuItem(editorText("Editor Preferences...", "Preferencje edytora..."), "Ctrl+,")) {
                             state.showPreferencesWindow = true;
                         }
                         ImGui::Separator();
-                        if (ImGui::MenuItem("World & Graphics Settings")) { m_detailsTab = 1; state.showDetails = true; }
+                        if (ImGui::MenuItem(editorText("World & Graphics Settings", "Ustawienia świata i grafiki"))) { m_detailsTab = 1; state.showDetails = true; }
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Window")) {
-                        ImGui::MenuItem("Place Actors", nullptr, &state.showPlaceActors);
-                        ImGui::MenuItem("Outliner", nullptr, &state.showOutliner);
-                        ImGui::MenuItem("Details", nullptr, &state.showDetails);
-                        ImGui::MenuItem("Content Drawer", "Ctrl+Space", &state.showContentDrawer);
-                        ImGui::MenuItem("Output Log", nullptr, &state.showOutputLog);
-                        ImGui::MenuItem("Blueprints / Scripts", nullptr, &state.showScriptStudio);
+                    if (ImGui::BeginMenu(editorText("Window", "Okno"))) {
+                        ImGui::MenuItem(editorText("Place Actors", "Dodaj obiekty"), nullptr, &state.showPlaceActors);
+                        ImGui::MenuItem(editorText("Outliner", "Hierarchia sceny"), nullptr, &state.showOutliner);
+                        ImGui::MenuItem(editorText("Details", "Właściwości"), nullptr, &state.showDetails);
+                        ImGui::MenuItem(editorText("Content Drawer", "Przeglądarka zasobów"), "Ctrl+Space", &state.showContentDrawer);
+                        ImGui::MenuItem(editorText("Output Log", "Dziennik"), nullptr, &state.showOutputLog);
+                        ImGui::MenuItem(editorText("Blueprints / Scripts", "Blueprinty / Skrypty"), nullptr, &state.showScriptStudio);
                         ImGui::Separator();
                         ImGui::MenuItem("Editor Preferences...", "Ctrl+,", &state.showPreferencesWindow);
                         ImGui::Separator();
