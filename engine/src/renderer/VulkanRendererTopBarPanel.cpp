@@ -248,11 +248,11 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.55f, 0.25f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
                 ImGui::BeginDisabled();
-                ImGui::Button("     PLAYING ", ImVec2(0, btnH));
+                ImGui::Button(editorText("ui.playing", "     PLAYING "), ImVec2(0, btnH));
                 ImGui::EndDisabled();
                 ImGui::PopStyleColor(2);
             } else {
-                if (ImGui::Button("     Play ", ImVec2(0, btnH)) && engine) {
+                if (ImGui::Button(editorText("ui.play", "     Play "), ImVec2(0, btnH)) && engine) {
                     engine->playSimulation();
                     if (engine->getCameraMode() == "editor" && engine->getRegistry()) {
                         auto view = engine->getRegistry()->get().view<ecs::CharacterMovementComponent>();
