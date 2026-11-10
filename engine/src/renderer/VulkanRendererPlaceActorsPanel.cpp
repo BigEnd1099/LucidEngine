@@ -69,13 +69,16 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 ImGui::InputTextWithHint("##SearchClasses", "Search Classes...", classSearch, sizeof(classSearch));
                 ImGui::Separator();
 
+                int matchedCards = 0;
                 auto spawnCard = [&](const char* title, const char* desc, int spawnType, VectorIconType iconType, ImU32 iconCol) {
                     if (classSearch[0] != '\0') {
                         std::string tL = title, sL = classSearch;
-                        std::transform(tL.begin(), tL.end(), tL.begin(), ::tolower);
-                        std::transform(sL.begin(), sL.end(), sL.begin(), ::tolower);
+                        const auto toLower = [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); };
+                        std::transform(tL.begin(), tL.end(), tL.begin(), toLower);
+                        std::transform(sL.begin(), sL.end(), sL.begin(), toLower);
                         if (tL.find(sL) == std::string::npos) return;
                     }
+                    ++matchedCards;
                     ImGui::PushID(title);
                     const float cardH = 38.0f * uiScale;
                     ImGui::BeginChild(title, ImVec2(0, cardH), true, ImGuiWindowFlags_NoScrollbar);
@@ -189,6 +192,11 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                 spawnCard("Spot Light",        "Conical Spotlight Emitter",        10, VectorIconType::Light,     IM_COL32(245, 158, 11, 255));
                 spawnCard("Area Light",        "Karis Rectangular Emitter",        11, VectorIconType::Light,     IM_COL32(56, 189, 248, 255));
                 spawnCard("Fire VFX",          "Soft Gaussian HDR Particles",      8,  VectorIconType::Sparkles,  IM_COL32(251, 146, 60, 255));
+                if (matchedCards == 0) {
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("No actors match your search.");
+                    ImGui::TextDisabled("Try another name, e.g. Player, Light or Sphere.");
+                }
                 ImGui::EndChild();
                 ImGui::EndDisabled();
 
