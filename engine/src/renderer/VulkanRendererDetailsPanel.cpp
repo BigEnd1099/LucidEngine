@@ -40,24 +40,24 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                 ImGui::PushStyleColor(ImGuiCol_Button, m_detailsTab == 0 ? tabActive : tabInactive);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.40f, 0.68f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.30f, 0.52f, 1.0f));
-                if (ImGui::Button(editorText("ui.details", "Details", "Właściwości"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 0;
+                if (ImGui::Button(editorText("ui.details", "Details"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 0;
                 ImGui::PopStyleColor(3);
                 ImGui::SameLine(0.0f, inspectorTabGap);
                 ImGui::PushStyleColor(ImGuiCol_Button, m_detailsTab == 1 ? tabActive : tabInactive);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.40f, 0.68f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.30f, 0.52f, 1.0f));
-                if (ImGui::Button(editorText("ui.world_graphics", "World & Graphics", "Świat i grafika"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 1;
+                if (ImGui::Button(editorText("ui.world_graphics", "World & Graphics"), ImVec2(inspectorTabWidth, 26.0f * uiScale))) m_detailsTab = 1;
                 ImGui::PopStyleColor(3);
                 ImGui::Separator();
 
                 if (m_detailsTab == 0) {
                     if (selectedEntity == entt::null || !registry.get().valid(selectedEntity)) {
                         ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), editorText("ui.select_an_object_in_the_scene", "Select an object in the scene", "Wybierz obiekt ze sceny"));
-                        ImGui::TextDisabled(editorText("ui.select_any_object_in_the_3d_viewport_or_the_outliner_above", "Select any object in the 3D viewport or the Outliner above,", "Kliknij dowolny obiekt w oknie 3D lub w hierarchii sceny powyżej,"));
-                        ImGui::TextDisabled(editorText("ui.to_inspect_its_components_transform_mesh_pbr_physics_chemistry_lightin", "to inspect its components (Transform, Mesh, PBR, Physics, Chemistry, Lighting).", "aby wyświetlić komponenty (Transform, siatka, PBR, fizyka, chemia, światło)."));
+                        ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), editorText("ui.select_an_object_in_the_scene", "Select an object in the scene"));
+                        ImGui::TextDisabled(editorText("ui.select_any_object_in_the_3d_viewport_or_the_outliner_above", "Select any object in the 3D viewport or the Outliner above,"));
+                        ImGui::TextDisabled(editorText("ui.to_inspect_its_components_transform_mesh_pbr_physics_chemistry_lightin", "to inspect its components (Transform, Mesh, PBR, Physics, Chemistry, Lighting)."));
                         ImGui::Spacing();
-                        ImGui::SeparatorText(editorText("ui.quickly_add_objects", "Quickly add objects", "Szybkie dodawanie obiektów"));
+                        ImGui::SeparatorText(editorText("ui.quickly_add_objects", "Quickly add objects"));
                         auto quickSpawnBtn = [&](const char* name, int mId, glm::vec3 col) {
                             if (ImGui::Button(name)) {
                                 auto ent = registry.createEntity();
@@ -98,11 +98,11 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::SameLine();
                         ImGui::TextDisabled("#%u", static_cast<uint32_t>(selectedEntity));
                         ImGui::SameLine();
-                        if (ImGui::Button(editorText("ui.component", "+ Component", "+ Komponent"), ImVec2(0, 0))) {
+                        if (ImGui::Button(editorText("ui.component", "+ Component"), ImVec2(0, 0))) {
                             ImGui::OpenPopup("AddComponentPopup");
                         }
                         if (ImGui::BeginPopup("AddComponentPopup")) {
-                            ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), editorText("ui.add_component", "Add component:", "Dodaj komponent:"));
+                            ImGui::TextColored(ImVec4(0.22f, 0.74f, 0.97f, 1.0f), editorText("ui.add_component", "Add component:"));
                             ImGui::Separator();
                             if (!registry.get().all_of<ecs::LightComponent>(selectedEntity)) {
                                 if (ImGui::MenuItem("+ Swiatlo (Light)")) {
@@ -160,12 +160,12 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 if ((pCh || rCh || sCh) && engine) engine->syncEntityTransformPhysics(selectedEntity);
 
                                 ImGui::Spacing();
-                                if (ImGui::Button(editorText("ui.reset_position_0_0_0", " Reset Position (0, 0, 0) ", " Zresetuj pozycję (0, 0, 0) "))) {
+                                if (ImGui::Button(editorText("ui.reset_position_0_0_0", " Reset Position (0, 0, 0) "))) {
                                     t.position = glm::vec3(0.0f);
                                     if (engine) engine->syncEntityTransformPhysics(selectedEntity);
                                 }
                                 ImGui::SameLine();
-                                if (ImGui::Button(editorText("ui.focus_camera_f", " Focus Camera [F] ", " Skup kamerę [F] "))) {
+                                if (ImGui::Button(editorText("ui.focus_camera_f", " Focus Camera [F] "))) {
                                     if (engine) engine->setCamera(t.position - cameraForward * 8.0f, cameraYaw, cameraPitch, cameraFov);
                                 }
                             }
@@ -200,20 +200,20 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                         const glm::vec3 currentSunDir = -sunForward;
                                         ImGui::TextDisabled("Wektor swiatla: (%.2f, %.2f, %.2f)", currentSunDir.x, currentSunDir.y, currentSunDir.z);
 
-                                        ImGui::Text(editorText("ui.time_of_day", "Time of day:", "Pory dnia:"));
-                                        if (ImGui::SmallButton(editorText("ui.noon", "Noon", "Południe"))) {
+                                        ImGui::Text(editorText("ui.time_of_day", "Time of day:"));
+                                        if (ImGui::SmallButton(editorText("ui.noon", "Noon"))) {
                                             lt.rotation.x = -75.0f; lt.rotation.y = 0.0f; changed = true;
                                         }
                                         ImGui::SameLine();
-                                        if (ImGui::SmallButton(editorText("ui.morning", "Morning", "Poranek"))) {
+                                        if (ImGui::SmallButton(editorText("ui.morning", "Morning"))) {
                                             lt.rotation.x = -20.0f; lt.rotation.y = 80.0f; changed = true;
                                         }
                                         ImGui::SameLine();
-                                        if (ImGui::SmallButton(editorText("ui.golden_hour", "Golden hour", "Złota godzina"))) {
+                                        if (ImGui::SmallButton(editorText("ui.golden_hour", "Golden hour"))) {
                                             lt.rotation.x = -12.0f; lt.rotation.y = 240.0f; changed = true;
                                         }
                                         ImGui::SameLine();
-                                        if (ImGui::SmallButton(editorText("ui.sunset", "Sunset", "Zachód"))) {
+                                        if (ImGui::SmallButton(editorText("ui.sunset", "Sunset"))) {
                                             lt.rotation.x = -3.0f; lt.rotation.y = 265.0f; changed = true;
                                         }
 
@@ -557,9 +557,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             }
                         }
 
-                        ImGui::InputTextWithHint("##CustomHdri", editorText("ui.path_to_exr_hdr_file_e_g_c_maps_sky_exr", "Path to .exr / .hdr file (e.g. C:/maps/sky.exr)", "Ścieżka do pliku .exr / .hdr (np. C:/maps/sky.exr)"), m_customHdriPath, sizeof(m_customHdriPath));
+                        ImGui::InputTextWithHint("##CustomHdri", editorText("ui.path_to_exr_hdr_file_e_g_c_maps_sky_exr", "Path to .exr / .hdr file (e.g. C:/maps/sky.exr)"), m_customHdriPath, sizeof(m_customHdriPath));
                         ImGui::SameLine();
-                        if (ImGui::Button(editorText("ui.load_hdri_exr", "Load HDRI/EXR", "Wczytaj HDRI/EXR"))) {
+                        if (ImGui::Button(editorText("ui.load_hdri_exr", "Load HDRI/EXR"))) {
                             if (m_customHdriPath[0] != '\0') {
                                 loadEnvironmentHdriFile(m_customHdriPath);
                             }
@@ -644,7 +644,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 env.sunDirection = sunDir;
                                 ImGui::TextDisabled("Wektor slonca: (%.2f, %.2f, %.2f)", sunDir.x, sunDir.y, sunDir.z);
 
-                                ImGui::Text(editorText("ui.time_of_day", "Time of day:", "Pory dnia:"));
+                                ImGui::Text(editorText("ui.time_of_day", "Time of day:"));
                                 if (ImGui::SmallButton("Poludnie##World")) { sunLt.rotation.x = -75.0f; sunLt.rotation.y = 0.0f; changed = true; }
                                 ImGui::SameLine();
                                 if (ImGui::SmallButton("Poranek##World")) { sunLt.rotation.x = -20.0f; sunLt.rotation.y = 80.0f; changed = true; }
