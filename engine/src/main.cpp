@@ -1,6 +1,7 @@
 #include "core/Engine.hpp"
 #include "network/DualTransportContracts.hpp"
 #include <iostream>
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <stdexcept>
