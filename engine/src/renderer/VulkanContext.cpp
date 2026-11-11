@@ -1,5 +1,11 @@
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
 #define VMA_IMPLEMENTATION
 #include "renderer/VulkanContext.hpp"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #include "core/Logger.hpp"
 #include <stdexcept>
 #include <algorithm>
