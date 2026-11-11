@@ -37,6 +37,7 @@ namespace engine::renderer {
 
             bool      reflectionCheckerboard{true};
             bool      reflectionStochasticLights{true};
+            bool      reflectionPrimaryStochasticLights{false};
             bool      reflectionLodBias{true};
             bool      reflectionHalfRes{false};
         };
