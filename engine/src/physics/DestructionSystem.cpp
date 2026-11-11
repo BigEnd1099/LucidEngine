@@ -9,7 +9,7 @@
 
 namespace engine::physics {
 
-    void DestructionSystem::update(ecs::Registry* registry, PhysicsContext* physics, core::Engine* engine, float dt, const std::vector<ContactPoint>& contacts) {
+    void DestructionSystem::update(ecs::Registry* registry, PhysicsContext* physics, core::Engine* engine, float, const std::vector<ContactPoint>& contacts) {
         if (!registry) return;
         auto& reg = registry->get();
 
@@ -54,7 +54,7 @@ namespace engine::physics {
         }
     }
 
-    void DestructionSystem::fractureEntity(ecs::Registry* registry, PhysicsContext* physics, core::Engine* engine, uint32_t entityId, const glm::vec3& impactPoint, const glm::vec3& impulse) {
+    void DestructionSystem::fractureEntity(ecs::Registry* registry, PhysicsContext* physics, core::Engine* engine, uint32_t entityId, const glm::vec3&, const glm::vec3& impulse) {
         if (!registry) return;
         auto& reg = registry->get();
         auto e = static_cast<entt::entity>(entityId);
