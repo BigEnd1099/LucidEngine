@@ -80,6 +80,34 @@ namespace engine::renderer {
             }
         }
 
+        // Resolve explicit constraints first. Resource hazards are inferred in this
+        // valid order so an explicitly-declared producer can appear after its consumer
+        // in source code without being misclassified as an imported resource.
+        auto stableTopologicalOrder = [&](const std::vector<size_t>& sourceIndegree) {
+            std::vector<size_t> indegrees = sourceIndegree;
+            std::priority_queue<size_t, std::vector<size_t>, std::greater<size_t>> queue;
+            std::vector<size_t> order;
+            order.reserve(passCount);
+            for (size_t i = 0; i < passCount; ++i) {
+                if (indegrees[i] == 0) queue.push(i);
+            }
+            while (!queue.empty()) {
+                const size_t current = queue.top();
+                queue.pop();
+                order.push_back(current);
+                for (const size_t next : edges[current]) {
+                    if (--indegrees[next] == 0) queue.push(next);
+                }
+            }
+            return order;
+        };
+
+        const std::vector<size_t> explicitOrder = stableTopologicalOrder(indegree);
+        if (explicitOrder.size() != passCount) {
+            m_lastError = "RenderGraph explicit pass dependency cycle detected.";
+            return false;
+        }
+
         struct ResourceState {
             bool hasWriter{false};
             size_t lastWriter{0};
@@ -87,9 +115,9 @@ namespace engine::renderer {
         };
         std::unordered_map<std::string, ResourceState> resources;
 
-        // Infer RAW, WAW and WAR hazards from declared resource usage.
+        // Infer RAW, WAW and WAR hazards in the explicit dependency order.
         // Unwritten inputs are treated as externally-owned/imported resources.
-        for (size_t i = 0; i < passCount; ++i) {
+        for (const size_t i : explicitOrder) {
             const auto& pass = m_passes[i];
             std::unordered_set<std::string> uniqueInputs;
             for (const auto& resource : pass.inputs) {
