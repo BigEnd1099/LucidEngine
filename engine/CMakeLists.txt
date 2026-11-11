@@ -246,7 +246,7 @@ target_compile_definitions(engine PRIVATE ASIO_STANDALONE USE_GLFW)
 if(WIN32)
     # ASIO/IXWebSocket use the Windows SDK target to select available APIs.
     target_compile_definitions(engine PRIVATE _WIN32_WINNT=0x0A00)
-endif
+endif()
 target_link_libraries(engine PRIVATE
     EnTT::EnTT
     glm::glm
