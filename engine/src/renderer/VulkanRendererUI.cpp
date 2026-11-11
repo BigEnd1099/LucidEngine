@@ -645,7 +645,8 @@ namespace engine::renderer {
                 metric("Reflection checkerboard", metrics.value("rtReflectionCheckerboard", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("Reflection half res", metrics.value("rtReflectionHalfRes", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 ImGui::TableNextRow();
-                metric("Stochastic lights", metrics.value("rtReflectionStochasticLights", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Stochastic lights (secondary)", metrics.value("rtReflectionStochasticLights", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Stochastic lights (primary)", metrics.value("rtReflectionPrimaryStochasticLights", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("Reflection LOD bias", metrics.value("rtReflectionLodBias", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("Infinite reflection bounces", metrics.value("rtReflectionInfiniteBounces", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("RT debug mode ID", metrics.value("rtDebugMode", 0.0), "");
