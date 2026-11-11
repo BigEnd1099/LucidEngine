@@ -1,5 +1,6 @@
 #include "core/Profiler.hpp"
 #include "renderer/Geometry/ClusterRenderer.hpp"
+#include "renderer/RenderGraph.hpp"
 #include "renderer/Lighting/HardwareReSTIR.hpp"
 
 #include <cassert>
@@ -71,6 +72,31 @@ int main() {
     clusters.registerCluster(outside);
     const auto visible = clusters.cullVisibleClusters(intersectingPlane, glm::vec3(0.0f, 0.0f, 5.0f), 1.0f);
     assert(visible.size() == 1 && visible.front() == 0);
+
+    // RenderGraph: explicit dependencies can reorder independent declarations.
+    RenderGraph graph;
+    std::vector<std::string> execution;
+    graph.addPass("present", {}, {}, [&](VkCommandBuffer) { execution.push_back("present"); }, {"shade"});
+    graph.addPass("shade", {}, {}, [&](VkCommandBuffer) { execution.push_back("shade"); });
+    assert(graph.compile());
+    assert(graph.getExecutionOrder().size() == 2);
+    assert(graph.getExecutionOrder()[0] == 1 && graph.getExecutionOrder()[1] == 0);
+    graph.execute(VK_NULL_HANDLE);
+    assert(execution.size() == 2 && execution[0] == "shade" && execution[1] == "present");
+
+    // Resource declarations infer write-after-read and read-after-write dependencies.
+    graph.clear();
+    graph.addPass("write-color", {}, {"color"}, [&](VkCommandBuffer) { execution.push_back("write"); });
+    graph.addPass("read-color", {"color"}, {}, [&](VkCommandBuffer) { execution.push_back("read"); });
+    assert(graph.compile());
+    assert(graph.getExecutionOrder()[0] == 0 && graph.getExecutionOrder()[1] == 1);
+
+    // Cyclic explicit dependencies are rejected with a diagnostic instead of executing in insertion order.
+    graph.clear();
+    graph.addPass("cycle-a", {}, {}, [](VkCommandBuffer) {}, {"cycle-b"});
+    graph.addPass("cycle-b", {}, {}, [](VkCommandBuffer) {}, {"cycle-a"});
+    assert(!graph.compile());
+    assert(!graph.getLastError().empty());
 
     // Profiler averages must be true arithmetic means, and invalid metrics are ignored.
     auto& profiler = engine::core::Profiler::get();
