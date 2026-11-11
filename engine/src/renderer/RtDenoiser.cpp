@@ -537,6 +537,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtReflectionMaxRoughness", params.reflectionMaxRoughness);
         profiler.recordMetric("rtReflectionCheckerboard", params.reflectionCheckerboard ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionStochasticLights", params.reflectionStochasticLights ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionPrimaryStochasticLights", params.reflectionPrimaryStochasticLights ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionLodBias", params.reflectionLodBias ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionHalfRes", params.reflectionHalfRes ? 1.0 : 0.0);
         profiler.recordMetric("rtDebugMode", static_cast<uint32_t>(params.debugMode));
