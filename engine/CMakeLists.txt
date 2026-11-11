@@ -83,10 +83,17 @@ FetchContent_MakeAvailable(qjs)
 
 if(MSVC)
     # QuickJS-ng emits known C4701/C4702 diagnostics in its upstream C sources.
-    # Suppress only those IDs on those source files; keep warnings enabled elsewhere.
+    # Apply the narrow suppressions in QuickJS's own directory and its targets;
+    # warnings remain enabled for Lucid Engine and all unrelated dependencies.
     foreach(qjs_source quickjs.c quickjs-libc.c qjsc.c)
         set_source_files_properties(${qjs_SOURCE_DIR}/${qjs_source}
+            TARGET_DIRECTORY qjs
             PROPERTIES COMPILE_OPTIONS "/wd4701;/wd4702")
+    endforeach()
+    foreach(qjs_target qjs qjsc qjs_exe run-test262 test_conv function_source)
+        if(TARGET ${qjs_target})
+            target_compile_options(${qjs_target} PRIVATE /wd4701 /wd4702)
+        endif()
     endforeach()
 endif()
 
