@@ -12,7 +12,7 @@
 using namespace engine::renderer;
 
 #define CHECK(condition) do { if (!(condition)) { \
-    std::cerr << "FAILED: " << #condition << " at " << __FILE__ << ':' << __LINE__ << '\\n'; \
+    std::cerr << "FAILED: " << #condition << " at " << __FILE__ << ':' << __LINE__ << '\n'; \
     return 1; \
 } } while (false)
 
