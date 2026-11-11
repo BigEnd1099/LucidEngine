@@ -22,7 +22,7 @@ namespace engine::ai {
         return NodeStatus::FAILURE;
     }
 
-    NodeStatus ConditionNode::execute(Blackboard& bb, float dt) {
+    NodeStatus ConditionNode::execute(Blackboard& bb, float) {
         if (!m_predicate) return NodeStatus::FAILURE;
         return m_predicate(bb) ? NodeStatus::SUCCESS : NodeStatus::FAILURE;
     }
