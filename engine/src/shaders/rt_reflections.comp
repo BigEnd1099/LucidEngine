@@ -117,8 +117,9 @@ void main() {
     if (dot(N, N) <= 1e-4) { imageStore(imgRefl, px, vec4(0.0)); return; }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
-    // Do not hard-cut rough reflections. GGX sampling naturally broadens the lobe;
-    // checkerboard sampling controls the extra cost for rough surfaces.
+    // Rough surfaces get (almost) no visible mirror reflection: skip tracing and let IBL handle them.
+    const float RT_REFL_MAX_ROUGHNESS = 0.75;
+    if (roughness > RT_REFL_MAX_ROUGHNESS) { imageStore(imgRefl, px, vec4(0.0)); return; }
 
     bool useCheckerboard     = (pc.u.w & 0x00000100u) != 0u;
     bool useStochasticLights = (pc.u.w & 0x00000200u) != 0u; // Secondary reflection bounces
@@ -193,13 +194,8 @@ void main() {
                 vec3 lightPos = ubo.lightsPos[li].xyz;
                 float range = max(ubo.lightsPos[li].w, 0.1);
                 int type = int(round(ubo.lightsDir[li].w));
-                // A point light is not a visible glowing sphere. Area lights retain a
-                // finite proxy matching their configured dimensions; spotlights are
-                // not intersected as bulbs (their cone is a lighting volume, not geometry).
-                if (type == 1) continue;
-                float bulbRadius = (type == 2)
-                    ? clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.01, 0.6)
-                    : 0.015;
+                float bulbRadius = clamp(range * 0.02, 0.08, 0.35);
+                if (type == 2) bulbRadius = clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.1, 0.6);
                 vec3 OC = lightPos - curOrig;
                 float tProj = dot(OC, curDir);
                 if (tProj <= 0.0) continue;
@@ -208,9 +204,15 @@ void main() {
                 if (d2 >= r2) continue;
                 float tHit = tProj - sqrt(max(0.0, r2 - d2));
                 if (tHit <= 0.0 || tHit >= closestBulbDist) continue;
+                float coneFade = 1.0;
+                if (type == 1) {
+                    vec3 toHit = normalize((curOrig + curDir * tHit) - lightPos);
+                    float cone = dot(toHit, normalize(ubo.lightsDir[li].xyz));
+                    coneFade = mix(0.15, 1.0, smoothstep(ubo.lightsParams[li].y, ubo.lightsParams[li].x, cone));
+                }
                 if (!rayQueryOccluded(curOrig, curDir, max(0.001, tHit - 0.02))) {
                     closestBulbDist = tHit;
-                    bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0);
+                    bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0 * coneFade);
                     hitBulb = true;
                 }
             }
