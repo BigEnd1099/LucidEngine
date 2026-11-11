@@ -17,17 +17,31 @@ endif()
 
 project(LucidEngine CXX)
 
-if(MSVC)
-    add_compile_options(/EHa)
-    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
+# The MSVC runtime is selected above; compiler options are scoped to Lucid targets below.
 
-add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS GLM_ENABLE_EXPERIMENTAL)
+# GLM configuration macros are applied to Lucid targets only, not every fetched dependency.
+set(LUCID_GLM_COMPILE_DEFINITIONS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+    GLM_FORCE_RADIANS
+    GLM_ENABLE_EXPERIMENTAL
+)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
+
+# CMake's Check* modules emit a large number of "Performing Test ... - Failed"
+# status lines when probing GCC/Clang-only flags with MSVC. Keep the probes
+# (they still determine the correct feature results), but silence their routine
+# status output while configuring third-party dependencies.
+if(DEFINED CMAKE_REQUIRED_QUIET)
+    set(_LUCID_PREVIOUS_CMAKE_REQUIRED_QUIET "${CMAKE_REQUIRED_QUIET}")
+    set(_LUCID_HAD_CMAKE_REQUIRED_QUIET TRUE)
+else()
+    set(_LUCID_HAD_CMAKE_REQUIRED_QUIET FALSE)
+endif()
+set(CMAKE_REQUIRED_QUIET TRUE)
 
 # EnTT (ECS)
 FetchContent_Declare(entt URL https://github.com/skypjack/entt/archive/refs/tags/v3.13.0.tar.gz)
@@ -102,6 +116,15 @@ FetchContent_MakeAvailable(imgui)
 
 find_package(Vulkan REQUIRED)
 
+# Restore the caller's check-module verbosity before configuring Lucid targets.
+if(_LUCID_HAD_CMAKE_REQUIRED_QUIET)
+    set(CMAKE_REQUIRED_QUIET "${_LUCID_PREVIOUS_CMAKE_REQUIRED_QUIET}")
+else()
+    unset(CMAKE_REQUIRED_QUIET)
+endif()
+unset(_LUCID_PREVIOUS_CMAKE_REQUIRED_QUIET)
+unset(_LUCID_HAD_CMAKE_REQUIRED_QUIET)
+
 file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "src/*.cpp")
 file(GLOB_RECURSE HEADER_FILES CONFIGURE_DEPENDS "include/*.hpp")
 
@@ -163,6 +186,19 @@ if(Python3_FOUND)
 endif()
 
 add_executable(engine ${SRC_FILES} ${HEADER_FILES} ${IMGUI_SRCS})
+
+# Apply warning/exception policy to Lucid's own target only. Fetched libraries
+# retain their upstream compiler settings and are not forced to accept MSVC flags.
+if(MSVC)
+    target_compile_options(engine PRIVATE /W4 /permissive- /EHa)
+    target_compile_definitions(engine PRIVATE NOMINMAX ${LUCID_GLM_COMPILE_DEFINITIONS})
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(engine PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_definitions(engine PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+else()
+    target_compile_definitions(engine PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+endif()
+
 add_dependencies(engine CompileShaders)
 if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
@@ -227,7 +263,9 @@ target_link_libraries(engine PRIVATE
 option(LUCID_BUILD_ALGORITHM_TESTS "Build Lucid renderer algorithm tests" OFF)
 if(LUCID_BUILD_ALGORITHM_TESTS)
     enable_testing()
-    find_package(Threads REQUIRED)
+    if(NOT WIN32)
+        find_package(Threads REQUIRED)
+    endif()
     add_executable(lucid_renderer_algorithm_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_renderer_algorithms.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/Profiler.cpp
@@ -239,11 +277,22 @@ if(LUCID_BUILD_ALGORITHM_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${vma_SOURCE_DIR}/include
     )
+    if(MSVC)
+        target_compile_options(lucid_renderer_algorithm_tests PRIVATE /W4 /permissive-)
+        target_compile_definitions(lucid_renderer_algorithm_tests PRIVATE NOMINMAX ${LUCID_GLM_COMPILE_DEFINITIONS})
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(lucid_renderer_algorithm_tests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_definitions(lucid_renderer_algorithm_tests PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+    else()
+        target_compile_definitions(lucid_renderer_algorithm_tests PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+    endif()
     target_link_libraries(lucid_renderer_algorithm_tests PRIVATE
         glm::glm
         nlohmann_json::nlohmann_json
         Vulkan::Vulkan
-        Threads::Threads
     )
+    if(NOT WIN32)
+        target_link_libraries(lucid_renderer_algorithm_tests PRIVATE Threads::Threads)
+    endif()
     add_test(NAME lucid_renderer_algorithm_tests COMMAND lucid_renderer_algorithm_tests)
 endif()
