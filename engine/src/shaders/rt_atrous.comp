@@ -6,9 +6,12 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
 
-// Passes 3-4/4: edge-avoiding a-trous wavelet filter (5x5 B3-spline, step 1 then 2),
+// Passes 3-4/4: edge-avoiding a-trous wavelet filter (5x5 B3-spline, 4-stage hierarchy step 1, 2, 4, 8),
 // guided by view-space plane distance, normals, and SVGF local luminance variance.
-//   PASS 0: imgHistCur -> imgA        PASS 1: imgA -> imgS (final output, sampled by pbr_rt.frag)
+//   PASS 0: imgHistCur -> imgA (step 1)
+//   PASS 1: imgA       -> imgS (step 2)
+//   PASS 2: imgS       -> imgA (step 4)
+//   PASS 3: imgA       -> imgS (step 8, final output sampled by pbr_rt.frag)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(constant_id = 0) const int PASS = 0;
 
@@ -24,11 +27,19 @@ layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out:
 layout(push_constant) uniform PC {
     mat4 unused;
     vec4 f;   // x = spatial strength (0..1), y = maxHistory, w = svgfEnabled (1/0)
-    uvec4 u;  // u.x = debugMode (in pass 1)
+    uvec4 u;  // u.x = debugMode (evaluated in final pass)
 } pc;
 
-vec4 loadSrc(ivec2 p) { return (PASS == 0) ? imageLoad(imgHistCur, p) : imageLoad(imgA, p); }
-void storeDst(ivec2 p, vec4 v) { if (PASS == 0) imageStore(imgA, p, v); else imageStore(imgS, p, v); }
+vec4 loadSrc(ivec2 p) {
+    if (PASS == 0) return imageLoad(imgHistCur, p);
+    if (PASS == 1 || PASS == 3) return imageLoad(imgA, p);
+    return imageLoad(imgS, p); // PASS == 2
+}
+
+void storeDst(ivec2 p, vec4 v) {
+    if (PASS == 0 || PASS == 2) imageStore(imgA, p, v);
+    else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
+}
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -39,8 +50,8 @@ void main() {
     vec4 center = loadSrc(px);
     vec4 gC = imageLoad(imgGeomCur, px);
 
-    // Debug visualization modes (evaluated only in PASS 1 directly into imgS)
-    if (PASS == 1 && pc.u.x > 0u) {
+    // Debug visualization modes (evaluated in final pass directly into imgS)
+    if ((PASS == 3 || PASS == 1) && pc.u.x > 0u) {
         uint mode = pc.u.x;
         if (gC.z < 0.0) {
             // Sky
@@ -48,8 +59,8 @@ void main() {
             return;
         }
         if (mode == 1u) {
-            // Raw indirect trace (imgS still contains rt_indirect.comp output before pass 1 overwrite)
-            vec4 rawS = imageLoad(imgS, px);
+            // Raw indirect trace (imgHistCur in pass 0, or center in pass 1/3)
+            vec4 rawS = imageLoad(imgHistCur, px);
             storeDst(px, rawS);
             return;
         } else if (mode == 2u) {
@@ -97,7 +108,7 @@ void main() {
     vec3 nC = rtOctDecode(gC.xy);
     vec3 nCv = mat3(ubo.view) * nC;
     vec3 pCv = rtViewPosFromLinear(vec2(px) + 0.5, gC.z, size);
-    float depthTol = 0.012 * gC.z + 0.003;
+    float depthTol = 0.005 * gC.z + 0.002;
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
 
@@ -107,7 +118,7 @@ void main() {
     const bool useSvgf = (pc.f.w > 0.5);
 
     vec4 sum = center * (h[0] * h[0]);
-    float varSum = varC * (h[0] * h[0]) * (h[0] * h[0]);
+    float varSum = varC * (h[0] * h[0]);
     float wTotal = h[0] * h[0];
 
     for (int j = -2; j <= 2; ++j) {
@@ -119,36 +130,42 @@ void main() {
             if (gQ.z < 0.0) continue;
             vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
             float planeDist = abs(dot(nCv, pQv - pCv));
-            float wd = exp(-planeDist / (depthTol * float(step)));
-            float wn = pow(clamp(dot(nC, rtOctDecode(gQ.xy)), 0.0, 1.0), 24.0);
+            float wd = exp(-planeDist / max(depthTol * sqrt(float(step)), 1e-4));
+            float wn = pow(max(0.0, dot(nC, rtOctDecode(gQ.xy))), 16.0);
 
+            vec4 qCol = loadSrc(q);
             float wl = 1.0;
             if (useSvgf) {
-                vec4 qCol = loadSrc(q);
                 float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
                 float deltaL = abs(lC - lQ);
-                float sigmaL = 4.0 * max(pc.f.x, 0.1);
-                wl = exp(-deltaL / (sigmaL * sqrt(max(varC, 1e-4)) + 1e-3));
+                float stdDev = sqrt(max(varC, 1e-4));
+                float sigmaL = 1.2 * max(pc.f.x, 0.1);
+                wl = exp(-deltaL / (sigmaL * stdDev + 0.05));
             }
 
-            float w = h[abs(i)] * h[abs(j)] * wd * wn * wl;
-            sum += loadSrc(q) * w;
+            // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
+            float deltaVis = abs(center.a - qCol.a);
+            float wVis = exp(-deltaVis / 0.18);
+
+            float w = h[abs(i)] * h[abs(j)] * wd * wn * wl * wVis;
+            sum += qCol * w;
             if (useSvgf) {
                 float qVar = (PASS == 0) ? max(0.0, imageLoad(imgMomentsCur, q).z) : max(0.0, imageLoad(imgMomentsCur, q).w);
-                varSum += w * w * qVar;
+                varSum += w * qVar;
             }
             wTotal += w;
         }
     }
     vec4 filtered = sum / max(wTotal, 1e-6);
 
-    if (PASS == 0 && useSvgf) {
-        float filteredVar = varSum / max(wTotal * wTotal, 1e-6);
+    if (useSvgf && PASS < 3) {
+        float filteredVar = varSum / max(wTotal, 1e-6);
         momC.w = filteredVar;
         imageStore(imgMomentsCur, px, momC);
     }
 
-    // Short history -> trust the spatial estimate; long history -> keep the temporal detail.
-    float s = clamp(pc.f.x * (1.0 / (1.0 + gC.w * 0.04)), 0.0, 1.0);
+    // Spatial strength directly controls filtering. SVGF edge-stopping functions
+    // (depth, normal, and variance-guided luminance weight) naturally preserve true details.
+    float s = clamp(pc.f.x, 0.0, 1.0);
     storeDst(px, mix(center, filtered, s));
 }

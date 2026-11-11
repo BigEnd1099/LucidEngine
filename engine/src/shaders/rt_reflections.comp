@@ -25,6 +25,18 @@ layout(push_constant) uniform PC {
 } pc;
 
 const float MAX_REFL_DIST = 1000.0;
+const float FIREFLY_CLAMP = 32.0;
+
+vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
+    float a = max(roughness * roughness, 0.001);
+    float phi = 2.0 * PI * u.x;
+    float cosTheta = sqrt(clamp((1.0 - u.y) / (1.0 + (a * a - 1.0) * u.y), 0.0, 1.0));
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    vec3 hLocal = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+    vec3 T, B;
+    buildBasis(N, T, B);
+    return normalize(T * hLocal.x + B * hLocal.y + N * hLocal.z);
+}
 
 // Indirect diffuse at a secondary hit.
 //  - hit visible on screen: reuse the denoised RT GI / SSGI cache,
@@ -46,43 +58,48 @@ vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hit
     vec3 diffuseResponse = (1.0 - F) * (1.0 - hitMetallic) * hitAlbedo;
     if (max(diffuseResponse.r, max(diffuseResponse.g, diffuseResponse.b)) < 1e-3) return vec3(0.0);
 
-    // 1) Visible on screen: reuse the cached GI.
+    // 1) Visible on screen: reuse the cached GI with guard-band edge fading.
     vec4 clipPos = ubo.viewProj * vec4(hitPos, 1.0);
+    vec3 screenGI = vec3(0.0);
+    float screenWeight = 0.0;
     if (clipPos.w > 0.001) {
         vec2 hitUV = clipPos.xy / clipPos.w * 0.5 + 0.5;
-        if (all(greaterThanEqual(hitUV, vec2(0.0))) && all(lessThanEqual(hitUV, vec2(1.0)))) {
+        vec2 edgeFade = smoothstep(vec2(0.0), vec2(0.06), hitUV) * smoothstep(vec2(1.0), vec2(0.94), hitUV);
+        float wEdge = edgeFade.x * edgeFade.y;
+        if (wEdge > 0.001) {
             float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
-            if (abs(clipPos.z / clipPos.w - screenDepth) < 0.02) {
-                vec3 add = vec3(0.0);
+            if (abs(clipPos.z / clipPos.w - screenDepth) < 0.03) {
                 if (useRtGI) {
                     ivec2 giSize = imageSize(imgGI);
                     ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
-                    add += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
+                    screenGI += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
                 }
                 if (useSSGI) {
-                    add += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+                    screenGI += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
                 }
-                return add;
+                screenWeight = wEdge;
+                if (screenWeight >= 0.99) return screenGI;
             }
         }
     }
 
-    // 2) Off-screen / hidden in screen space: one diffuse ray. Skipped for paths that carry almost no energy.
-    if (!allowTrace || pathEnergy < 0.1) return vec3(0.0);
+    // 2) Off-screen / hidden in screen space: one diffuse ray smoothly blended with guard band.
+    if (!allowTrace || pathEnergy < 0.005) return screenGI * screenWeight;
     vec3 gd = sampleCosineHemisphere(Nh, rand2());
     RtInstanceData h2;
     vec3 p2, n2;
     vec2 uv2;
     vec4 t2;
     float dist2;
-    if (traceSceneSurface(hitPos + Nh * 0.012, gd, 60.0, h2, p2, n2, uv2, t2, dist2)) {
+    vec3 worldGI = vec3(0.0);
+    if (traceSceneSurface(hitPos + Nh * 0.012, gd, 200.0, h2, p2, n2, uv2, t2, dist2)) {
         int numActiveLights = min(ubo.numLights, 8);
         int singleLight = (numActiveLights > 0) ? clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1) : -1;
         float singleWeight = (numActiveLights > 0) ? float(numActiveLights) : 1.0;
         vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, singleLight, singleWeight, 2.0), 24.0);
-        return diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
+        worldGI = diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
     }
-    return vec3(0.0);
+    return mix(worldGI, screenGI, screenWeight);
 }
 
 void main() {
@@ -149,11 +166,15 @@ void main() {
     for (int s = 0; s < samples; ++s) {
         vec3 throughput = vec3(1.0);
         vec3 pathRadiance = vec3(0.0);
-        vec3 curOrig = P + N * 0.012;
-        vec2 disk0 = sampleUniformDisk(rand2());
-        vec3 curDir = roughness < 0.02 ? idealR :
-            normalize(idealR + tangent * disk0.x * spread + bitangent * disk0.y * spread);
-        if (dot(curDir, N) <= 0.0) curDir = reflect(curDir, N);
+        vec3 curOrig = P + N * (0.012 / max(dot(N, V), 0.15));
+        vec3 curDir;
+        if (roughness < 0.02) {
+            curDir = idealR;
+        } else {
+            vec3 H = sampleGGX(rand2(), N, roughness);
+            curDir = reflect(-V, H);
+            if (dot(curDir, N) <= 0.0) curDir = idealR;
+        }
 
         for (int bounce = 0; bounce < maxBounces; ++bounce) {
             RtInstanceData hit;
@@ -212,7 +233,7 @@ void main() {
             vec3 Nh = normalize(hitNorm);
             float NdotV = max(dot(Nh, -curDir), 0.0);
             vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
-            vec3 contW = F * (1.0 - hitRough);
+            vec3 contW = mix(F * (1.0 - hitRough * 0.5), F, metallic);
             float maxContinueRoughness = clamp(pc.f.w, 0.05, 1.0);
             float minContinueThroughput = clamp(uintBitsToFloat(pc.u.z), 0.001, 1.0);
             float contLum = max(contW.r, max(contW.g, contW.b));
@@ -236,7 +257,7 @@ void main() {
                                       canContinue ? 0.0 : -1.0, singleLight, singleWeight, bounceLod);
             local += screenIndirectAtHit(hit, hitPos, hitNorm, hitUv, curDir,
                                          max(throughput.r, max(throughput.g, throughput.b)), bounce < 2);
-            pathRadiance += throughput * local;
+            pathRadiance += throughput * clampFirefly(local, FIREFLY_CLAMP);
             if (!canContinue) break;
 
             if (infiniteBounces) {
@@ -250,17 +271,18 @@ void main() {
             }
 
             vec3 reflected = reflect(curDir, Nh);
-            vec3 tH, bH;
-            buildBasis(reflected, tH, bH);
-            vec2 diskH = sampleUniformDisk(rand2());
-            vec3 nextDir = hitRough < 0.02 ? reflected :
-                normalize(reflected + tH * diskH.x * hitRough * hitRough * 0.85 +
-                          bH * diskH.y * hitRough * hitRough * 0.85);
-            if (dot(nextDir, Nh) <= 0.0) nextDir = reflected;
-            curOrig = hitPos + Nh * 0.012;
+            vec3 nextDir;
+            if (hitRough < 0.02) {
+                nextDir = reflected;
+            } else {
+                vec3 H2 = sampleGGX(rand2(), Nh, hitRough);
+                nextDir = reflect(curDir, H2);
+                if (dot(nextDir, Nh) <= 0.0) nextDir = reflected;
+            }
+            curOrig = hitPos + Nh * (0.012 / max(dot(Nh, -curDir), 0.15));
             curDir = nextDir;
         }
-        accumulated += pathRadiance;
+        accumulated += clampFirefly(pathRadiance, FIREFLY_CLAMP);
     }
 
     imageStore(imgRefl, px, vec4(sanitizeHDR(accumulated / float(samples)), 1.0));

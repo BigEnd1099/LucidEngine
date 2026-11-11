@@ -618,8 +618,10 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             ImGui::Text("Refl Trace Pass:  %.3f ms", timings.reflTraceMs);
                             ImGui::Text("GI Temporal:      %.3f ms", timings.temporalMs);
                             ImGui::Text("Refl Temporal:    %.3f ms", timings.reflTemporalMs);
-                            ImGui::Text("Atrous Step 1:    %.3f ms", timings.atrous0Ms);
-                            ImGui::Text("Atrous Step 2:    %.3f ms", timings.atrous1Ms);
+                            ImGui::Text("Atrous Step 1 (s1): %.3f ms", timings.atrous0Ms);
+                            ImGui::Text("Atrous Step 2 (s2): %.3f ms", timings.atrous1Ms);
+                            ImGui::Text("Atrous Step 3 (s4): %.3f ms", timings.atrous2Ms);
+                            ImGui::Text("Atrous Step 4 (s8): %.3f ms", timings.atrous3Ms);
                             ImGui::Separator();
                             ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Total RT Compute: %.3f ms", timings.totalMs);
                             ImGui::TreePop();

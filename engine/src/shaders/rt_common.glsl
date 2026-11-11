@@ -128,6 +128,20 @@ vec2 sampleUniformDisk(vec2 u) {
     return vec2(cos(a), sin(a)) * r;
 }
 
+// Heitz 2014 Height-Correlated Smith GGX & NDF for ray query shading
+float rtDistributionGGX(float NdotH, float a) {
+    float a2 = a * a;
+    float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * d * d, 1e-12);
+}
+
+float rtVisibilitySmithGGXCorrelated(float NdotV, float NdotL, float a) {
+    float a2 = a * a;
+    float gv = NdotL * sqrt(max(NdotV * NdotV * (1.0 - a2) + a2, 1e-8));
+    float gl = NdotV * sqrt(max(NdotL * NdotL * (1.0 - a2) + a2, 1e-8));
+    return 0.5 / max(gv + gl, 1e-7);
+}
+
 // Firefly suppression: clamps the luminance of a single path sample.
 vec3 clampFirefly(vec3 c, float maxLum) {
     float l = max(max(c.r, c.g), c.b);
@@ -265,6 +279,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
 
     // Specular boost for directional bounce in diffuse GI to compensate for cosine sampling
     float giSpecBoost = isDiffuseGI ? mix(1.0, 2.5, metallic * (1.0 - rawRoughness)) : 1.0;
+    float directMetalBoost = mix(1.0, 4.0, metallic);
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float sunNdotL = max(dot(hitNormal, sunDir), 0.0);
@@ -275,14 +290,11 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float NdotH = max(dot(hitNormal, H), 0.0);
         float VdotH = max(dot(V, H), 0.0);
 
-        float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-        float D = a2 / max(PI * dDenom * dDenom, 1e-12);
-        float g1v = NdotV / (NdotV * (1.0 - k) + k);
-        float g1l = sunNdotL / (sunNdotL * (1.0 - k) + k);
-        float G = g1v * g1l;
+        float D = rtDistributionGGX(NdotH, a);
+        float Vis = rtVisibilitySmithGGXCorrelated(NdotV, sunNdotL, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * G * F) / max(4.0 * NdotV * sunNdotL, 0.001) * giSpecBoost;
+        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
     }
@@ -324,14 +336,11 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float NdotH = max(dot(hitNormal, H), 0.0);
         float VdotH = max(dot(V, H), 0.0);
 
-        float dDenom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-        float D = a2 / max(PI * dDenom * dDenom, 1e-12);
-        float g1v = NdotV / (NdotV * (1.0 - k) + k);
-        float g1l = ndotl / (ndotl * (1.0 - k) + k);
-        float G = g1v * g1l;
+        float D = rtDistributionGGX(NdotH, a);
+        float Vis = rtVisibilitySmithGGXCorrelated(NdotV, ndotl, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * G * F) / max(4.0 * NdotV * ndotl, 0.001) * giSpecBoost;
+        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.lightsCol[i].rgb *
                     (intensity * 4.0 * attenuation * ndotl * lightMultiplier);
@@ -345,12 +354,13 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         radiance += ambientKD * diffuse * ambientIBL;
 
         vec3 R = reflect(-V, hitNormal);
-        vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * (1.0 - rawRoughness);
-        float skyScale = (specSkyScale >= 0.0) ? specSkyScale : (isDiffuseGI ? 0.15 : 0.4);
+        float roughFade = mix(1.0 - rawRoughness * 0.5, 1.0, metallic);
+        vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * roughFade;
+        float skyScale = (specSkyScale >= 0.0) ? specSkyScale : (isDiffuseGI ? 0.25 : 1.0);
         radiance += specSky * skyScale;
     }
 
-    return sanitizeHDR(radiance);
+    return sanitizeHDR(clampFirefly(radiance, isDiffuseGI ? 16.0 : 32.0));
 }
 
 vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {

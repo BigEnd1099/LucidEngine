@@ -15,16 +15,30 @@
 
 
 // Pass 2/4: temporal accumulation with camera reprojection, motion vectors,
-
 // geometric history rejection, 3x3 neighborhood clamping, EMA, and SVGF moments.
-
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-
-
 #include "rt_common.glsl"
-
 #include "rt_screen.glsl"
+
+vec3 rgbToYCoCg(vec3 c) {
+    return vec3(
+         0.25 * c.r + 0.5 * c.g + 0.25 * c.b,
+         0.5  * c.r             - 0.5  * c.b,
+        -0.25 * c.r + 0.5 * c.g - 0.25 * c.b
+    );
+}
+
+vec3 yCoCgToRgb(vec3 c) {
+    float y  = c.x;
+    float co = c.y;
+    float cg = c.z;
+    return vec3(
+        y + co - cg,
+        y + cg,
+        y - co - cg
+    );
+}
 
 
 
@@ -103,98 +117,66 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     ivec2 fullDepthSize = textureSize(uDepth, 0).xy;
     ivec2 fullPx = min(ivec2(curUV * vec2(fullDepthSize)), fullDepthSize - 1);
     float d = texelFetch(uDepth, fullPx, 0).r;
+    float zC = rtLinearDepth(d);
 
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
-
-
+    vec3 toCam = ubo.cameraPos.xyz - P;
+    vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
+    float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
 
     vec4  hist = vec4(0.0);
-
     vec4  histMoments = vec4(0.0);
-
     float histLen = 0.0;
-
     float wSum = 0.0;
 
-
-
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
-
     ivec2 fullMotionPx = min(ivec2(curUV * vec2(fullMotionSize)), fullMotionSize - 1);
     vec2 motion = texelFetch(uMotion, fullMotionPx, 0).xy;
 
     vec4 pClip = pc.prevViewProj * vec4(P, 1.0);
-
     if (pc.f.z > 0.5) {
-
         vec2 prevUV = curUV - motion;
-
         if (dot(motion, motion) < 1e-9 && pClip.w > 1e-4) {
-
             prevUV = (pClip.xy / pClip.w) * 0.5 + 0.5;
-
         }
 
         vec2 prevPx = prevUV * size - 0.5;
-
         ivec2 base = ivec2(floor(prevPx));
-
         vec2 fr = prevPx - vec2(base);
 
+        // Slope-aware depth tolerance: grazing angles expand tolerance to prevent false history rejection
+        float depthTol = (0.04 * pClip.w + 0.01) / nDotV;
+
         for (int i = 0; i < 4; ++i) {
-
             ivec2 o = ivec2(i & 1, i >> 1);
-
             ivec2 tp = base + o;
-
             if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[3], 1u); continue; }
 
             vec4 g = imageLoad(imgGeomPrev, tp);
-
             if (g.z < 0.0) continue;
 
-            // Disocclusion tests: depth of the same surface point in the previous frame + normal.
-
-            if (abs(g.z - pClip.w) > 0.04 * pClip.w + 0.01) { atomicAdd(rtLocalCounters[4], 1u); continue; }
-
+            // Disocclusion tests: slope-adjusted depth + surface normal
+            if (abs(g.z - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[4], 1u); continue; }
             if (dot(rtOctDecode(g.xy), N) < 0.8) { atomicAdd(rtLocalCounters[5], 1u); continue; }
 
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
-
             hist        += w * imageLoad(imgHistPrev, tp);
-
             histMoments += w * imageLoad(imgMomentsPrev, tp);
-
             histLen     += w * g.w;
-
             wSum        += w;
-
         }
-
     }
 
-
-
     float maxHist = max(pc.f.x, 1.0);
-
     float spp = max(pc.f.y, 1.0);
-
     vec4 result;
-
     float newLen;
 
-
-
     float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
-
     vec2 curSampleMoments = vec2(rawLum, rawLum * rawLum);
-
     vec4 outMoments = vec4(0.0);
 
-
-
     bool isCheckerSkipped = (raw.a < -0.5);
-
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             atomicAdd(rtLocalCounters[6], 1u);
@@ -203,11 +185,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
-            newLen = min(histLen + spp, maxHist);
+            newLen = min(histLen + spp * 0.5, maxHist);
             outMoments = histMoments;
         } else {
             atomicAdd(rtLocalCounters[7], 1u);
-            // Disocclusion / invalid history: bilateral reconstruction from the 4 active neighbors
+            // Disocclusion / invalid history: bilateral reconstruction from the 4 active neighbors in current frame
             vec4 neighborSum = vec4(0.0);
             float weightSum = 0.0;
             const ivec2 offsets[4] = ivec2[](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
@@ -219,8 +201,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
                 vec4 nG = imageLoad(imgGeomCur, np);
                 if (nG.z < 0.0) continue;
-                float depthDiff = abs(nG.z - pClip.w);
-                if (depthDiff > 0.05 * pClip.w + 0.02) continue;
+                // Comparing neighbor depth to current pixel linear depth zC in current frame
+                float depthDiff = abs(nG.z - zC);
+                if (depthDiff > 0.05 * zC + 0.02) continue;
                 vec3 nNormal = rtOctDecode(nG.xy);
                 float normalDot = max(dot(nNormal, N), 0.0);
                 if (normalDot < 0.75) continue;
@@ -245,44 +228,73 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histMoments /= wSum;
             histLen /= wSum;
 
-            // 3x3 Neighborhood Clamping: limits reprojected history to current frame bounds
-            vec4 boxMin = raw;
-            vec4 boxMax = raw;
-            vec4 m1 = vec4(0.0);
-            vec4 m2 = vec4(0.0);
+            // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
+            vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
+            vec3 m1Y = vec3(0.0);
+            vec3 m2Y = vec3(0.0);
             float count = 0.0;
+            float aoMin = raw.a;
+            float aoMax = raw.a;
+
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue; // Exclude center pixel to prevent outlier self-contamination
                     ivec2 sp = px + ivec2(dx, dy);
                     if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
                     vec4 sVal = imageLoad(imgS, sp);
                     if (sVal.a < 0.0) continue; // Skip checkerboard-skipped neighbors
-                    boxMin = (count == 0.0) ? sVal : min(boxMin, sVal);
-                    boxMax = (count == 0.0) ? sVal : max(boxMax, sVal);
-                    m1 += sVal;
-                    m2 += sVal * sVal;
+                    vec3 sY = rgbToYCoCg(sVal.rgb);
+                    m1Y += sY;
+                    m2Y += sY * sY;
+                    aoMin = min(aoMin, sVal.a);
+                    aoMax = max(aoMax, sVal.a);
                     count += 1.0;
                 }
             }
-            if (count > 0.0) {
-                m1 /= count;
-                m2 /= count;
-                vec4 sigma = sqrt(max(vec4(0.0), m2 - m1 * m1));
-                vec4 clampMin = min(boxMin, m1 - 2.5 * sigma) - vec4(0.05);
-                vec4 clampMax = max(boxMax, m1 + 2.5 * sigma) + vec4(0.05);
-                hist = clamp(hist, clampMin, clampMax);
-            }
+            float spatialVar = 0.1;
+            if (count >= 2.0) {
+                m1Y /= count;
+                m2Y /= count;
+                vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
+                spatialVar = max(0.0, m2Y.x - m1Y.x * m1Y.x);
+                float gamma = 1.5 + 1.5 * clamp(histLen / 16.0, 0.0, 1.0);
 
-            // Firefly suppression: allow bright spotlight bounces without artificial dimming
-            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(60.0));
+                // Variance floor: prevent zero-clipping of weak indirect light in dark areas
+                vec3 effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
+                vec3 clampMinY = m1Y - gamma * effectiveSigma;
+                vec3 clampMaxY = m1Y + gamma * effectiveSigma;
+                clampMinY.x = max(0.0, clampMinY.x);
+                clampMaxY.x = max(clampMinY.x, clampMaxY.x);
+
+                vec3 histY = rgbToYCoCg(hist.rgb);
+                // When motion is minimal, relax upper clamp for diffuse GI to allow temporal accumulation
+                if (dot(motion, motion) < 1e-5) {
+                    clampMaxY = max(clampMaxY, histY);
+                }
+                histY = clamp(histY, clampMinY, clampMaxY);
+                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
+                hist.a = clamp(hist.a, aoMin, aoMax);
+
+                // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 3.0)
+                // so legitimate single-ray hits (0.1 to 2.5) in dark regions are never zero-clipped!
+                float fireflyThreshold = max(3.5 * sigmaY.x, 3.0);
+                if (rawYCoCg.x > m1Y.x + fireflyThreshold) {
+                    rawYCoCg.x = m1Y.x + fireflyThreshold;
+                    raw.rgb = max(vec3(0.0), yCoCgToRgb(rawYCoCg));
+                }
+            }
+            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(24.0));
+
             newLen = min(histLen + spp, maxHist);
             // Exponential Moving Average (EMA) with minimum blend factor so dynamic changes fade in a fraction of a second
             float alpha = clamp(spp / newLen, 0.001, 1.0);
             result = mix(hist, raw, alpha);
 
-            // SVGF moments accumulation
+            // SVGF moments accumulation: blend spatial and temporal variance when history is short (< 4 frames)
+            // to prevent variance starvation, edge-stopping collapse, and noisy boiling on disocclusions.
             vec2 accumulatedMoments = mix(histMoments.xy, curSampleMoments, alpha);
-            float variance = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
+            float temporalVar = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
+            float variance = (newLen < 4.0) ? mix(spatialVar, temporalVar, clamp((newLen - 1.0) / 3.0, 0.0, 1.0)) : temporalVar;
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
             atomicAdd(rtLocalCounters[2], 1u);

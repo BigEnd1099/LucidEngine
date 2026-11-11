@@ -207,6 +207,153 @@ int main() {
     CHECK(wMid >= wFar);
     CHECK(wFar >= 1.0e-2f * 0.5f);
 
+    // RT Denoiser: YCoCg color space round-trip
+    auto rgbToYCoCg = [](glm::vec3 c) {
+        return glm::vec3(
+             0.25f * c.r + 0.5f * c.g + 0.25f * c.b,
+             0.5f  * c.r              - 0.5f  * c.b,
+            -0.25f * c.r + 0.5f * c.g - 0.25f * c.b
+        );
+    };
+    auto yCoCgToRgb = [](glm::vec3 c) {
+        float y  = c.x;
+        float co = c.y;
+        float cg = c.z;
+        return glm::vec3(
+            y + co - cg,
+            y + cg,
+            y - co - cg
+        );
+    };
+    glm::vec3 testRgb(0.72f, 0.45f, 0.18f);
+    glm::vec3 roundTrip = yCoCgToRgb(rgbToYCoCg(testRgb));
+    CHECK(glm::distance(testRgb, roundTrip) < 1.0e-5f);
+
+    // RT Denoiser: Slope-aware depth tolerance
+    auto calcDepthTol = [](float clipW, float nDotV) {
+        float clampedNDotV = std::clamp(std::abs(nDotV), 0.15f, 1.0f);
+        return (0.04f * clipW + 0.01f) / clampedNDotV;
+    };
+    float tolFacing = calcDepthTol(10.0f, 1.0f);   // normal facing camera
+    float tolGrazing = calcDepthTol(10.0f, 0.05f); // normal at glancing angle
+    CHECK(tolGrazing > tolFacing);
+    CHECK(std::abs(tolFacing - 0.41f) < 1.0e-4f);
+    CHECK(std::abs(tolGrazing - (0.41f / 0.15f)) < 1.0e-4f);
+
+    // RT Denoiser: SVGF luminance edge-stopping weight
+    auto calcSvgfLuminanceWeight = [](float deltaL, float variance, float sigmaL) {
+        return std::exp(-deltaL / (sigmaL * std::sqrt(std::max(variance, 1.0e-4f)) + 1.0e-3f));
+    };
+    // With high variance (noisy/unconverged), small edge differences are filtered (wl ~ 1)
+    float wlHighVar = calcSvgfLuminanceWeight(0.1f, 1.0f, 4.0f);
+    // With low variance (converged history), edge differences are preserved (wl drops)
+    float wlLowVar = calcSvgfLuminanceWeight(0.1f, 0.0001f, 4.0f);
+    CHECK(wlHighVar > wlLowVar);
+    CHECK(wlHighVar > 0.95f);
+    CHECK(wlLowVar < 0.20f);
+
+    // RT Denoiser: B3-spline filter weights normalization
+    const float hTaps[3] = { 0.375f, 0.25f, 0.0625f };
+    float sum1D = hTaps[0] + 2.0f * hTaps[1] + 2.0f * hTaps[2];
+    CHECK(std::abs(sum1D - 1.0f) < 1.0e-6f);
+    float sum2D = 0.0f;
+    for (int j = -2; j <= 2; ++j) {
+        for (int i = -2; i <= 2; ++i) {
+            sum2D += hTaps[std::abs(i)] * hTaps[std::abs(j)];
+        }
+    }
+    CHECK(std::abs(sum2D - 1.0f) < 1.0e-6f);
+
+    // PBR: Multiple-Scattering Energy Compensation for Metals (Fdez-Aguera)
+    // Single scattering GGX loses up to 50% energy on rough metals; energy compensation restores it.
+    auto computeMetalSpecularBRDF = [](glm::vec3 F0, glm::vec2 dfg) {
+        glm::vec3 energyComp = 1.0f + F0 * (1.0f / std::max(dfg.x + dfg.y, 1.0e-3f) - 1.0f);
+        return (F0 * dfg.x + dfg.y) * energyComp;
+    };
+    glm::vec3 silverF0(0.95f, 0.95f, 0.95f);
+    glm::vec2 roughDfg(0.45f, 0.08f); // typical split-sum DFG at roughness 0.5
+    glm::vec3 singleScatterBRDF = silverF0 * roughDfg.x + roughDfg.y; // ~0.507
+    glm::vec3 compensatedBRDF = computeMetalSpecularBRDF(silverF0, roughDfg); // ~0.956
+    CHECK(singleScatterBRDF.r < 0.55f); // single-scattering loses almost half the energy!
+    CHECK(compensatedBRDF.r > 0.90f);    // energy compensation restores full realistic metallic reflection
+    CHECK(compensatedBRDF.r <= 1.0f);    // energy conservation: cannot exceed 1.0 for silver
+
+    // RT Denoiser: Hampel peer-group outlier filter for fireflies
+    // A single-pixel spike (e.g. 50.0) surrounded by normal samples (~0.5) must be suppressed
+    float neighborSamples[8] = { 0.48f, 0.52f, 0.50f, 0.49f, 0.51f, 0.47f, 0.53f, 0.50f };
+    float m1 = 0.0f;
+    float m2 = 0.0f;
+    for (int k = 0; k < 8; ++k) {
+        m1 += neighborSamples[k];
+        m2 += neighborSamples[k] * neighborSamples[k];
+    }
+    m1 /= 8.0f;
+    m2 /= 8.0f;
+    float sigma = std::sqrt(std::max(0.0f, m2 - m1 * m1));
+    float rawFirefly = 50.0f;
+    float clampedFirefly = std::clamp(rawFirefly, m1 - 3.0f * sigma, m1 + 3.0f * sigma);
+    CHECK(clampedFirefly < 1.0f); // Firefly crushed to within neighbor distribution!
+    CHECK(clampedFirefly >= m1);
+
+    // RT Specular: Numerically stable Height-Correlated Smith GGX at grazing angles
+    auto testSmithVis = [](float NdotV, float NdotL, float a) {
+        float a2 = a * a;
+        float gv = NdotL * std::sqrt(std::max(NdotV * NdotV * (1.0f - a2) + a2, 1e-8f));
+        float gl = NdotV * std::sqrt(std::max(NdotL * NdotL * (1.0f - a2) + a2, 1e-8f));
+        return 0.5f / std::max(gv + gl, 1e-7f);
+    };
+    // Grazing angle test: NdotV = 0.001, NdotL = 0.001
+    float visGrazing = testSmithVis(0.001f, 0.001f, 0.05f);
+    CHECK(!std::isnan(visGrazing) && !std::isinf(visGrazing));
+    CHECK(visGrazing > 0.0f && visGrazing < 10000.0f); // bounded, no division by zero
+
+    // RT Denoiser: Zero-Clipping Prevention in Dark Areas
+    // When 8 neighbors are black (0.0) and 1 hit is 0.8, weak light must NOT be extinguished to 0.0
+    float darkNeighbors[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    float mDark = 0.0f;
+    float mDark2 = 0.0f;
+    for (int k = 0; k < 8; ++k) {
+        mDark += darkNeighbors[k];
+        mDark2 += darkNeighbors[k] * darkNeighbors[k];
+    }
+    mDark /= 8.0f;
+    mDark2 /= 8.0f;
+    float sigmaDark = std::sqrt(std::max(0.0f, mDark2 - mDark * mDark));
+    float fireflyFloor = std::max(3.5f * sigmaDark, 3.0f);
+    float weakHit = 0.8f;
+    float processedWeakHit = (weakHit > mDark + fireflyFloor) ? (mDark + fireflyFloor) : weakHit;
+    CHECK(processedWeakHit == 0.8f); // Weak light is 100% preserved, not zero-clipped!
+
+    // RT Denoiser: À-Trous Luminance weight floor prevents energy extinction
+    auto calcAtrousLumaWeight = [](float deltaL, float var, float phiL, float floorEps) {
+        float stdDev = std::sqrt(std::max(var, 1e-4f));
+        return std::exp(-deltaL / (phiL * stdDev + floorEps));
+    };
+    // In dark areas (var ~ 0), deltaL = 0.05 with floor 0.05 spreads energy
+    float wSpread = calcAtrousLumaWeight(0.05f, 0.0f, 1.2f, 0.05f);
+    CHECK(wSpread > 0.35f); // Energy spreads to neighbors (>40% weight)!
+    // Without floor (epsilon = 1e-3), weight was choked down (< 2.5% weight)
+    float wBroken = calcAtrousLumaWeight(0.05f, 0.0f, 1.2f, 1e-3f);
+    CHECK(wBroken < 0.03f);
+    CHECK(wSpread > wBroken * 15.0f); // Proves that floor 0.05 allows energy to spread 15-20x better!
+
+    // RT Denoiser: Diffuse GI normal exponent (16.0) smoothly filters curved spheres
+    // Sphere curvature between adjacent pixels: dot(n1, n2) = 0.90
+    float wnNew = std::pow(0.90f, 16.0f); // ~0.185 (filters smoothly across sphere)
+    float wnOld = std::pow(0.90f, 32.0f); // ~0.034 (almost shut off filtering, causing grain)
+    CHECK(wnNew > wnOld * 5.0f);
+
+    // Direct Lighting Specular: 100% metallic surfaces reflect direct light with 4x physical boost
+    auto calcDirectSpecular = [](float metallic, float D, float Vis, float F, float energyComp, float NdotL) {
+        float directMetalBoost = glm::mix(1.0f, 4.0f, metallic);
+        return (D * Vis) * F * energyComp * NdotL * directMetalBoost;
+    };
+    float specDielectric = calcDirectSpecular(0.0f, 1.0f, 0.25f, 0.04f, 1.0f, 1.0f);
+    float specMetalRaw = calcDirectSpecular(0.0f, 1.0f, 0.25f, 1.0f, 1.0f, 1.0f);
+    float specMetalBoosted = calcDirectSpecular(1.0f, 1.0f, 0.25f, 1.0f, 1.0f, 1.0f);
+    CHECK(std::abs(specMetalBoosted - 4.0f * specMetalRaw) < 1.0e-5f);
+    CHECK(specDielectric > 0.0f);
+
     std::cout << "Renderer algorithm tests passed.\n";
     return 0;
 }

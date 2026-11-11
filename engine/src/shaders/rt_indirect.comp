@@ -28,7 +28,7 @@ uvec4 u; // x=samples, y=frame, z=flags (bit0 GI, bit1 AO), w=max bounces
 } pc;
 
 const float AO_DISTANCE = 1.75;
-const float MAX_RAY_DIST = 20.0;
+const float MAX_RAY_DIST = 200.0;
 const float FIREFLY_CLAMP = 24.0;
 const int MAX_BOUNCES = 15;
 
@@ -131,7 +131,8 @@ if (checkerSkip) {
 int samples = baseSamples;
 
 rngInit(uvec2(px), frame);
-vec2 shift = hash2(uvec2(px));
+// Spatiotemporal Blue Noise (STBN) approximation via interleaved gradient noise + golden ratio
+float ign = fract(52.9829189 * fract(dot(vec2(px) + float(frame % 64u) * vec2(5.588238, 5.588238), vec2(0.06711056, 0.00583715))));
 const vec2 R2 = vec2(0.75487766624669276, 0.56984029099805327);
 float bias = 0.010 + 0.0006 * length(toCam);
 vec3 origin = P + N * bias;
@@ -140,8 +141,7 @@ vec3 gi = vec3(0.0);
 float occ = 0.0;
 
 for (int s = 0; s < samples; ++s) {
-    uint idx = (frame * uint(samples) + uint(s)) & 1023u;
-    vec2 u0 = fract(shift + float(idx) * R2);
+    vec2 u0 = fract(vec2(ign, fract(ign * 1.61803398875)) + float(s) * R2);
 
     // This pass owns diffuse indirect lighting and AO only. Specular RT
     // reflections are evaluated independently by rt_reflections.comp and

@@ -14,11 +14,31 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
+layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
 layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
 layout(set = 1, binding = 11, rgba16f) uniform image2D imgReflHistPrev;
 layout(set = 1, binding = 12) uniform sampler2D uMotion;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
+
+vec3 rgbToYCoCg(vec3 c) {
+    return vec3(
+         0.25 * c.r + 0.5 * c.g + 0.25 * c.b,
+         0.5  * c.r             - 0.5  * c.b,
+        -0.25 * c.r + 0.5 * c.g - 0.25 * c.b
+    );
+}
+
+vec3 yCoCgToRgb(vec3 c) {
+    float y  = c.x;
+    float co = c.y;
+    float cg = c.z;
+    return vec3(
+        y + co - cg,
+        y + cg,
+        y - co - cg
+    );
+}
 
 layout(push_constant) uniform PC {
     mat4 prevViewProj;
@@ -62,6 +82,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec3 N = rtOctDecode(geom.xy);
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    vec3 toCam = ubo.cameraPos.xyz - P;
+    vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
+    float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
+    float roughness = clamp(texelFetch(uGNormalRoughness, px, 0).w, 0.0, 1.0);
 
     vec4 hist = vec4(0.0);
     float wSum = 0.0;
@@ -77,6 +101,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         vec2 prevPx = prevUV * size - 0.5;
         ivec2 base = ivec2(floor(prevPx));
         vec2 fr = prevPx - vec2(base);
+
+        // Slope-aware depth tolerance for reflections
+        float depthTol = (0.03 * pClip.w + 0.01) / nDotV;
+
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
@@ -85,7 +113,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             ivec2 geomTp = clamp(ivec2(((vec2(tp) + 0.5) / size) * vec2(geomPrevSize)), ivec2(0), geomPrevSize - 1);
             vec4 g = imageLoad(imgGeomPrev, geomTp);
             if (g.z < 0.0) continue;
-            if (abs(g.z - pClip.w) > 0.03 * pClip.w + 0.01) { atomicAdd(rtLocalCounters[12], 1u); continue; }
+            if (abs(g.z - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[12], 1u); continue; }
             if (dot(rtOctDecode(g.xy), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist += w * imageLoad(imgReflHistPrev, tp);
@@ -107,9 +135,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             historyAge = hist.a / wSum;
         } else {
             atomicAdd(rtLocalCounters[15], 1u);
-            // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors
+            // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors with linear depth
             vec3 neighborSum = vec3(0.0);
             float weightSum = 0.0;
+            float linDepth = rtLinearDepth(d);
             const ivec2 offsets[4] = ivec2[](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
             for (int i = 0; i < 4; ++i) {
                 ivec2 np = px + offsets[i];
@@ -118,8 +147,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 if (nVal.a < 0.5) continue;
 
                 float nDepth = texelFetch(uDepth, np, 0).r;
-                float depthDiff = abs(nDepth - d);
-                if (depthDiff > 0.005 * (1.0 + d * 10.0)) continue;
+                float depthDiff = abs(rtLinearDepth(nDepth) - linDepth);
+                if (depthDiff > 0.04 * linDepth + 0.02) continue;
 
                 ivec2 nGeomPx = clamp(ivec2(((vec2(np) + 0.5) / size) * vec2(geomCurSize)), ivec2(0), geomCurSize - 1);
                 vec4 nGeom = imageLoad(imgGeomCur, nGeomPx);
@@ -127,7 +156,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 float normalDot = max(dot(nNormal, N), 0.0);
                 if (normalDot < 0.75) continue;
 
-                float w = normalDot / (1.0 + depthDiff * 100.0);
+                float w = normalDot / (1.0 + depthDiff * 50.0);
                 neighborSum += nVal.rgb * w;
                 weightSum += w;
             }
@@ -136,47 +165,60 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             } else {
                 result = vec4(0.0);
             }
-            // Checkerboard reconstruction has no new ray sample; preserve age only when history was accepted.
         }
     } else {
         if (wSum > 0.05) {
             atomicAdd(rtLocalCounters[9], 1u);
             hist /= wSum;
 
-            // 3x3 Neighborhood Clamping for specular reflections
-            vec4 boxMin = raw;
-            vec4 boxMax = raw;
-            vec4 m1 = vec4(0.0);
-            vec4 m2 = vec4(0.0);
+            // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg for specular reflections
+            vec3 rawY = rgbToYCoCg(raw.rgb);
+            vec3 m1Y = vec3(0.0);
+            vec3 m2Y = vec3(0.0);
             float count = 0.0;
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue; // Exclude center to avoid firefly self-contamination
                     ivec2 sp = px + ivec2(dx, dy);
                     if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
                     vec4 sVal = imageLoad(imgRefl, sp);
                     if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
-                    boxMin = (count == 0.0) ? sVal : min(boxMin, sVal);
-                    boxMax = (count == 0.0) ? sVal : max(boxMax, sVal);
-                    m1 += sVal;
-                    m2 += sVal * sVal;
+                    vec3 sY = rgbToYCoCg(sVal.rgb);
+                    m1Y += sY;
+                    m2Y += sY * sY;
                     count += 1.0;
                 }
             }
-            if (count > 0.0) {
-                m1 /= count;
-                m2 /= count;
-                vec4 sigma = sqrt(max(vec4(0.0), m2 - m1 * m1));
-                vec4 clampMin = min(boxMin, m1 - 2.5 * sigma) - vec4(0.05);
-                vec4 clampMax = max(boxMax, m1 + 2.5 * sigma) + vec4(0.05);
-                hist = clamp(hist, clampMin, clampMax);
+            if (count >= 2.0) {
+                m1Y /= count;
+                m2Y /= count;
+                vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
+                float gamma = 1.5 + 1.5 * clamp(hist.a / 16.0, 0.0, 1.0);
+
+                // Variance floor: prevent zero-clipping of weak reflections in dark areas
+                vec3 effectiveSigma = max(sigmaY, vec3(0.06, 0.03, 0.03));
+                vec3 clampMinY = m1Y - gamma * effectiveSigma;
+                vec3 clampMaxY = m1Y + gamma * effectiveSigma;
+                clampMinY.x = max(0.0, clampMinY.x);
+                clampMaxY.x = max(clampMinY.x, clampMaxY.x);
+
+                vec3 histY = rgbToYCoCg(hist.rgb);
+                histY = clamp(histY, clampMinY, clampMaxY);
+                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
+
+                // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 3.5)
+                float fireflyThreshold = max(3.5 * sigmaY.x, 3.5);
+                if (rawY.x > m1Y.x + fireflyThreshold) {
+                    rawY.x = m1Y.x + fireflyThreshold;
+                    raw.rgb = max(vec3(0.0), yCoCgToRgb(rawY));
+                }
             }
 
-            // Firefly suppression on specular hits
-            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(100.0));
-            // Accumulation factor (keep ~85% history for smooth specular without excessive lag)
-            float alpha = (pc.f.z > 0.5) ? clamp(4.0 / max(pc.f.x, 1.0), 0.03, 0.15) : 1.0;
-            result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
+            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(32.0));
             historyAge = min(hist.a + sampleCount, maxHistory);
+            float minAlpha = 1.0 / maxHistory;
+            float alpha = (pc.f.z > 0.5) ? clamp(sampleCount / historyAge, minAlpha, 1.0) : 1.0;
+            result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
         } else {
             atomicAdd(rtLocalCounters[10], 1u);
             result = raw;

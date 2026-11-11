@@ -651,6 +651,8 @@ namespace engine::renderer {
                 metric("Reflection LOD bias", metrics.value("rtReflectionLodBias", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("Infinite reflection bounces", metrics.value("rtReflectionInfiniteBounces", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 metric("RT debug mode ID", metrics.value("rtDebugMode", 0.0), "");
+                metric("Atrous Step 3 (s4)", metrics.value("rtGiAtrous2Ms", 0.0), "ms");
+                metric("Atrous Step 4 (s8)", metrics.value("rtGiAtrous3Ms", 0.0), "ms");
                 ImGui::EndTable();
             }
 

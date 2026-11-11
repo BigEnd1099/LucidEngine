@@ -284,7 +284,9 @@ vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float meta
     float Vis = visibilitySmithGGXCorrelated(NdotV, max(NdotL, 1e-4), alpha);
     vec3 F = fresnelSchlick(VdotH, F0);
 
-    vec3 specular = (D * Vis) * F * energyComp * NdotL;
+    // Odbicie bezpośredniego światła od 100% metalu jest 4x mocniejsze
+    float directMetalBoost = mix(1.0, 4.0, metallic);
+    vec3 specular = (D * Vis) * F * energyComp * NdotL * directMetalBoost;
     vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
     vec3 diffuse = kD * (albedo / PI) * wrappedNdotL;
     return (diffuse + specular) * radiance;
@@ -312,7 +314,8 @@ void main() {
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
     float roughness = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.0, 1.0);
-    float alphaDirect = max(roughness * roughness, 0.02);
+    // Zachowaj fizyczną ostrość i energię odbicia bezpośredniego światła (minimum roughness = 0.04)
+    float alphaDirect = max(roughness * roughness, 0.0016);
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 

@@ -49,6 +49,8 @@ namespace engine::renderer {
             float temporalMs{0.0f};
             float atrous0Ms{0.0f};
             float atrous1Ms{0.0f};
+            float atrous2Ms{0.0f};
+            float atrous3Ms{0.0f};
             float reflTraceMs{0.0f};
             float reflTemporalMs{0.0f};
             float totalMs{0.0f};
@@ -140,7 +142,7 @@ namespace engine::renderer {
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_tracePipelineHandle{VK_NULL_HANDLE};
         VkPipeline m_temporalPipeline{VK_NULL_HANDLE};
-        std::array<VkPipeline, 2> m_atrousPipelines{};
+        std::array<VkPipeline, 4> m_atrousPipelines{};
         VkPipeline m_reflPipeline{VK_NULL_HANDLE};
         VkPipeline m_reflTemporalPipeline{VK_NULL_HANDLE};
 
