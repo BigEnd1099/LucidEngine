@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 namespace engine::core {
-    class MeshAsset;
+    struct MeshAsset;
 }
 
 namespace engine::renderer {
