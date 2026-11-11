@@ -53,7 +53,6 @@ namespace engine::world {
         if (!registry) return;
 
         CellCoord camCell = toCellCoord(cameraPos);
-        int cellRadius = static_cast<int>(std::ceil(m_streamRadius / m_cellSize));
 
         for (auto& [coord, cell] : m_cells) {
             float dx = (coord.x - camCell.x) * m_cellSize;

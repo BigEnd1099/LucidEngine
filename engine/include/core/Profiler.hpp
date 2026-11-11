@@ -88,4 +88,7 @@ namespace engine::core {
 
 }
 
-#define LUCID_PROFILE_SCOPE(name) engine::core::Profiler::ScopedSample _profilerSample##__LINE__(name)
+#define LUCID_DETAIL_CONCAT_INNER(a, b) a##b
+#define LUCID_DETAIL_CONCAT(a, b) LUCID_DETAIL_CONCAT_INNER(a, b)
+#define LUCID_PROFILE_SCOPE(name) \
+    ::engine::core::Profiler::ScopedSample LUCID_DETAIL_CONCAT(_profilerSample_, __LINE__)(name)

@@ -135,7 +135,7 @@ namespace engine::network {
         return delta;
     }
 
-    void ReplicationGraph::prioritizeEntities(ecs::Registry& registry, const glm::vec3& observerPos) {
+    void ReplicationGraph::prioritizeEntities(ecs::Registry&, const glm::vec3&) {
         // Spatial importance sorting for network bandwidth optimization
     }
 

@@ -2,15 +2,20 @@
 #include "animation/SkeletonStream.hpp"
 #include "core/Engine.hpp"
 #include "core/Logger.hpp"
+#include <limits>
 
 namespace engine::network {
 
     UdpAnimationServer::UdpAnimationServer(int port, core::ThreadQueue<JsonRpcDispatcher::Command>& queue)
         : m_socket(m_ioContext), m_queue(queue) {
+        if (port < 0 || port > static_cast<int>(std::numeric_limits<asio::ip::port_type>::max())) {
+            core::Logger::warn("UDP Animation Server: port is outside the valid UDP port range");
+            return;
+        }
         try {
             m_socket.open(asio::ip::udp::v4());
             m_socket.set_option(asio::socket_base::reuse_address(true));
-            m_socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), port));
+            m_socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), static_cast<asio::ip::port_type>(port)));
         } catch (const std::exception& e) {
             core::Logger::warn(std::string("UDP Animation Server bind warning (port ") + std::to_string(port) + "): " + e.what());
         }

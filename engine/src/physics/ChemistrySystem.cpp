@@ -14,7 +14,6 @@ namespace engine::physics {
         // 1. Process individual thermodynamic states
         for (auto entity : view) {
             auto& chem = view.get<ecs::ChemistryComponent>(entity);
-            auto& transform = view.get<ecs::TransformComponent>(entity);
 
             // Ambient temperature regulation (returns towards 20°C slowly)
             if (!chem.isBurning) {

@@ -98,7 +98,7 @@ namespace engine::anim {
         return bestIdx;
     }
 
-    void MotionMatching::update(ecs::Registry& registry, physics::PhysicsContext* physics, float dt) {
+    void MotionMatching::update(ecs::Registry& registry, physics::PhysicsContext*, float dt) {
         auto& reg = registry.get();
         auto view = reg.view<ecs::IKFootPlacementComponent, ecs::TransformComponent>();
 

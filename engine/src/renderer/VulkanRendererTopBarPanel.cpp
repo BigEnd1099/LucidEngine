@@ -5,6 +5,7 @@
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
 #include <cmath>
+#include <cctype>
 #include <cstdio>
 #ifdef USE_GLFW
 #include "imgui.h"
@@ -191,7 +192,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                 const std::string curPreset = engine ? engine->getCurrentPreset() : "empty";
                 std::string sceneDisplayName = curPreset;
                 if (sceneDisplayName == "empty") sceneDisplayName = "CzystyPoziom";
-                else if (!sceneDisplayName.empty()) sceneDisplayName[0] = std::toupper(sceneDisplayName[0]);
+                else if (!sceneDisplayName.empty()) sceneDisplayName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(sceneDisplayName[0])));
                 std::string tabBtnLabel = "    " + sceneDisplayName + ".scene  (Poziom glowny) ";
 
                 ImVec2 tabStart = ImGui::GetCursorScreenPos();
