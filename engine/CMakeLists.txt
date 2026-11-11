@@ -17,6 +17,12 @@ endif()
 
 project(LucidEngine CXX)
 
+# Keep MSVC Release optimization while avoiding CMake /Ob2 conflicting with fastgltf /Ob3 (D9025).
+if(MSVC)
+    string(REPLACE "/Ob2" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+    string(REPLACE "/Ob2" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+endif()
+
 # The MSVC runtime is selected above; compiler options are scoped to Lucid targets below.
 
 # GLM configuration macros are applied to Lucid targets only, not every fetched dependency.
@@ -76,10 +82,11 @@ FetchContent_Declare(qjs URL https://github.com/quickjs-ng/quickjs/archive/refs/
 FetchContent_MakeAvailable(qjs)
 
 if(MSVC)
-    foreach(qjs_target qjs qjsc qjs_exe run-test262 test_conv function_source)
-        if(TARGET ${qjs_target})
-            target_compile_options(${qjs_target} PRIVATE /w)
-        endif()
+    # QuickJS-ng emits known C4701/C4702 diagnostics in its upstream C sources.
+    # Suppress only those IDs on those source files; keep warnings enabled elsewhere.
+    foreach(qjs_source quickjs.c quickjs-libc.c qjsc.c)
+        set_source_files_properties(${qjs_SOURCE_DIR}/${qjs_source}
+            PROPERTIES COMPILE_OPTIONS "/wd4701;/wd4702")
     endforeach()
 endif()
 
@@ -241,6 +248,8 @@ target_include_directories(engine PRIVATE ${vma_SOURCE_DIR}/include)
 target_include_directories(engine PRIVATE ${jolt_SOURCE_DIR})
 target_include_directories(engine PRIVATE ${asio_SOURCE_DIR}/asio/include)
 target_include_directories(engine PRIVATE ${qjs_SOURCE_DIR})
+# Treat fastgltf headers as third-party system headers for MSVC diagnostics.
+target_include_directories(engine SYSTEM PRIVATE ${fastgltf_SOURCE_DIR}/include)
 target_include_directories(engine PRIVATE ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_compile_definitions(engine PRIVATE ASIO_STANDALONE USE_GLFW)
 if(WIN32)
