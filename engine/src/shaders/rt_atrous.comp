@@ -109,9 +109,7 @@ void main() {
     vec3 nCv = mat3(ubo.view) * nC;
     vec3 pCv = rtViewPosFromLinear(vec2(px) + 0.5, gC.z, size);
     float depthTol = 0.005 * gC.z + 0.002;
-    // Keep the final coarse pass local: the old 1/2/4/8 cascade spread
-    // a single bright sample across a very large footprint in half-res GI.
-    const int step = (PASS == 3) ? 4 : (1 << PASS);
+    const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
 
     vec4 momC = imageLoad(imgMomentsCur, px);
