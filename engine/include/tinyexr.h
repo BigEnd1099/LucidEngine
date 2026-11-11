@@ -603,7 +603,8 @@ extern int LoadEXRFromMemory(float **out_rgba, int *width, int *height,
 #ifdef TINYEXR_IMPLEMENTATION
 #ifndef TINYEXR_IMPLEMENTATION_DEFINED
 #ifdef _MSC_VER
-#pragma warning(push, 0)
+#pragma warning(push)
+#pragma warning(disable: 4702)
 #endif
 #define TINYEXR_IMPLEMENTATION_DEFINED
 

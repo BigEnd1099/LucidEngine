@@ -92,7 +92,9 @@ if(MSVC)
     endforeach()
     foreach(qjs_target qjs qjsc qjs_exe run-test262 test_conv function_source)
         if(TARGET ${qjs_target})
-            target_compile_options(${qjs_target} PRIVATE /wd4701 /wd4702)
+            # QuickJS is vendored third-party C code. Keep its diagnostics from
+            # polluting the engine build without weakening warnings in our code.
+            target_compile_options(${qjs_target} PRIVATE /w)
         endif()
     endforeach()
 endif()
