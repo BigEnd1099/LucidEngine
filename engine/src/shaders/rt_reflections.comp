@@ -105,7 +105,8 @@ void main() {
     if (roughness > RT_REFL_MAX_ROUGHNESS) { imageStore(imgRefl, px, vec4(0.0)); return; }
 
     bool useCheckerboard     = (pc.u.w & 0x00000100u) != 0u;
-    bool useStochasticLights = (pc.u.w & 0x00000200u) != 0u;
+    bool useStochasticLights = (pc.u.w & 0x00000200u) != 0u; // Secondary reflection bounces
+    bool usePrimaryStochasticLights = (pc.u.w & 0x00001000u) != 0u; // Optional PR #49 primary-hit optimization
     bool useLodBias          = (pc.u.w & 0x00000400u) != 0u;
     bool useHalfRes          = (pc.u.w & 0x00000800u) != 0u;
 
@@ -220,10 +221,13 @@ void main() {
 
             int singleLight = -1;
             float singleWeight = 1.0;
-            if (useStochasticLights && numActiveLights > 0) {
+            const bool useSingleLightForHit = (bounce == 0)
+                ? usePrimaryStochasticLights
+                : useStochasticLights;
+            if (useSingleLightForHit && numActiveLights > 0) {
                 // Uniform one-light sampling is an unbiased estimator of the full local-light sum.
-                // Apply it to the first reflection hit too: evaluating every local-light shadow ray
-                // for every primary reflection sample is the dominant avoidable ray-query multiplier.
+                // Primary-hit sampling is independently optional because it trades lower query cost
+                // for increased per-sample variance on the most visible reflection contribution.
                 singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
                 singleWeight = float(numActiveLights);
             }
