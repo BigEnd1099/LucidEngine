@@ -210,7 +210,7 @@ void main() {
                 if (tHit <= 0.0 || tHit >= closestBulbDist) continue;
                 if (!rayQueryOccluded(curOrig, curDir, max(0.001, tHit - 0.02))) {
                     closestBulbDist = tHit;
-                    bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0 * coneFade);
+                    bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0);
                     hitBulb = true;
                 }
             }
