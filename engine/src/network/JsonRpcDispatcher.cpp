@@ -935,6 +935,7 @@ namespace engine::network {
                     setBool(quality, "svgfEnabled", rt.svgfEnabled);
                     setBool(quality, "reflectionCheckerboard", rt.reflectionCheckerboard);
                     setBool(quality, "reflectionStochasticLights", rt.reflectionStochasticLights);
+                    setBool(quality, "reflectionPrimaryStochasticLights", rt.reflectionPrimaryStochasticLights);
                     setBool(quality, "reflectionLodBias", rt.reflectionLodBias);
                     setBool(quality, "reflectionHalfRes", rt.reflectionHalfRes);
                     setInt(quality, "giSamples", rt.giSamples, 1, 16);
@@ -966,6 +967,7 @@ namespace engine::network {
                         {"denoiseEnabled", rt.denoiseEnabled}, {"svgfEnabled", rt.svgfEnabled},
                         {"reflectionCheckerboard", rt.reflectionCheckerboard},
                         {"reflectionStochasticLights", rt.reflectionStochasticLights},
+                        {"reflectionPrimaryStochasticLights", rt.reflectionPrimaryStochasticLights},
                         {"reflectionLodBias", rt.reflectionLodBias},
                         {"reflectionHalfRes", rt.reflectionHalfRes},
                         {"debugMode", static_cast<uint32_t>(rt.debugMode)}
