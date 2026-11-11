@@ -35,7 +35,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     if (engine && !s_scriptInit) {
                         s_scriptInit = true;
                         const std::string code = engine->getCurrentScript();
-                        std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
+                        std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", code.c_str());
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = false;
                     }
@@ -65,7 +65,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_rotation", " Template: Rotation "))) {
                         std::string tpl = "// QuickJS Live Script: Rotacja i animacja obiektu\nlet angle = 0;\nexport function update(dt) {\n    angle += dt * 45.0;\n    console.log('[QuickJS] Kat rotacji: ' + angle.toFixed(1));\n}\n";
-                        std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
+                        std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", tpl.c_str());
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = true;
                         s_scriptLastRunOk = true;
@@ -332,7 +332,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         static bool s_projBufInit = false;
                         if (!s_projBufInit) {
                             s_projBufInit = true;
-                            std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
+                            std::snprintf(projPathBuf, sizeof(projPathBuf), "%s", pref.lastProjectPath.c_str());
                         }
                         const bool projectPathEdited = ImGui::InputText(editorText("settings.last_project", "Last Project"), projPathBuf, sizeof(projPathBuf));
                         if (projectPathEdited) {
