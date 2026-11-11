@@ -38,7 +38,8 @@ namespace engine::renderer {
 
         // 4 RT Reflection Optimization Variants:
         bool reflectionCheckerboard{true};      // Variant 1: Roughness-adaptive checkerboard (roughness > 0.25)
-        bool reflectionStochasticLights{true};  // Variant 2: Stochastic 1-light direct illumination on bounce >= 1
+        bool reflectionStochasticLights{true};  // Variant 2: Stochastic 1-light direct illumination on secondary bounces
+        bool reflectionPrimaryStochasticLights{false}; // Optional PR #49 optimization for the primary reflection hit
         bool reflectionLodBias{true};           // Variant 3: Mip LOD bias increasing with bounce depth
         bool reflectionHalfRes{false};          // Variant 4: Global half-resolution reflections with bilateral filter
     };
