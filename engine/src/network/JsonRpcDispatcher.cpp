@@ -1,4 +1,6 @@
 #include "network/JsonRpcDispatcher.hpp"
+#include "network/McpToolsetRegistry.hpp"
+#include "network/McpKnowledgeBase.hpp"
 #include <algorithm>
 #include "core/Engine.hpp"
 #include "core/Logger.hpp"
@@ -13,6 +15,49 @@ namespace engine::network {
 
             std::string method = json["method"];
             auto id = json.contains("id") ? json["id"] : nlohmann::json();
+
+            // 0. Extract AgentAccessTier for MCP tools & security enforcement
+            mcp::AgentAccessTier clientTier = mcp::AgentAccessTier::LiveEdit;
+            if (json.contains("tier")) {
+                clientTier = mcp::parseAgentAccessTier(json["tier"].is_string() ? json["tier"].get<std::string>() : std::to_string(json["tier"].get<int>()));
+            } else if (json.contains("params") && json["params"].is_object() && json["params"].contains("tier")) {
+                clientTier = mcp::parseAgentAccessTier(json["params"]["tier"].is_string() ? json["params"]["tier"].get<std::string>() : std::to_string(json["params"]["tier"].get<int>()));
+            }
+
+            auto& mcpRegistry = mcp::McpToolsetRegistry::get();
+            if (mcpRegistry.hasTool(method)) {
+                const auto* tool = mcpRegistry.getTool(method);
+                if (tool && static_cast<uint8_t>(clientTier) < static_cast<uint8_t>(tool->requiredTier)) {
+                    // Deterministic immediate rejection (< 0.5 ms) without queuing
+                    nlohmann::json err = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"error", {
+                            {"code", -32001},
+                            {"message", std::string("Permission Denied: Tool '") + method + "' requires tier " +
+                                        mcp::agentAccessTierToString(tool->requiredTier) + " but client has " +
+                                        mcp::agentAccessTierToString(clientTier)}
+                        }}
+                    };
+                    if (client && client->getReadyState() == ix::ReadyState::Open) {
+                        try { client->sendText(err.dump()); } catch (...) {}
+                    }
+                    return;
+                }
+
+                nlohmann::json args = json.contains("params") ? json["params"] : nlohmann::json::object();
+                queue.push([method, args, clientTier, client, id](core::Engine* eng) {
+                    auto res = mcp::McpToolsetRegistry::get().invoke(eng, method, args, clientTier);
+                    nlohmann::json reply = {{"jsonrpc", "2.0"}, {"id", id}};
+                    if (res.contains("error")) {
+                        reply["error"] = res["error"];
+                    } else {
+                        reply["result"] = res.value("result", nlohmann::json::object());
+                    }
+                    eng->sendWsMessage(client, reply.dump());
+                });
+                return;
+            }
 
             if (method == "engine.loadScript") {
                 std::string code;

@@ -1,7 +1,9 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/VulkanRendererInternal.hpp"
 #include "core/Logger.hpp"
+#include "core/Profiler.hpp"
 #include "renderer/Vertex.hpp"
+#include "renderer/SpatialAnnotation.hpp"
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
 #include "utils/FileIO.hpp"
@@ -9,6 +11,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <stdexcept>
 #include <chrono>
@@ -68,6 +71,8 @@ namespace engine::renderer {
         createGraphicsPipeline();
         createParticlePipeline();
         createPostProcessResources();
+        m_worldRadianceCache.init(m_context, m_descriptorPool, m_descriptorSetLayout);
+        m_gpuCulling.init(m_context, m_descriptorPool, m_width, m_height);
         initRtDenoiser();
         initCaptureResources();
 
@@ -115,6 +120,8 @@ namespace engine::renderer {
             }
 
             m_rtDenoiser.cleanup();
+            m_worldRadianceCache.cleanup();
+            m_gpuCulling.cleanup();
             m_accelerationStructure.cleanup();
             cleanupCaptureResources();
             cleanupParticlePipeline();
@@ -193,6 +200,7 @@ namespace engine::renderer {
                                 m_gBufferMotionImageView);
             refreshRtIndirectDescriptors();
         }
+        m_gpuCulling.resize(m_width, m_height);
         initCaptureResources();
 
         core::Logger::info("Render resolution updated to " + std::to_string(m_width) + "x" + std::to_string(m_height));
@@ -240,6 +248,7 @@ namespace engine::renderer {
     void VulkanRenderer::createComputePipelines() {}
 
     void VulkanRenderer::initCaptureResources() {
+        cleanupCaptureResources();
         VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufferInfo.size = static_cast<VkDeviceSize>(m_width) * m_height * 4u;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -249,10 +258,18 @@ namespace engine::renderer {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
         allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-        VmaAllocationInfo stagingAllocInfo{};
-        if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocInfo, &m_captureStagingBuffer, &m_captureStagingAlloc, &stagingAllocInfo) == VK_SUCCESS) {
-            m_captureMappedPtr = stagingAllocInfo.pMappedData;
+        for (uint32_t i = 0; i < CAPTURE_RING_COUNT; ++i) {
+            VmaAllocationInfo stagingAllocInfo{};
+            if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocInfo, &m_captureStagingRing[i], &m_captureStagingAllocRing[i], &stagingAllocInfo) == VK_SUCCESS) {
+                m_captureMappedPtrRing[i] = stagingAllocInfo.pMappedData;
+            }
+            VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+            vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &m_captureFenceRing[i]);
         }
+        m_captureStagingBuffer = m_captureStagingRing[0];
+        m_captureStagingAlloc = m_captureStagingAllocRing[0];
+        m_captureMappedPtr = m_captureMappedPtrRing[0];
 
         VkCommandBufferAllocateInfo cmdAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
         cmdAllocInfo.commandPool = m_context->getCommandPool();
@@ -266,12 +283,21 @@ namespace engine::renderer {
             vkFreeCommandBuffers(m_context->getDevice(), m_context->getCommandPool(), 1, &m_captureCommandBuffer);
             m_captureCommandBuffer = VK_NULL_HANDLE;
         }
-        if (m_captureStagingBuffer != VK_NULL_HANDLE && m_context->getAllocator()) {
-            vmaDestroyBuffer(m_context->getAllocator(), m_captureStagingBuffer, m_captureStagingAlloc);
-            m_captureStagingBuffer = VK_NULL_HANDLE;
-            m_captureStagingAlloc = VK_NULL_HANDLE;
-            m_captureMappedPtr = nullptr;
+        for (uint32_t i = 0; i < CAPTURE_RING_COUNT; ++i) {
+            if (m_captureFenceRing[i] != VK_NULL_HANDLE && m_context->getDevice()) {
+                vkDestroyFence(m_context->getDevice(), m_captureFenceRing[i], nullptr);
+                m_captureFenceRing[i] = VK_NULL_HANDLE;
+            }
+            if (m_captureStagingRing[i] != VK_NULL_HANDLE && m_context->getAllocator()) {
+                vmaDestroyBuffer(m_context->getAllocator(), m_captureStagingRing[i], m_captureStagingAllocRing[i]);
+                m_captureStagingRing[i] = VK_NULL_HANDLE;
+                m_captureStagingAllocRing[i] = VK_NULL_HANDLE;
+                m_captureMappedPtrRing[i] = nullptr;
+            }
         }
+        m_captureStagingBuffer = VK_NULL_HANDLE;
+        m_captureStagingAlloc = VK_NULL_HANDLE;
+        m_captureMappedPtr = nullptr;
     }
 
     static void writeJpegBuffer(void* context, void* data, int size) {
@@ -297,38 +323,108 @@ namespace engine::renderer {
     }
 
     std::string VulkanRenderer::captureFrameBase64() {
+        nlohmann::json dummyMetadata;
+        return captureAovBase64("FinalComposite", dummyMetadata);
+    }
+
+    std::string VulkanRenderer::captureAovBase64(const std::string& aovName, nlohmann::json& outMetadata) {
         if (m_width == 0 || m_height == 0) return "";
-        if (!m_captureStagingBuffer || !m_captureMappedPtr || !m_captureCommandBuffer) {
+        if (!m_captureStagingRing[0] || !m_captureMappedPtrRing[0] || !m_captureCommandBuffer) {
             initCaptureResources();
-            if (!m_captureStagingBuffer || !m_captureMappedPtr || !m_captureCommandBuffer) return "";
+            if (!m_captureStagingRing[0] || !m_captureMappedPtrRing[0] || !m_captureCommandBuffer) return "";
         }
 
-        static std::string s_cachedFrame;
-        static auto s_lastTime = std::chrono::steady_clock::now();
-        const auto nowTime = std::chrono::steady_clock::now();
-        if (!s_cachedFrame.empty() && std::chrono::duration<float, std::milli>(nowTime - s_lastTime).count() < 14.0f) {
-            return s_cachedFrame;
+        // Fill telemetry and spatial metadata
+        outMetadata["aov"] = aovName.empty() ? "FinalComposite" : aovName;
+        outMetadata["width"] = m_width;
+        outMetadata["height"] = m_height;
+        outMetadata["frameCounter"] = m_frameCounter;
+
+        if (m_sceneUboMappedPtr) {
+            const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
+            outMetadata["camera"] = {
+                {"position", {sceneUbo->cameraPos.x, sceneUbo->cameraPos.y, sceneUbo->cameraPos.z}},
+                {"sunDirection", {sceneUbo->sunDirection.x, sceneUbo->sunDirection.y, sceneUbo->sunDirection.z}},
+                {"viewProj", nlohmann::json::array()},
+                {"view", nlohmann::json::array()}
+            };
+            const float* vp = glm::value_ptr(sceneUbo->viewProj);
+            for (int i = 0; i < 16; ++i) outMetadata["camera"]["viewProj"].push_back(vp[i]);
+            const float* v = glm::value_ptr(sceneUbo->view);
+            for (int i = 0; i < 16; ++i) outMetadata["camera"]["view"].push_back(v[i]);
         }
 
+        outMetadata["profiler"] = core::Profiler::get().getStatsJson();
+        outMetadata["renderGraph"] = m_renderGraph.getPassTelemetryJson();
+        outMetadata["annotations"] = SpatialAnnotationRegistry::get().toJson();
+
+        // Select source image based on requested AOV
+        VkImage srcImage = m_colorImage;
+        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        uint32_t srcWidth = m_width;
+        uint32_t srcHeight = m_height;
+
+        if (aovName == "NormalRoughness" || aovName == "normal") {
+            if (m_gBufferNormalRoughnessImage) srcImage = m_gBufferNormalRoughnessImage;
+        } else if (aovName == "AlbedoMetallic" || aovName == "albedo") {
+            if (m_gBufferAlbedoMetallicImage) srcImage = m_gBufferAlbedoMetallicImage;
+        } else if (aovName == "GIIndirect" || aovName == "gi" || aovName == "ao") {
+            if (m_aoBlurImage) srcImage = m_aoBlurImage;
+            else if (m_aoImage) srcImage = m_aoImage;
+        } else if (aovName == "ShadowCascadeDebug" || aovName == "shadow") {
+            if (m_shadowImage) {
+                srcImage = m_shadowImage;
+                aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+                srcWidth = m_shadowWidth;
+                srcHeight = m_shadowHeight;
+            }
+        }
+
+        if (srcImage == VK_NULL_HANDLE) {
+            srcImage = m_colorImage;
+            aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+            srcWidth = m_width;
+            srcHeight = m_height;
+        }
+        if (srcImage == VK_NULL_HANDLE) return "";
+
+        uint32_t currIdx = m_captureRingIndex;
+        uint32_t prevIdx = (currIdx + 1) % CAPTURE_RING_COUNT;
+
+        // Non-blocking check on previous ring slot: if ready, we encode immediately (< 0.5 ms)
+        std::string resultBase64;
+        VkResult prevStatus = vkGetFenceStatus(m_context->getDevice(), m_captureFenceRing[prevIdx]);
+        if (prevStatus == VK_SUCCESS && m_captureMappedPtrRing[prevIdx]) {
+            const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[prevIdx]);
+            std::vector<uint8_t> jpegBytes;
+            jpegBytes.reserve(256 * 1024);
+            stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+            resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
+        }
+
+        // Wait with a small bounded timeout on curr fence if in flight, then record next copy
+        vkWaitForFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx], VK_TRUE, 2000000ULL);
+        vkResetFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx]);
         vkResetCommandBuffer(m_captureCommandBuffer, 0);
+
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(m_captureCommandBuffer, &beginInfo);
 
-        transitionImage(m_captureCommandBuffer, m_colorImage,
+        transitionImage(m_captureCommandBuffer, srcImage,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
+                        aspect, 0, 1, 0, 1,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
 
         VkBufferImageCopy region{};
-        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        region.imageExtent = { m_width, m_height, 1 };
-        vkCmdCopyImageToBuffer(m_captureCommandBuffer, m_colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_captureStagingBuffer, 1, &region);
+        region.imageSubresource = { aspect, 0, 0, 1 };
+        region.imageExtent = { srcWidth, srcHeight, 1 };
+        vkCmdCopyImageToBuffer(m_captureCommandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_captureStagingRing[currIdx], 1, &region);
 
-        transitionImage(m_captureCommandBuffer, m_colorImage,
+        transitionImage(m_captureCommandBuffer, srcImage,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
+                        aspect, 0, 1, 0, 1,
                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
@@ -337,21 +433,21 @@ namespace engine::renderer {
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &m_captureCommandBuffer;
-        VkFence captureFence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        vkCreateFence(m_context->getDevice(), &fenceInfo, nullptr, &captureFence);
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, captureFence);
-        vkWaitForFences(m_context->getDevice(), 1, &captureFence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(m_context->getDevice(), captureFence, nullptr);
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_captureFenceRing[currIdx]);
 
-        const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtr);
-        std::vector<uint8_t> jpegBytes;
-        jpegBytes.reserve(256 * 1024);
-        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+        m_captureRingIndex = prevIdx;
 
-        s_cachedFrame = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
-        s_lastTime = std::chrono::steady_clock::now();
-        return s_cachedFrame;
+        // If result was not ready from previous ring slot (e.g. bootstrap/first call), wait on curr and return
+        if (resultBase64.empty()) {
+            vkWaitForFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx], VK_TRUE, UINT64_MAX);
+            const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[currIdx]);
+            std::vector<uint8_t> jpegBytes;
+            jpegBytes.reserve(256 * 1024);
+            stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+            resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
+        }
+
+        return resultBase64;
     }
 
     void VulkanRenderer::submitBufferBarrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size) {

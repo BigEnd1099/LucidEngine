@@ -1292,6 +1292,19 @@ namespace engine::renderer {
         {
             const bool tlasReady = m_sceneUboMappedPtr &&
                 static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
+
+            if (tlasReady && m_worldRadianceCache.isInitialized() && m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
+                const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
+                m_worldRadianceCache.dispatchUpdate(
+                    m_commandBuffer,
+                    m_accelerationStructure.getTLAS(),
+                    m_frameCounter,
+                    glm::vec3(sceneUbo->cameraPos),
+                    glm::vec3(sceneUbo->sunDirection),
+                    sceneUbo->sunColor
+                );
+            }
+
             const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
                 m_rtGraphicsPipeline != VK_NULL_HANDLE &&
                 m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&

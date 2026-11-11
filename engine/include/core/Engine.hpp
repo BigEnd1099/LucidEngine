@@ -70,6 +70,7 @@ namespace engine::core {
         void resetScene(const std::string& preset = "physics");
         void applySnapshotJson(const std::string& jsonStr);
         std::string captureFrameBase64();
+        std::string captureAovBase64(const std::string& aovName, nlohmann::json& outMetadata);
         void stepSimulation(int steps, float dt);
         nlohmann::json getSnapshotJson();
         std::string getTypeDefinitions();

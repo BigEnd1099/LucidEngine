@@ -290,6 +290,9 @@ if(LUCID_BUILD_ALGORITHM_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Lighting/HardwareReSTIR.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Geometry/ClusterRenderer.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/RenderGraph.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/SpatialAnnotation.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Lighting/WorldRadianceCache.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Geometry/GpuCulling.cpp
     )
     target_include_directories(lucid_renderer_algorithm_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -1,0 +1,29 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D u_SourceMip;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D u_DestinationMip;
+
+layout(push_constant) uniform PushConstants {
+    vec2 destSize;      // Dimensions of destination mip
+    vec2 invDestSize;   // 1.0 / destSize
+} pc;
+
+void main() {
+    ivec2 destCoord = ivec2(gl_GlobalInvocationID.xy);
+    if (destCoord.x >= int(pc.destSize.x) || destCoord.y >= int(pc.destSize.y)) return;
+
+    // UV center of destination pixel in [0, 1]
+    vec2 uv = (vec2(destCoord) + 0.5) * pc.invDestSize;
+
+    // The sampler is created with VK_SAMPLER_REDUCTION_MODE_MAX (standard Vulkan depth [0, 1], 1.0 = far plane).
+    // For NPOT dimensions: sample across sub-quad offsets to cover boundary texels safely.
+    vec2 halfTexel = pc.invDestSize * 0.25;
+    float d0 = texture(u_SourceMip, uv + vec2(-halfTexel.x, -halfTexel.y)).r;
+    float d1 = texture(u_SourceMip, uv + vec2( halfTexel.x, -halfTexel.y)).r;
+    float d2 = texture(u_SourceMip, uv + vec2(-halfTexel.x,  halfTexel.y)).r;
+    float d3 = texture(u_SourceMip, uv + vec2( halfTexel.x,  halfTexel.y)).r;
+
+    float maxDepth = max(max(d0, d1), max(d2, d3));
+    imageStore(u_DestinationMip, destCoord, vec4(maxDepth, 0.0, 0.0, 0.0));
+}

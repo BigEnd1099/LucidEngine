@@ -4,8 +4,15 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 namespace engine::renderer {
+
+    struct PassTelemetry {
+        std::string passName;
+        double durationMs{0.0};
+        uint32_t drawCount{0};
+    };
 
     // A pass declares logical resource reads/writes. The graph compiles those
     // declarations into a deterministic execution order; Vulkan barriers remain
@@ -37,11 +44,14 @@ namespace engine::renderer {
         const std::string& getLastError() const { return m_lastError; }
         const std::vector<size_t>& getExecutionOrder() const { return m_executionOrder; }
         const std::vector<RenderPassDef>& getPasses() const { return m_passes; }
+        const std::vector<PassTelemetry>& getPassTelemetry() const { return m_passTelemetry; }
+        nlohmann::json getPassTelemetryJson() const;
         void clear();
 
     private:
         std::vector<RenderPassDef> m_passes;
         std::vector<size_t> m_executionOrder;
+        std::vector<PassTelemetry> m_passTelemetry;
         std::string m_lastError;
         bool m_isCompiled{false};
     };

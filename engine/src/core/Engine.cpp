@@ -2107,6 +2107,13 @@ function update(entities, dt, input, contacts) {
         return m_renderer->captureFrameBase64();
     }
 
+    std::string Engine::captureAovBase64(const std::string& aovName, nlohmann::json& outMetadata) {
+        if (m_renderer) {
+            return m_renderer->captureAovBase64(aovName, outMetadata);
+        }
+        return "";
+    }
+
     void Engine::stepSimulation(int steps, float dt) {
         if (steps <= 0 || dt <= 0.0f) return;
         // In GUI editor mode, prevent accidental stepping when no play session is active.

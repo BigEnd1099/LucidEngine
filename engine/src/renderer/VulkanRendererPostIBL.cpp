@@ -414,6 +414,14 @@ namespace engine::renderer {
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_hdrImage, m_hdrAllocation, m_hdrImageView);
 
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, m_oitAccumImage, m_oitAccumAlloc, m_oitAccumImageView);
+
+        createImg2D(m_width, m_height, 1, VK_FORMAT_R8_UNORM,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, m_oitRevealImage, m_oitRevealAlloc, m_oitRevealImageView);
+
         // 5-poziomowa piramida Jimenez Bloom (start od 1/2 rozdzielczości)
         const uint32_t bloomBaseW = std::max(1u, m_width / 2u);
         const uint32_t bloomBaseH = std::max(1u, m_height / 2u);
@@ -443,11 +451,11 @@ namespace engine::renderer {
         }
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_aoImage, m_aoAllocation, m_aoImageView);
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_aoBlurImage, m_aoBlurAllocation, m_aoBlurImageView);
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R32_UINT,
@@ -459,11 +467,11 @@ namespace engine::renderer {
                     VK_IMAGE_ASPECT_DEPTH_BIT, m_depthImage, m_depthAllocation, m_depthImageView);
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_gBufferNormalRoughnessImage, m_gBufferNormalRoughnessAlloc, m_gBufferNormalRoughnessImageView);
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R8G8B8A8_UNORM,
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, m_gBufferAlbedoMetallicImage, m_gBufferAlbedoMetallicAlloc, m_gBufferAlbedoMetallicImageView);
 
         createImg2D(m_width, m_height, 1, VK_FORMAT_R16G16_SFLOAT,
@@ -570,6 +578,8 @@ namespace engine::renderer {
         };
         destroyImg(m_bloomImage, m_bloomAllocation, m_bloomFullView);
         destroyImg(m_hdrImage, m_hdrAllocation, m_hdrImageView);
+        destroyImg(m_oitAccumImage, m_oitAccumAlloc, m_oitAccumImageView);
+        destroyImg(m_oitRevealImage, m_oitRevealAlloc, m_oitRevealImageView);
         destroyImg(m_ldrTempImage, m_ldrTempAllocation, m_ldrTempImageView);
         destroyImg(m_colorImage, m_colorAllocation, m_colorImageView);
         destroyImg(m_aoImage, m_aoAllocation, m_aoImageView);

@@ -2,6 +2,7 @@
 #include "core/Logger.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <queue>
 #include <stdexcept>
 #include <unordered_map>
@@ -184,9 +185,33 @@ namespace engine::renderer {
             throw std::runtime_error("RenderGraph compilation failed: " + m_lastError);
         }
 
+        m_passTelemetry.clear();
+        m_passTelemetry.reserve(m_executionOrder.size());
+
         for (const size_t index : m_executionOrder) {
             const auto& pass = m_passes[index];
+            const auto start = std::chrono::high_resolution_clock::now();
             pass.executeCallback(cmd);
+            const auto end = std::chrono::high_resolution_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+            m_passTelemetry.push_back({
+                pass.name,
+                ms,
+                1 // Recorded dispatch item
+            });
         }
+    }
+
+    nlohmann::json RenderGraph::getPassTelemetryJson() const {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& item : m_passTelemetry) {
+            arr.push_back({
+                {"pass", item.passName},
+                {"durationMs", item.durationMs},
+                {"drawCount", item.drawCount}
+            });
+        }
+        return arr;
     }
 }

@@ -3,7 +3,11 @@
 #include "renderer/AccelerationStructure.hpp"
 #include "renderer/RtDenoiser.hpp"
 #include "renderer/RtSettings.hpp"
+#include "renderer/RenderGraph.hpp"
+#include "renderer/Lighting/WorldRadianceCache.hpp"
+#include "renderer/Geometry/GpuCulling.hpp"
 #include "ecs/Registry.hpp"
+#include <nlohmann/json.hpp>
 #include <vector>
 #include <string>
 #include <array>
@@ -32,6 +36,15 @@ namespace engine::renderer {
         void setBenchmarkMode(bool enabled) { m_benchmarkMode = enabled; }
         void render(ecs::Registry& registry, core::AssetManager* assetManager = nullptr, glm::mat4 viewMatrix = glm::mat4(1.0f), core::Engine* engine = nullptr);
         std::string captureFrameBase64();
+        std::string captureAovBase64(const std::string& aovName, nlohmann::json& outMetadata);
+        RenderGraph& getRenderGraph() { return m_renderGraph; }
+        const RenderGraph& getRenderGraph() const { return m_renderGraph; }
+        WorldRadianceCache& getWorldRadianceCache() { return m_worldRadianceCache; }
+        const WorldRadianceCache& getWorldRadianceCache() const { return m_worldRadianceCache; }
+        GpuCulling& getGpuCulling() { return m_gpuCulling; }
+        const GpuCulling& getGpuCulling() const { return m_gpuCulling; }
+        void setHiZCullingEnabled(bool enabled) { m_hiZCullingEnabled = enabled; }
+        bool isHiZCullingEnabled() const { return m_hiZCullingEnabled; }
         void submitBufferBarrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size);
 
         void setRenderResolution(uint32_t width, uint32_t height);
@@ -200,6 +213,9 @@ namespace engine::renderer {
         AccelerationStructure m_accelerationStructure;
         RtSettings m_rtSettings{};
         RtDenoiser m_rtDenoiser;
+        WorldRadianceCache m_worldRadianceCache;
+        GpuCulling m_gpuCulling;
+        bool m_hiZCullingEnabled{true};
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
 
         static constexpr uint32_t RT_MAX_INSTANCE_COUNT = 4096;
@@ -302,6 +318,27 @@ namespace engine::renderer {
         VmaAllocation m_bloomAllocation{VK_NULL_HANDLE};
         VkImageView m_bloomFullView{VK_NULL_HANDLE};
         std::array<VkImageView, BLOOM_MIP_COUNT> m_bloomMipViews{};
+
+        // WBOIT (Order-Independent Transparency)
+        VkImage m_oitAccumImage{VK_NULL_HANDLE};
+        VmaAllocation m_oitAccumAlloc{VK_NULL_HANDLE};
+        VkImageView m_oitAccumImageView{VK_NULL_HANDLE};
+
+        VkImage m_oitRevealImage{VK_NULL_HANDLE};
+        VmaAllocation m_oitRevealAlloc{VK_NULL_HANDLE};
+        VkImageView m_oitRevealImageView{VK_NULL_HANDLE};
+
+        VkPipelineLayout m_oitPipelineLayout{VK_NULL_HANDLE};
+        VkPipeline m_oitPipeline{VK_NULL_HANDLE};
+
+        VkPipelineLayout m_oitCompositePipelineLayout{VK_NULL_HANDLE};
+        VkPipeline m_oitCompositePipeline{VK_NULL_HANDLE};
+        VkDescriptorSetLayout m_oitCompositeDescLayout{VK_NULL_HANDLE};
+        VkDescriptorSet m_oitCompositeDescSet{VK_NULL_HANDLE};
+        bool m_oitEnabled{true};
+
+        void setOitEnabled(bool enabled) { m_oitEnabled = enabled; }
+        bool isOitEnabled() const { return m_oitEnabled; }
         std::array<VkExtent2D, BLOOM_MIP_COUNT> m_bloomMipExtents{};
         uint32_t m_activeBloomMips{BLOOM_MIP_COUNT};
         VkSampler m_linearSampler{VK_NULL_HANDLE};
@@ -527,6 +564,16 @@ namespace engine::renderer {
         VmaAllocation m_captureStagingAlloc{VK_NULL_HANDLE};
         void* m_captureMappedPtr{nullptr};
         VkCommandBuffer m_captureCommandBuffer{VK_NULL_HANDLE};
+
+        // Dual-buffered capture staging ring & fences for non-blocking AOV capture
+        static constexpr uint32_t CAPTURE_RING_COUNT = 2;
+        VkBuffer m_captureStagingRing[CAPTURE_RING_COUNT]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+        VmaAllocation m_captureStagingAllocRing[CAPTURE_RING_COUNT]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+        void* m_captureMappedPtrRing[CAPTURE_RING_COUNT]{nullptr, nullptr};
+        VkFence m_captureFenceRing[CAPTURE_RING_COUNT]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+        uint32_t m_captureRingIndex{0};
+
+        RenderGraph m_renderGraph;
 
         // Niagara-Style Particle Pipeline
         struct ParticleVertex {

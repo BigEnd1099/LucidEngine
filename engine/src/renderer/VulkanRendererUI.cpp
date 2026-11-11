@@ -1,4 +1,5 @@
 #include "renderer/VulkanRenderer.hpp"
+#include "renderer/SpatialAnnotation.hpp"
 #include "renderer/EditorUiStyle.hpp"
 #include "renderer/EditorLocalization.hpp"
 #include "renderer/EditorUiControls.hpp"
@@ -1732,6 +1733,32 @@ namespace engine::renderer {
                     }
                     drawList->AddCircleFilled(iconCenter, 10.5f * s_uiScale, lCol);
                     drawList->AddCircle(iconCenter, 10.5f * s_uiScale, IM_COL32(255, 255, 255, 235), 0, 1.5f);
+                }
+            }
+
+            // Render Spatial Annotations from AI Agents (Unreal 5.9 Spatial Insights)
+            {
+                const auto annotations = SpatialAnnotationRegistry::get().getActiveAnnotations();
+                for (const auto& ann : annotations) {
+                    ImVec2 sPos; float sW = 0.0f;
+                    if (worldToScreen(ann.worldPos, sPos, sW) && sW > 0.05f) {
+                        const ImU32 col = IM_COL32(
+                            static_cast<int>(std::clamp(ann.color.r * 255.0f, 0.0f, 255.0f)),
+                            static_cast<int>(std::clamp(ann.color.g * 255.0f, 0.0f, 255.0f)),
+                            static_cast<int>(std::clamp(ann.color.b * 255.0f, 0.0f, 255.0f)),
+                            static_cast<int>(std::clamp(ann.color.a * 255.0f, 0.0f, 255.0f)));
+                        const float rPix = std::clamp((ann.radius * 700.0f) / sW, 8.0f, 100.0f);
+                        drawList->AddCircle(sPos, rPix, col, 24, 2.0f);
+                        drawList->AddCircleFilled(sPos, 4.5f * s_uiScale, col);
+
+                        std::string tag = "[Agent " + std::to_string(ann.agentId) + "] " + ann.label;
+                        const ImVec2 tSz = ImGui::CalcTextSize(tag.c_str());
+                        const ImVec2 bMin(sPos.x - tSz.x * 0.5f - 5.0f, sPos.y - rPix - tSz.y - 7.0f);
+                        const ImVec2 bMax(sPos.x + tSz.x * 0.5f + 5.0f, sPos.y - rPix - 1.0f);
+                        drawList->AddRectFilled(bMin, bMax, IM_COL32(20, 24, 32, 220), 4.0f);
+                        drawList->AddRect(bMin, bMax, col, 4.0f, 0, 1.0f);
+                        drawList->AddText(ImVec2(sPos.x - tSz.x * 0.5f, sPos.y - rPix - tSz.y - 5.0f), IM_COL32(255, 255, 255, 255), tag.c_str());
+                    }
                 }
             }
 

@@ -2,6 +2,19 @@
 #include "renderer/Geometry/ClusterRenderer.hpp"
 #include "renderer/RenderGraph.hpp"
 #include "renderer/Lighting/HardwareReSTIR.hpp"
+#include "renderer/SpatialAnnotation.hpp"
+#include "renderer/Lighting/WorldRadianceCache.hpp"
+#include "renderer/Geometry/GpuCulling.hpp"
+#include <glm/gtc/matrix_transform.hpp>
+
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -129,6 +142,70 @@ int main() {
     CHECK(stats.at("samples").at("algorithm-test").at("sampleCount").get<uint64_t>() == 1);
     CHECK(stats.at("samples").at("algorithm-test").at("avgMs").get<double>() > 0.0);
     CHECK(!stats.at("metrics").contains("invalid-nan"));
+
+    // SpatialAnnotationRegistry test
+    auto& annRegistry = SpatialAnnotationRegistry::get();
+    annRegistry.clear();
+    CHECK(annRegistry.getActiveAnnotations().empty());
+    SpatialAnnotation ann1;
+    ann1.worldPos = glm::vec3(10.0f, 2.0f, -5.0f);
+    ann1.radius = 1.5f;
+    ann1.label = "Anomaly Detected";
+    ann1.agentId = 42;
+    uint32_t annId = annRegistry.addAnnotation(ann1);
+    CHECK(annId == 1);
+    CHECK(annRegistry.getActiveAnnotations().size() == 1);
+    auto annJson = annRegistry.toJson();
+    CHECK(annJson.is_array() && annJson.size() == 1);
+    CHECK(annJson[0]["label"] == "Anomaly Detected");
+    CHECK(annJson[0]["agentId"] == 42);
+    annRegistry.clear();
+    CHECK(annRegistry.getActiveAnnotations().empty());
+
+    // WorldRadianceCell std430 alignment & sizing
+    static_assert(sizeof(WorldRadianceCell) == 32, "Std430 alignment mismatch!");
+    CHECK(sizeof(WorldRadianceCell) == 32);
+
+    // Octahedral normal pack/unpack round-trip
+    glm::vec3 testNorm = glm::normalize(glm::vec3(0.577f, -0.577f, 0.577f));
+    uint32_t packedNorm = WorldRadianceCache::packNormalOctahedral(testNorm);
+    glm::vec3 unpackedNorm = WorldRadianceCache::unpackNormalOctahedral(packedNorm);
+    CHECK(glm::dot(testNorm, unpackedNorm) > 0.999f);
+
+    // Spatial hash stability & bound
+    uint32_t cellHash1 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
+    uint32_t cellHash2 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
+    CHECK(cellHash1 == cellHash2);
+    CHECK(cellHash1 < WorldRadianceCache::CACHE_CELL_COUNT);
+
+    // GPU Frustum Culling Sphere Test
+    glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);
+    glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 vp = proj * view;
+
+    // Sphere in front of camera (center at (0, 0, 0)) -> visible
+    CHECK(GpuCulling::testFrustumSphere(vp, glm::vec3(0.0f, 0.0f, 0.0f), 1.0f));
+
+    // Sphere far behind camera (center at (0, 0, 50)) -> culled
+    CHECK(!GpuCulling::testFrustumSphere(vp, glm::vec3(0.0f, 0.0f, 50.0f), 1.0f));
+
+    // Sphere far off to the side (center at (100, 0, 0)) -> culled
+    CHECK(!GpuCulling::testFrustumSphere(vp, glm::vec3(100.0f, 0.0f, 0.0f), 1.0f));
+
+    // WBOIT McGuire & Bavoil weight calculation verification
+    auto calcWboitWeight = [](float alpha, float viewZ) {
+        float distWeight = 0.03f / (1.0e-5f + std::pow(viewZ / 200.0f, 4.0f));
+        return alpha * std::clamp(distWeight, 1.0e-2f, 3.0e3f);
+    };
+
+    float wNear = calcWboitWeight(0.5f, 2.0f);   // 2 meters
+    float wMid  = calcWboitWeight(0.5f, 20.0f);  // 20 meters
+    float wFar  = calcWboitWeight(0.5f, 200.0f); // 200 meters
+
+    // Weights must monotonically decrease with view distance
+    CHECK(wNear >= wMid);
+    CHECK(wMid >= wFar);
+    CHECK(wFar >= 1.0e-2f * 0.5f);
 
     std::cout << "Renderer algorithm tests passed.\n";
     return 0;

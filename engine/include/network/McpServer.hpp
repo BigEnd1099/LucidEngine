@@ -1,29 +1,22 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include <string>
-#include <functional>
-#include <unordered_map>
+#include "network/McpToolsetRegistry.hpp"
 
 namespace engine::core { class Engine; }
 
 namespace engine::network::mcp {
 
-    struct McpTool {
-        std::string name;
-        std::string description;
-        nlohmann::json inputSchema;
-        std::function<nlohmann::json(const nlohmann::json&)> handler;
-    };
-
     class McpServer {
     public:
-        McpServer(core::Engine* engine);
-        void processStdio(); // Obsługa standardowego wejścia/wyjścia pod MCP stdio transport
-        void registerEngineTools();
+        McpServer(core::Engine* engine, AgentAccessTier tier = AgentAccessTier::LiveEdit);
+        void processStdio(); // Obsluga standardowego wejscia/wyjscia pod MCP stdio transport
+        void setAccessTier(AgentAccessTier tier) { m_tier = tier; }
+        AgentAccessTier getAccessTier() const { return m_tier; }
 
     private:
         core::Engine* m_engine;
-        std::unordered_map<std::string, McpTool> m_tools;
+        AgentAccessTier m_tier{AgentAccessTier::LiveEdit};
 
         void sendResponse(const nlohmann::json& id, const nlohmann::json& result);
         void sendError(const nlohmann::json& id, int code, const std::string& message);
