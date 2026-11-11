@@ -561,7 +561,10 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             ImGui::SetTooltip(editorText("details.rt_roughness_tooltip", "Smooth surfaces (roughness <= 0.25) traced at full 1:1; rough surfaces traced on alternating checkerboard and bilaterally reconstructed."));
                         ImGui::Checkbox(editorText("details.rt_stochastic_lights", "Stochastic Lights on Bounces (Variant 2)"), &m_rtSettings.reflectionStochasticLights);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip(editorText("details.rt_stochastic_tooltip", "On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all 8 lights, cutting shadow rays from 9 to 2."));
+                            ImGui::SetTooltip(editorText("details.rt_stochastic_tooltip", "On secondary bounces (bounce >= 1), importance-samples 1 light instead of testing all active local lights."));
+                        ImGui::Checkbox("Primary-hit stochastic local-light sampling (PR #49)", &m_rtSettings.reflectionPrimaryStochasticLights);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Optional: applies the same unbiased one-light estimator to the first reflection hit. Reduces local-light shadow queries, but can increase visible per-sample variance. Disabled by default to preserve pre-PR #49 behavior.");
                         ImGui::Checkbox(editorText("details.rt_lod_bias", "Bounce Depth Mip LOD Bias (Variant 3)"), &m_rtSettings.reflectionLodBias);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip(editorText("details.rt_lod_tooltip", "Increases texture mip LOD with bounce depth (textureLod float(bounce)) to reduce GPU texture cache thrashing."));
