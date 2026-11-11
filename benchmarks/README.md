@@ -51,7 +51,7 @@ Every numeric profiler metric is copied into each raw sample dynamically, so new
 
 The editor-quality profile reproduces the RT values visible in the supplied capture; it does not claim to reproduce unreported editor settings. GTAO/SSGI values are recorded from the running renderer and are not silently inferred.
 
-The shader debug modes include history-length and variance visualizations. The benchmark deliberately does not read back per-pixel history-age distributions or rejection counts in its normal performance pass: that requires an additional GPU readback path and would perturb the timings. Those measurements should be added as an explicitly opt-in diagnostic capture, separate from clean performance numbers.
+The profiler's existing RT diagnostic SSBO exports 16 history-age bins for GI and reflections without a separate image readback. The report includes reflection histogram coverage versus `rtReflectionPixels`, the bin-00 share, and every bin in raw samples/CSV. Bin 00 includes age zero and ages below `maxHistory / 16`; with `maxHistory=256`, it spans ages below 16 samples. The benchmark also runs a controlled same-build primary-hit stochastic-light A/B in `editor_quality`: OFF vs ON, with identical scene/camera/quality and alternating order across repeats. Only `reflectionPrimaryStochasticLights` changes; secondary-bounce stochastic lighting stays enabled in both variants.
 
 ## Output
 
