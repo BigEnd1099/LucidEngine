@@ -800,10 +800,16 @@ namespace engine::core {
                 }
             }
 
+            if (vertices.size() > std::numeric_limits<uint32_t>::max() ||
+                indices.size() > std::numeric_limits<uint32_t>::max()) {
+                core::Logger::warn("AssetManager: skipping mesh that exceeds the 32-bit index/count limit");
+                continue;
+            }
+
             auto meshAsset = std::make_unique<MeshAsset>();
             meshAsset->id = m_nextMeshId++;
-            meshAsset->vertexCount = vertices.size();
-            meshAsset->indexCount = indices.size();
+            meshAsset->vertexCount = static_cast<uint32_t>(vertices.size());
+            meshAsset->indexCount = static_cast<uint32_t>(indices.size());
             meshAsset->vertices = vertices;
             meshAsset->hasSkinInfluences = hasSkinAttributes && skinInfluences.size() == vertices.size();
             if (meshAsset->hasSkinInfluences)
@@ -1489,8 +1495,8 @@ namespace engine::core {
 
         auto plane = std::make_unique<MeshAsset>();
         plane->id = m_nextMeshId++; // 1
-        plane->vertexCount = planeVertices.size();
-        plane->indexCount = cubeIndices.size();
+        plane->vertexCount = static_cast<uint32_t>(planeVertices.size());
+        plane->indexCount = static_cast<uint32_t>(cubeIndices.size());
         uploadBuffer(plane->vertexBuffer, plane->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(plane->indexBuffer, plane->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(plane));
@@ -1498,8 +1504,8 @@ namespace engine::core {
         // --- 2. MESH 2: STANDARD CUBE ---
         auto cube = std::make_unique<MeshAsset>();
         cube->id = m_nextMeshId++; // 2
-        cube->vertexCount = planeVertices.size();
-        cube->indexCount = cubeIndices.size();
+        cube->vertexCount = static_cast<uint32_t>(planeVertices.size());
+        cube->indexCount = static_cast<uint32_t>(cubeIndices.size());
         uploadBuffer(cube->vertexBuffer, cube->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(cube->indexBuffer, cube->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(cube));
@@ -1544,8 +1550,8 @@ namespace engine::core {
 
         auto sphere = std::make_unique<MeshAsset>();
         sphere->id = m_nextMeshId++; // 3
-        sphere->vertexCount = sphereVertices.size();
-        sphere->indexCount = sphereIndices.size();
+        sphere->vertexCount = static_cast<uint32_t>(sphereVertices.size());
+        sphere->indexCount = static_cast<uint32_t>(sphereIndices.size());
         uploadBuffer(sphere->vertexBuffer, sphere->vertexAllocation, sphereVertices.data(), sphereVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(sphere->indexBuffer, sphere->indexAllocation, sphereIndices.data(), sphereIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(sphere));
@@ -1587,8 +1593,8 @@ namespace engine::core {
 
         auto cylinder = std::make_unique<MeshAsset>();
         cylinder->id = m_nextMeshId++; // 4
-        cylinder->vertexCount = cylVertices.size();
-        cylinder->indexCount = cylIndices.size();
+        cylinder->vertexCount = static_cast<uint32_t>(cylVertices.size());
+        cylinder->indexCount = static_cast<uint32_t>(cylIndices.size());
         uploadBuffer(cylinder->vertexBuffer, cylinder->vertexAllocation, cylVertices.data(), cylVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(cylinder->indexBuffer, cylinder->indexAllocation, cylIndices.data(), cylIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(cylinder));
@@ -1635,8 +1641,8 @@ namespace engine::core {
 
         auto capsule = std::make_unique<MeshAsset>();
         capsule->id = m_nextMeshId++; // 5
-        capsule->vertexCount = capVertices.size();
-        capsule->indexCount = capIndices.size();
+        capsule->vertexCount = static_cast<uint32_t>(capVertices.size());
+        capsule->indexCount = static_cast<uint32_t>(capIndices.size());
         uploadBuffer(capsule->vertexBuffer, capsule->vertexAllocation, capVertices.data(), capVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(capsule->indexBuffer, capsule->indexAllocation, capIndices.data(), capIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
         m_meshes.push_back(std::move(capsule));
