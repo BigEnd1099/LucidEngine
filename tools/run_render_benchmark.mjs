@@ -12,6 +12,9 @@ const WIDTH = Number(process.env.LUCID_BENCH_WIDTH || 2560);
 const HEIGHT = Number(process.env.LUCID_BENCH_HEIGHT || 1440);
 const WARMUP_MS = Number(process.env.LUCID_BENCH_WARMUP_MS || 1500);
 const CAPTURE_MS = Number(process.env.LUCID_BENCH_CAPTURE_MS || 2000);
+const requestedRtAbRepeats = Number.parseInt(process.env.LUCID_RT_AB_REPEATS || '3', 10);
+const RT_AB_REPEATS = Number.isFinite(requestedRtAbRepeats)
+  ? Math.max(1, Math.min(5, requestedRtAbRepeats)) : 3;
 const SAMPLE_INTERVAL_MS = 100;
 
 if (!fs.existsSync(EXE)) {
@@ -278,7 +281,7 @@ const RT_PROFILES = [
       reflectionInfiniteBounces: false, reflectionMaxRoughness: 0.60,
       reflectionMinThroughput: 0.06, maxHistory: 32, spatialStrength: 1.0,
       denoiseEnabled: true, svgfEnabled: true, reflectionCheckerboard: true,
-      reflectionStochasticLights: true, reflectionLodBias: true,
+      reflectionStochasticLights: true, reflectionPrimaryStochasticLights: false, reflectionLodBias: true,
       reflectionHalfRes: false, debugMode: 0
     }
   },
@@ -291,7 +294,7 @@ const RT_PROFILES = [
       reflectionInfiniteBounces: false, reflectionMaxRoughness: 1.0,
       reflectionMinThroughput: 0.06, maxHistory: 256, spatialStrength: 1.0,
       denoiseEnabled: true, svgfEnabled: true, reflectionCheckerboard: true,
-      reflectionStochasticLights: true, reflectionLodBias: true,
+      reflectionStochasticLights: true, reflectionPrimaryStochasticLights: false, reflectionLodBias: true,
       reflectionHalfRes: false, debugMode: 0
     }
   }
@@ -329,7 +332,7 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
   while (Date.now() < deadline) {
     const stats = await callRpc('engine.getProfilerStats');
     const metrics = stats?.metrics || {};
-    samples.push({
+    const sample = {
       profilerSamples: stats?.samples || {},
       timestamp: new Date().toISOString(),
       frameTimeMs: Number(stats?.frameTimeMs || 0),
@@ -384,14 +387,34 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
       rtReflectionMaxRoughness: Number(metrics.rtReflectionMaxRoughness || 0),
       rtReflectionCheckerboard: Number(metrics.rtReflectionCheckerboard || 0),
       rtReflectionStochasticLights: Number(metrics.rtReflectionStochasticLights || 0),
+      rtReflectionPrimaryStochasticLights: Number(metrics.rtReflectionPrimaryStochasticLights || 0),
       rtReflectionLodBias: Number(metrics.rtReflectionLodBias || 0),
       rtReflectionHalfRes: Number(metrics.rtReflectionHalfRes || 0),
       rtDebugMode: Number(metrics.rtDebugMode || 0),
       ...Object.fromEntries(Object.entries(metrics).filter(([, value]) => typeof value === 'number'))
-    });
+    };
+    const reflectionAgeBinKeys = Array.from({ length: 16 }, (_, i) =>
+      'rtReflectionHistoryAgeBin' + String(i).padStart(2, '0'));
+    const reflectionAgeBins = reflectionAgeBinKeys.map(key => Number(sample[key] || 0));
+    const reflectionAgeHistogramTotal = reflectionAgeBins.reduce((sum, value) => sum + value, 0);
+    const reflectionPixels = Number(sample.rtReflectionPixels || 0);
+    sample.rtReflectionHistoryAgeHistogramTotal = reflectionAgeHistogramTotal;
+    sample.rtReflectionHistoryAgeNonZeroPixels = reflectionAgeBins.slice(1).reduce((sum, value) => sum + value, 0);
+    sample.rtReflectionHistoryAgeBin00Share = reflectionAgeHistogramTotal > 0
+      ? reflectionAgeBins[0] / reflectionAgeHistogramTotal : 0;
+    sample.rtReflectionHistoryAgeHistogramCoverage = reflectionPixels > 0
+      ? reflectionAgeHistogramTotal / reflectionPixels : (reflectionAgeHistogramTotal === 0 ? 1 : 0);
+    sample.rtReflectionHistoryAgeHistogramMismatch =
+      reflectionPixels > 0 && reflectionAgeHistogramTotal !== reflectionPixels ? 1 : 0;
+    samples.push(sample);
     await sleep(SAMPLE_INTERVAL_MS);
   }
 
+  const histogramMismatchSamples = samples.filter(sample => sample.rtReflectionHistoryAgeHistogramMismatch > 0).length;
+  if (histogramMismatchSamples > 0) {
+    console.warn('[WARN] ' + name + ': reflection history-age histogram did not match rtReflectionPixels in ' +
+      histogramMismatchSamples + '/' + samples.length + ' profiler snapshots.');
+  }
   const numericKeys = Object.keys(samples[0] || {}).filter(key =>
     key !== 'timestamp' && samples.some(sample => typeof sample[key] === 'number'));
   const averages = {};
@@ -445,11 +468,11 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
   return result;
 }
 
-async function saveSceneCapture() {
+async function saveSceneCapture(fileName = 'atrium-benchmark.jpg') {
   const result = await callRpc('engine.captureFrame', {}, 20000);
   if (!result?.frame) return null;
   const base64 = result.frame.replace(/^data:image\/[^;]+;base64,/, '');
-  const output = path.join(outputDir, 'atrium-benchmark.jpg');
+  const output = path.join(outputDir, fileName);
   fs.writeFileSync(output, Buffer.from(base64, 'base64'));
   console.log('[SCENE] Screenshot saved: ' + output);
   return output;
@@ -462,6 +485,8 @@ function writeSummary(results, sceneMeta) {
     'rtGiTraceMs', 'rtGiTemporalMs', 'rtGiAtrous0Ms', 'rtGiAtrous1Ms',
     'rtReflectionTraceMs', 'rtReflectionTemporalMs', 'rtComputeTotalMs'
   ];
+  const rtHistoryAgeFields = Array.from({ length: 16 }, (_, i) =>
+    'rtReflectionHistoryAgeBin' + String(i).padStart(2, '0'));
   const rtDiagnosticFields = [
     'rtGiTraceExecMs', 'rtGiTraceSyncMs', 'rtGiTemporalExecMs', 'rtGiTemporalSyncMs',
     'rtGiAtrous0ExecMs', 'rtGiAtrous0SyncMs', 'rtReflectionStartSyncMs',
@@ -470,9 +495,12 @@ function writeSummary(results, sceneMeta) {
     'rtGiSamples', 'rtGiBounces', 'rtGiWidth', 'rtGiHeight', 'rtMaxHistory',
     'rtSpatialStrength', 'rtSvgfEnabled', 'rtGiCheckerboard', 'rtGiHistoryValid',
     'rtReflectionHistoryValid', 'rtHistoryInvalidatedByLightChange',
-    'rtReflectionSamples', 'rtReflectionBounces', 'rtReflectionInfiniteBounces',
+    'rtReflectionPrimaryStochasticLights', 'rtReflectionSamples', 'rtReflectionBounces', 'rtReflectionInfiniteBounces',
     'rtReflectionMaxRoughness', 'rtReflectionCheckerboard', 'rtReflectionStochasticLights',
-    'rtReflectionLodBias', 'rtReflectionHalfRes', 'rtDebugMode'
+    'rtReflectionLodBias', 'rtReflectionHalfRes', 'rtDebugMode',
+    'rtReflectionHistoryAgeHistogramTotal', 'rtReflectionHistoryAgeNonZeroPixels',
+    'rtReflectionHistoryAgeBin00Share', 'rtReflectionHistoryAgeHistogramCoverage',
+    'rtReflectionHistoryAgeHistogramMismatch', ...rtHistoryAgeFields
   ];
   const lines = [
     '# Lucid Engine Render Benchmark', '',
@@ -483,6 +511,7 @@ function writeSummary(results, sceneMeta) {
     '- RT quality profiles: ' + [...new Set(results.map(r => r.profile?.id).filter(Boolean))].join(', '),
     '- Profile settings are applied over JSON-RPC and captured from renderer readback; numeric profiler metrics are also copied dynamically into raw samples.',
     '- Warmup: ' + WARMUP_MS + ' ms; capture: ' + CAPTURE_MS + ' ms',
+    '- Primary-hit stochastic-light A/B repeats: ' + RT_AB_REPEATS + ' (editor_quality; OFF vs ON, same binary/scene/camera).',
     '- GPU subpass values are nested inside AO + RT and must not be summed into the parent.',
     '',
     '| Test | ' + fields.join(' | ') + ' |',
@@ -546,16 +575,63 @@ function writeSummary(results, sceneMeta) {
     ].join(' | ') + ' |');
   }
   lines.push('', '## RT reflection quality settings', '',
-    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Stochastic lights | LOD bias | Half resolution | Debug mode ID |',
-    '|---|' + Array(9).fill('---:').join('|') + '|');
+    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Secondary stochastic lights | Primary stochastic lights | LOD bias | Half resolution | Debug mode ID |',
+    '|---|' + Array(10).fill('---:').join('|') + '|');
   for (const result of results) {
     const a = result.averages;
     lines.push('| ' + result.name + ' | ' + [
       a.rtReflectionSamples ?? 0, a.rtReflectionBounces ?? 0,
       a.rtReflectionInfiniteBounces ?? 0, a.rtReflectionMaxRoughness ?? 0,
       a.rtReflectionCheckerboard ?? 0, a.rtReflectionStochasticLights ?? 0,
-      a.rtReflectionLodBias ?? 0, a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
+      a.rtReflectionPrimaryStochasticLights ?? 0, a.rtReflectionLodBias ?? 0,
+      a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
     ].join(' | ') + ' |');
+  }
+  lines.push('', '## Reflection-history age histogram', '',
+    'Bin 00 includes zero-age pixels and ages below the first linear threshold (maxHistory / 16). The histogram is a per-frame diagnostic counter distribution; compare it with rtReflectionPixels. A coverage value of 1.0 means the 16 bins account for every in-bounds reflection pixel.', '',
+    '| Test | Reflection pixels | Histogram total | Bin 00 share | Non-zero age pixels | Coverage | Mismatch |',
+    '|---|---:|---:|---:|---:|---:|---:|');
+  for (const result of results) {
+    const a = result.averages;
+    lines.push('| ' + result.name + ' | ' + [
+      a.rtReflectionPixels ?? 0, a.rtReflectionHistoryAgeHistogramTotal ?? 0,
+      a.rtReflectionHistoryAgeBin00Share ?? 0, a.rtReflectionHistoryAgeNonZeroPixels ?? 0,
+      a.rtReflectionHistoryAgeHistogramCoverage ?? 0, a.rtReflectionHistoryAgeHistogramMismatch ?? 0
+    ].join(' | ') + ' |');
+  }
+  lines.push('', '## Primary-hit stochastic-light A/B', '',
+    '| Pair | Variant | Repeat | FPS | Frame ms | GPU ms | AO+RT ms | Reflection trace exec ms | Reflection trace incl. gap ms | Reflection temporal ms | History accepted | Bin 00 share |',
+    '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  for (const result of results.filter(r => r.abComparison)) {
+    const a = result.averages;
+    lines.push('| ' + [
+      result.abComparison.featureSet, result.abComparison.primaryStochasticLights ? 'ON' : 'OFF',
+      result.abComparison.repeat, a.fps ?? 0, a.frameTimeMs ?? 0, a.gpuTimeMs ?? 0, a.gpuAoRtMs ?? 0,
+      a.rtReflectionTraceExecMs ?? 0, a.rtReflectionTraceMs ?? 0, a.rtReflectionTemporalMs ?? 0,
+      a.rtReflectionHistoryAccepted ?? 0, a.rtReflectionHistoryAgeBin00Share ?? 0
+    ].join(' | ') + ' |');
+  }
+  const abFeatureIds = [...new Set(results.filter(r => r.abComparison).map(r => r.abComparison.featureSet))];
+  lines.push('', '## Primary-hit A/B aggregate deltas (ON relative to OFF)', '',
+    '| Feature set | Metric | OFF mean | ON mean | Delta % |',
+    '|---|---|---:|---:|---:|');
+  const abMetricKeys = [
+    ['Frame time', 'frameTimeMs'], ['GPU frame time', 'gpuTimeMs'],
+    ['AO + RT stage', 'gpuAoRtMs'], ['Reflection trace execution', 'rtReflectionTraceExecMs'],
+    ['Reflection trace incl. dependency gap', 'rtReflectionTraceMs'],
+    ['Reflection temporal', 'rtReflectionTemporalMs'],
+    ['History accepted', 'rtReflectionHistoryAccepted'],
+    ['History age bin 00 share', 'rtReflectionHistoryAgeBin00Share']
+  ];
+  for (const featureSet of abFeatureIds) {
+    const off = results.filter(r => r.abComparison?.featureSet === featureSet && !r.abComparison.primaryStochasticLights);
+    const on = results.filter(r => r.abComparison?.featureSet === featureSet && r.abComparison.primaryStochasticLights);
+    for (const [label, key] of abMetricKeys) {
+      const offMean = mean(off.map(r => Number(r.averages[key] || 0)));
+      const onMean = mean(on.map(r => Number(r.averages[key] || 0)));
+      const delta = Math.abs(offMean) > 1e-9 ? ((onMean - offMean) / offMean) * 100 : 0;
+      lines.push('| ' + [featureSet, label, round(offMean), round(onMean), round(delta, 2)].join(' | ') + ' |');
+    }
   }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
@@ -567,7 +643,8 @@ function writeSummary(results, sceneMeta) {
     '- RT stage timings retain inclusive values and additionally expose dispatch-only execution and dependency-gap intervals.',
     '- Dependency-gap intervals are GPU scheduling gaps around synchronization barriers, not direct measurements of barrier instruction cost.',
     '- RT quality telemetry (samples, internal GI resolution, temporal history and SVGF state) is observational; the harness does not change RT quality defaults or reflection algorithms.',
-    '- Temporal debug views expose history length and variance, but this benchmark does not read back per-pixel history-age distributions or rejection counts; GPU readback would add measurement overhead and needs a separately gated diagnostic mode.', '');
+    '- The A/B variant changes only reflectionPrimaryStochasticLights; reflectionStochasticLights remains enabled for secondary bounces in both variants.',
+    '- Reflection-history bins are exported by the existing diagnostic SSBO; the report checks histogram coverage against rtReflectionPixels and retains every bin in raw samples/CSV.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
   const csvFields = [...new Set([...fields, ...rtDiagnosticFields,
     'gtaoRadius', 'gtaoIntensity', 'ssgiIntensity', 'ssgiGroundReflectance', 'ssgiMultiBounce',
@@ -588,7 +665,7 @@ function writeSummary(results, sceneMeta) {
   fs.writeFileSync(path.join(outputDir, 'REPORT.json'), JSON.stringify({
     generatedAt: new Date().toISOString(), executable: EXE, port: PORT,
     resolution: { width: WIDTH, height: HEIGHT }, scene: sceneMeta,
-    settings: { warmupMs: WARMUP_MS, captureMs: CAPTURE_MS, sampleIntervalMs: SAMPLE_INTERVAL_MS },
+    settings: { warmupMs: WARMUP_MS, captureMs: CAPTURE_MS, sampleIntervalMs: SAMPLE_INTERVAL_MS, rtAbRepeats: RT_AB_REPEATS },
     results: results.map(({ rawSamples, ...summary }) => summary)
   }, null, 2));
 }
@@ -671,6 +748,39 @@ async function main() {
     console.log('\\n[PROFILE] ' + profile.label);
     for (const [caseName, features] of profileCases) {
       results.push(await captureScenario('atrium_' + profile.id + '_' + caseName, features, sceneMeta, profile));
+    }
+  }
+
+  // Controlled same-build A/B for PR #49's primary-hit local-light estimator.
+  // Only the primary-hit toggle changes; all RT quality values, scene, camera and secondary-bounce
+  // stochastic-light setting remain identical. Alternate order on each repeat to reduce drift bias.
+  const editorQuality = RT_PROFILES.find(profile => profile.id === 'editor_quality');
+  const abFeatureSets = [
+    { id: 'reflections_only', flags: { gtao: false, ssgi: false, rtGi: false, rtAo: false, rtReflections: true } },
+    { id: 'all_effects', flags: { gtao: true, ssgi: true, rtGi: true, rtAo: true, rtReflections: true } }
+  ];
+  for (let repeat = 1; repeat <= RT_AB_REPEATS; repeat++) {
+    for (const featureSet of abFeatureSets) {
+      const order = (repeat % 2 === 1) ? [false, true] : [true, false];
+      for (const primaryStochasticLights of order) {
+        const abProfile = {
+          ...editorQuality,
+          settings: { ...editorQuality.settings, reflectionPrimaryStochasticLights: primaryStochasticLights }
+        };
+        const variant = primaryStochasticLights ? 'on' : 'off';
+        const name = 'ab_editor_quality_' + featureSet.id + '_primary_' + variant + '_r' + repeat;
+        const result = await captureScenario(name, featureSet.flags, {
+          ...sceneMeta,
+          abComparison: {
+            featureSet: featureSet.id,
+            primaryStochasticLights,
+            repeat,
+            pairId: 'editor_quality_' + featureSet.id + '_r' + repeat
+          }
+        }, abProfile);
+        results.push(result);
+        if (repeat === 1) await saveSceneCapture(name + '.jpg');
+      }
     }
   }
 

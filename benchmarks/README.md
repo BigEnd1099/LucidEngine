@@ -21,6 +21,7 @@ The runner disables the FPS limiter and VSync for uncapped measurements. The ren
 - `LUCID_BENCH_WIDTH` / `LUCID_BENCH_HEIGHT` — render resolution, defaults `2560 × 1440` (1440p, 16:9)
 - `LUCID_BENCH_WARMUP_MS` — warm-up per case, default `1500`
 - `LUCID_BENCH_CAPTURE_MS` — sampling period per case, default `2000`
+- `LUCID_RT_AB_REPEATS` — paired primary-hit stochastic-light A/B repeats, default `3` (clamped to 1–5)
 
 ## Scene design
 
@@ -51,7 +52,7 @@ Every numeric profiler metric is copied into each raw sample dynamically, so new
 
 The editor-quality profile reproduces the RT values visible in the supplied capture; it does not claim to reproduce unreported editor settings. GTAO/SSGI values are recorded from the running renderer and are not silently inferred.
 
-The shader debug modes include history-length and variance visualizations. The benchmark deliberately does not read back per-pixel history-age distributions or rejection counts in its normal performance pass: that requires an additional GPU readback path and would perturb the timings. Those measurements should be added as an explicitly opt-in diagnostic capture, separate from clean performance numbers.
+The profiler's existing RT diagnostic SSBO exports 16 history-age bins for GI and reflections without a separate image readback. The report includes reflection histogram coverage versus `rtReflectionPixels`, the bin-00 share, and every bin in raw samples/CSV. Bin 00 includes age zero and ages below `maxHistory / 16`; with `maxHistory=256`, it spans ages below 16 samples. The benchmark also runs a controlled same-build primary-hit stochastic-light A/B in `editor_quality`: OFF vs ON, with identical scene/camera/quality and alternating order across repeats. Only `reflectionPrimaryStochasticLights` changes; secondary-bounce stochastic lighting stays enabled in both variants.
 
 ## Output
 
@@ -62,6 +63,7 @@ Every run creates `benchmark-results/run-<timestamp>/` containing:
 - `REPORT.json` — machine-readable summary
 - one JSON file per test case with raw samples
 - `atrium-benchmark.jpg` — scene capture
+- `ab_editor_quality_*.jpg` — first-repeat screenshots for the primary-hit stochastic-light A/B pairs
 - `AtriumBenchmark/` — saved editable project (`.uproject`, `project.json`, `game.json` and project folders)
 
 GPU subpass values are nested inside the AO + RT aggregate; do not add them to the parent stage.
