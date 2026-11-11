@@ -24,7 +24,7 @@ namespace engine::physics {
 
     class EngineContactListener final : public JPH::ContactListener {
     public:
-        virtual void OnContactAdded(const JPH::Body &inBody1, const JPH::Body &inBody2, const JPH::ContactManifold &inManifold, JPH::ContactSettings &ioSettings) override {
+        virtual void OnContactAdded(const JPH::Body &inBody1, const JPH::Body &inBody2, const JPH::ContactManifold &, JPH::ContactSettings &ioSettings) override {
             // Use maximum restitution so bouncy objects bounce properly on any surface
             ioSettings.mCombinedRestitution = std::max(inBody1.GetRestitution(), inBody2.GetRestitution());
             ioSettings.mCombinedFriction = std::sqrt(std::max(0.0f, inBody1.GetFriction()) * std::max(0.0f, inBody2.GetFriction()));
