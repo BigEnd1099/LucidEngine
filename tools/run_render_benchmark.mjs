@@ -619,7 +619,9 @@ function writeSummary(results, sceneMeta) {
     ['Frame time', 'frameTimeMs'], ['GPU frame time', 'gpuTimeMs'],
     ['AO + RT stage', 'gpuAoRtMs'], ['Reflection trace execution', 'rtReflectionTraceExecMs'],
     ['Reflection trace incl. dependency gap', 'rtReflectionTraceMs'],
-    ['Reflection temporal', 'rtReflectionTemporalMs']
+    ['Reflection temporal', 'rtReflectionTemporalMs'],
+    ['History accepted', 'rtReflectionHistoryAccepted'],
+    ['History age bin 00 share', 'rtReflectionHistoryAgeBin00Share']
   ];
   for (const featureSet of abFeatureIds) {
     const off = results.filter(r => r.abComparison?.featureSet === featureSet && !r.abComparison.primaryStochasticLights);
@@ -644,7 +646,7 @@ function writeSummary(results, sceneMeta) {
     '- The A/B variant changes only reflectionPrimaryStochasticLights; reflectionStochasticLights remains enabled for secondary bounces in both variants.',
     '- Reflection-history bins are exported by the existing diagnostic SSBO; the report checks histogram coverage against rtReflectionPixels and retains every bin in raw samples/CSV.', '');
   fs.writeFileSync(path.join(outputDir, 'REPORT.md'), lines.join('\n'));
-  const csvFields = [...new Set([...fields, ...rtDiagnosticFields, ...rtHistoryAgeFields,
+  const csvFields = [...new Set([...fields, ...rtDiagnosticFields,
     'gtaoRadius', 'gtaoIntensity', 'ssgiIntensity', 'ssgiGroundReflectance', 'ssgiMultiBounce',
     'ssgiGroundColorR', 'ssgiGroundColorG', 'ssgiGroundColorB',
     'rtEnabled', 'rtAvailable', 'rtShadowsEnabled', 'rtGiHalfRes', 'rtGiIntensity', 'rtDenoiseEnabled',
