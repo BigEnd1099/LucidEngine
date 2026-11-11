@@ -17,10 +17,7 @@ endif()
 
 project(LucidEngine CXX)
 
-if(MSVC)
-    # Keep the selected MSVC runtime consistent across the engine and dependencies.
-    # Project-specific exception and warning flags are applied to project targets below.
-endif()
+# The MSVC runtime is selected above; compiler options are scoped to Lucid targets below.
 
 # GLM configuration macros are applied to Lucid targets only, not every fetched dependency.
 set(LUCID_GLM_COMPILE_DEFINITIONS
