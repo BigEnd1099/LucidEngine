@@ -67,7 +67,7 @@ int main() {
     cluster.coneAxis = glm::vec3(0.0f);
     clusters.registerCluster(cluster);
     NaniteCluster outside = cluster;
-    outside.sphereCenter = glm::vec3(10.0f, 0.0f, 0.0f);
+    outside.sphereCenter = glm::vec3(-10.0f, 0.0f, 0.0f);
     clusters.registerCluster(outside);
     const auto visible = clusters.cullVisibleClusters(outsidePlane, glm::vec3(0.0f, 0.0f, 5.0f), 1.0f);
     assert(visible.size() == 1 && visible.front() == 0);
