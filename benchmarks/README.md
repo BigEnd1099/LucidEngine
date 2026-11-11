@@ -71,3 +71,21 @@ RT pass timings retain inclusive stage values and also report dispatch-only exec
 Reports include observational RT quality telemetry: GI sample count, internal GI resolution, GI and reflection bounce counts, temporal-history capacity/validity, history invalidation by camera/light changes, SVGF state, checkerboard state, reflection roughness threshold, stochastic-light/LOD options and reflection resolution.
 
 RT reflection algorithms, shaders and quality defaults are not modified by the benchmark harness.
+
+## Renderer algorithm regression tests
+
+The optional C++ regression target covers CPU-side renderer algorithms without launching the editor or requiring a GPU device:
+
+```powershell
+cmake -S engine -B engine/build/algorithm-tests -DLUCID_BUILD_ALGORITHM_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build engine/build/algorithm-tests --config Release --target lucid_renderer_algorithm_tests
+ctest --test-dir engine/build/algorithm-tests -C Release --output-on-failure
+```
+
+The suite currently checks ReSTIR reservoir candidate-count normalization, invalid target-PDF handling, non-normalized frustum planes, conservative handling of invalid normal-cone metadata, CPU batch culling, RenderGraph dependency ordering/cycle rejection, and profiler sample aggregation. It is opt-in so normal engine builds do not gain another executable.
+
+Profiler JSON semantics:
+- `samples.*.avgMs` is the arithmetic mean over all recorded samples.
+- `samples.*.rollingAvgMs` is the exponential moving average.
+- `samples.*.sampleCount`, `minMs`, and `maxMs` expose the sample population and range.
+- `frameTimeAvgMs` is the arithmetic mean over completed frames; `frameTimeP95Ms` is the 95th percentile of the latest 180 frame-time samples.

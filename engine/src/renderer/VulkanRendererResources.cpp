@@ -1,8 +1,16 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "core/Logger.hpp"
 #include <stdexcept>
+#include <string>
 
 namespace engine::renderer {
+    namespace {
+        void requireVkSuccess(VkResult result, const char* operation) {
+            if (result == VK_SUCCESS) return;
+            throw std::runtime_error(
+                std::string(operation) + " failed with VkResult " + std::to_string(static_cast<int>(result)));
+        }
+    }
 
     void VulkanRenderer::createPointShadowResources() {
         VkImageCreateInfo cubeInfo{};
@@ -30,13 +38,13 @@ namespace engine::renderer {
         cubeViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
         cubeViewInfo.format = VK_FORMAT_D32_SFLOAT;
         cubeViewInfo.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 6 };
-        vkCreateImageView(m_context->getDevice(), &cubeViewInfo, nullptr, &m_pointShadowCubeView);
+        requireVkSuccess(vkCreateImageView(m_context->getDevice(), &cubeViewInfo, nullptr, &m_pointShadowCubeView), "vkCreateImageView(point shadow cube)");
 
         for (uint32_t f = 0; f < 6; ++f) {
             VkImageViewCreateInfo faceViewInfo = cubeViewInfo;
             faceViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
             faceViewInfo.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, f, 1 };
-            vkCreateImageView(m_context->getDevice(), &faceViewInfo, nullptr, &m_pointShadowFaceViews[f]);
+            requireVkSuccess(vkCreateImageView(m_context->getDevice(), &faceViewInfo, nullptr, &m_pointShadowFaceViews[f]), "vkCreateImageView(point shadow face)");
         }
 
         VkSamplerCreateInfo samplerInfo{};
@@ -48,7 +56,7 @@ namespace engine::renderer {
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        vkCreateSampler(m_context->getDevice(), &samplerInfo, nullptr, &m_pointShadowSampler);
+        requireVkSuccess(vkCreateSampler(m_context->getDevice(), &samplerInfo, nullptr, &m_pointShadowSampler), "vkCreateSampler(point shadow)");
     }
 
     void VulkanRenderer::cleanupPointShadowResources() {
@@ -91,13 +99,13 @@ namespace engine::renderer {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         viewInfo.format = VK_FORMAT_D32_SFLOAT;
         viewInfo.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, SHADOW_CASCADE_COUNT };
-        vkCreateImageView(m_context->getDevice(), &viewInfo, nullptr, &m_shadowImageView);
+        requireVkSuccess(vkCreateImageView(m_context->getDevice(), &viewInfo, nullptr, &m_shadowImageView), "vkCreateImageView(cascaded shadow array)");
 
         for (uint32_t c = 0; c < SHADOW_CASCADE_COUNT; ++c) {
             VkImageViewCreateInfo cv = viewInfo;
             cv.viewType = VK_IMAGE_VIEW_TYPE_2D;
             cv.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, c, 1 };
-            vkCreateImageView(m_context->getDevice(), &cv, nullptr, &m_shadowCascadeImageViews[c]);
+            requireVkSuccess(vkCreateImageView(m_context->getDevice(), &cv, nullptr, &m_shadowCascadeImageViews[c]), "vkCreateImageView(shadow cascade)");
         }
 
         VkSamplerCreateInfo samplerInfo{};
@@ -110,7 +118,7 @@ namespace engine::renderer {
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
         samplerInfo.compareEnable = VK_FALSE;
-        vkCreateSampler(m_context->getDevice(), &samplerInfo, nullptr, &m_shadowSampler);
+        requireVkSuccess(vkCreateSampler(m_context->getDevice(), &samplerInfo, nullptr, &m_shadowSampler), "vkCreateSampler(shadow map)");
     }
 
     void VulkanRenderer::cleanupShadowResources() {

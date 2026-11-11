@@ -31,7 +31,7 @@ The counters remain diagnostic instrumentation. Shared-memory atomics and two wo
 
 ## Reflection local-light sampling
 
-When reflection stochastic-light sampling is enabled, each reflection hit now selects one local light uniformly and multiplies its contribution by the active-light count. This is an unbiased estimator of the sum of local-light contributions and is applied to the primary reflection hit as well as secondary bounces. Previously, the primary hit evaluated every active local light (up to eight) and could issue a separate shadow ray query for each one, while stochastic selection was restricted to later bounces. The change reduces primary-hit local-light shadow-ray work when multiple local lights are active. It trades per-sample variance for fewer shadow queries; the configured reflection sample count and temporal accumulation remain unchanged. Validate image stability and GPU timings in the same scene with stochastic lights enabled and disabled.
+The secondary-bounce stochastic-light option continues to select one local light uniformly and scale its contribution by the active-light count. This remains an unbiased estimator and retains the pre-PR #49 behavior for bounce >= 1. The PR #49 extension to the primary reflection hit is now a separate opt-in setting (`reflectionPrimaryStochasticLights`, disabled by default). When enabled, it uses the same estimator on bounce 0, reducing local-light shadow queries at the cost of increased per-sample variance. Reflection sample count, bounce count, and temporal accumulation are not changed by this option. Compare both modes in identical scenes, especially mirror-like materials and scenes with several local lights.
 
 ## Deliberately not enabled: multiple frames in flight
 

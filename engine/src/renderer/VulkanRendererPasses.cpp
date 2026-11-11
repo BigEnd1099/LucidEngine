@@ -1319,6 +1319,7 @@ namespace engine::renderer {
             core::Profiler::get().recordMetric("rtSpatialStrength", m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0);
             core::Profiler::get().recordMetric("rtReflectionCheckerboard", m_rtSettings.reflectionCheckerboard ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtReflectionStochasticLights", m_rtSettings.reflectionStochasticLights ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtReflectionPrimaryStochasticLights", m_rtSettings.reflectionPrimaryStochasticLights ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtReflectionLodBias", m_rtSettings.reflectionLodBias ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));
@@ -1339,6 +1340,7 @@ namespace engine::renderer {
                 rtp.reflectionMinThroughput = m_rtSettings.reflectionMinThroughput;
                 rtp.reflectionCheckerboard = m_rtSettings.reflectionCheckerboard;
                 rtp.reflectionStochasticLights = m_rtSettings.reflectionStochasticLights;
+                rtp.reflectionPrimaryStochasticLights = m_rtSettings.reflectionPrimaryStochasticLights;
                 rtp.reflectionLodBias = m_rtSettings.reflectionLodBias;
                 rtp.reflectionHalfRes = m_rtSettings.reflectionHalfRes;
                 rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
@@ -1391,6 +1393,7 @@ namespace engine::renderer {
                 rtProfiler.recordMetric("rtReflectionMaxRoughness", m_rtSettings.reflectionMaxRoughness);
                 rtProfiler.recordMetric("rtReflectionCheckerboard", m_rtSettings.reflectionCheckerboard ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtReflectionStochasticLights", m_rtSettings.reflectionStochasticLights ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtReflectionPrimaryStochasticLights", m_rtSettings.reflectionPrimaryStochasticLights ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtReflectionLodBias", m_rtSettings.reflectionLodBias ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));

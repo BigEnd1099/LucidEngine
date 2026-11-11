@@ -537,6 +537,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtReflectionMaxRoughness", params.reflectionMaxRoughness);
         profiler.recordMetric("rtReflectionCheckerboard", params.reflectionCheckerboard ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionStochasticLights", params.reflectionStochasticLights ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionPrimaryStochasticLights", params.reflectionPrimaryStochasticLights ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionLodBias", params.reflectionLodBias ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionHalfRes", params.reflectionHalfRes ? 1.0 : 0.0);
         profiler.recordMetric("rtDebugMode", static_cast<uint32_t>(params.debugMode));
@@ -701,6 +702,7 @@ namespace engine::renderer {
             if (params.reflectionStochasticLights) reflFlags |= (1u << 9);
             if (params.reflectionLodBias)          reflFlags |= (1u << 10);
             if (params.reflectionHalfRes)          reflFlags |= (1u << 11);
+            if (params.reflectionPrimaryStochasticLights) reflFlags |= (1u << 12);
             reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
