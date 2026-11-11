@@ -247,10 +247,9 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
     float rawRoughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
 
-    // Roughness Regularization:
-    // For diffuse GI: widen GGX lobe to avoid delta fireflies while preserving directionality
-    // For reflections: minimum roughness for analytical point lights (sphere light approximation)
-    float effRoughness = isDiffuseGI ? clamp(rawRoughness, 0.20, 0.45) : max(rawRoughness, 0.12);
+    // Use the authored material roughness consistently in all RT hit paths.
+    // A tiny floor only protects the GGX denominator from a true delta distribution.
+    float effRoughness = max(rawRoughness, 0.02);
 
     vec3 shadingNormal = normalize(hitNormal);
     vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, mipLod).xyz * 2.0 - 1.0;
@@ -279,7 +278,6 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
 
     // Specular boost for directional bounce in diffuse GI to compensate for cosine sampling
     float giSpecBoost = isDiffuseGI ? mix(1.0, 2.5, metallic * (1.0 - rawRoughness)) : 1.0;
-    float directMetalBoost = mix(1.0, 4.0, metallic);
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float sunNdotL = max(dot(hitNormal, sunDir), 0.0);
@@ -294,7 +292,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float Vis = rtVisibilitySmithGGXCorrelated(NdotV, sunNdotL, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
+        vec3 spec = (D * Vis * F) * giSpecBoost;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
     }
@@ -340,25 +338,15 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float Vis = rtVisibilitySmithGGXCorrelated(NdotV, ndotl, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
+        vec3 spec = (D * Vis * F) * giSpecBoost;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.lightsCol[i].rgb *
                     (intensity * 4.0 * attenuation * ndotl * lightMultiplier);
     }
 
-    // Ambient / Environment lighting at hit point
-    if ((ubo.skyboxMode & 2) != 0) {
-        vec3 ambientIBL = sampleRtSkyRadiance(hitNormal) * 0.5;
-        vec3 ambientF = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-        vec3 ambientKD = (vec3(1.0) - ambientF) * (1.0 - metallic);
-        radiance += ambientKD * diffuse * ambientIBL;
-
-        vec3 R = reflect(-V, hitNormal);
-        float roughFade = mix(1.0 - rawRoughness * 0.5, 1.0, metallic);
-        vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * roughFade;
-        float skyScale = (specSkyScale >= 0.0) ? specSkyScale : (isDiffuseGI ? 0.25 : 1.0);
-        radiance += specSky * skyScale;
-    }
+    // Do not inject unoccluded sky IBL at a secondary surface hit.
+    // Environment radiance is added on ray misses, where visibility is known.
+    // This prevents HDRI light from leaking through closed walls and ceilings.
 
     return sanitizeHDR(clampFirefly(radiance, isDiffuseGI ? 16.0 : 32.0));
 }
