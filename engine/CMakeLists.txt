@@ -227,6 +227,7 @@ target_link_libraries(engine PRIVATE
 option(LUCID_BUILD_ALGORITHM_TESTS "Build Lucid renderer algorithm tests" OFF)
 if(LUCID_BUILD_ALGORITHM_TESTS)
     enable_testing()
+    find_package(Threads REQUIRED)
     add_executable(lucid_renderer_algorithm_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_renderer_algorithms.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/Profiler.cpp
@@ -241,6 +242,7 @@ if(LUCID_BUILD_ALGORITHM_TESTS)
         glm::glm
         nlohmann_json::nlohmann_json
         Vulkan::Vulkan
+        Threads::Threads
     )
     add_test(NAME lucid_renderer_algorithm_tests COMMAND lucid_renderer_algorithm_tests)
 endif()
