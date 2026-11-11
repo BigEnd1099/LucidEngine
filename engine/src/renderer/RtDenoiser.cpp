@@ -701,6 +701,7 @@ namespace engine::renderer {
             if (params.reflectionStochasticLights) reflFlags |= (1u << 9);
             if (params.reflectionLodBias)          reflFlags |= (1u << 10);
             if (params.reflectionHalfRes)          reflFlags |= (1u << 11);
+            if (params.reflectionPrimaryStochasticLights) reflFlags |= (1u << 12);
             reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
