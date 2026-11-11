@@ -1,0 +1,50 @@
+{
+    "audio": {
+        "masterVolume": 1.0,
+        "sfxVolume": 1.0
+    },
+    "general": {
+        "autoSavePreferences": true,
+        "lastProjectPath": "projects/MyGame",
+        "loadLastProjectOnStartup": true
+    },
+    "graphics": {
+        "antiAliasingMode": 1,
+        "autoViewportResolution": true,
+        "bloomEnabled": true,
+        "bloomIntensity": 0.65,
+        "bloomThreshold": 1.0,
+        "exposure": 1.0,
+        "gtaoEnabled": true,
+        "gtaoIntensity": 1.15,
+        "gtaoRadius": 0.75,
+        "rayTracingEnabled": false,
+        "resolutionScale": 1.0,
+        "shadowDistance": 100.0,
+        "targetFps": 0,
+        "vsync": true
+    },
+    "language": "en",
+    "ui": {
+        "showContentDrawer": false,
+        "showDetails": true,
+        "showOutliner": true,
+        "showOutputLog": false,
+        "showPlaceActors": true,
+        "showScriptStudio": false,
+        "uiScale": 1.0,
+        "userDrawerH": 220.0,
+        "userLeftPanelW": 260.0,
+        "userOutlinerH": 240.0,
+        "userRightPanelW": 310.0
+    },
+    "viewport": {
+        "camFlySpeed": 25.0,
+        "camMouseSensitivity": 0.2,
+        "cameraSpeed": 4,
+        "gizmoSpaceLocal": false,
+        "invertY": false,
+        "snapEnabled": false,
+        "snapStep": 0.5
+    }
+}
