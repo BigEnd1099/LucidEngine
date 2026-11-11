@@ -1,9 +1,11 @@
 #pragma once
+#include <array>
 #include <chrono>
+#include <cstdint>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <mutex>
 #include <nlohmann/json.hpp>
 
 namespace engine::core {
@@ -54,16 +56,29 @@ namespace engine::core {
         void recordSampleDuration(const std::string& name, double elapsedMs);
 
         using Clock = std::chrono::steady_clock;
+        static constexpr size_t FRAME_HISTORY_CAPACITY = 180;
+
         std::mutex m_mutex;
-        Clock::time_point m_frameStartTime;
+        Clock::time_point m_frameStartTime{};
+        bool m_frameActive{false};
         float m_lastFrameTimeMs{16.6f};
-        float m_avgFps{60.0f};
+        float m_avgFps{0.0f};
         float m_gpuTimeMs{0.0f};
+        double m_totalFrameTimeMs{0.0};
+        uint64_t m_frameTimeSampleCount{0};
+        std::array<float, FRAME_HISTORY_CAPACITY> m_frameTimeHistory{};
+        size_t m_frameHistoryCount{0};
+        size_t m_frameHistoryWriteIndex{0};
 
         struct SampleData {
-            Clock::time_point start;
+            Clock::time_point start{};
+            bool active{false};
             double elapsedMs{0.0};
+            double totalMs{0.0};
             double rollingAvgMs{0.0};
+            double minMs{0.0};
+            double maxMs{0.0};
+            uint64_t sampleCount{0};
         };
 
         std::unordered_map<std::string, SampleData> m_samples;
