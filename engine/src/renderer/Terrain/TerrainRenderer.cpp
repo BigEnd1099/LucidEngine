@@ -14,7 +14,7 @@ namespace engine::renderer {
         m_terrainChunks.clear();
     }
 
-    void TerrainRenderer::renderCDLOD(VkCommandBuffer cmd) {
+    void TerrainRenderer::renderCDLOD(VkCommandBuffer) {
         // MultiDrawIndirect for quadtree terrain grid chunks
     }
 

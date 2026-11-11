@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <string>
 
 #ifdef USE_GLFW
@@ -95,7 +96,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             ? registry.get().get<ecs::TagComponent>(selectedEntity).name
                             : "Actor";
                         char nameBuf[64];
-                        strncpy(nameBuf, tagStr.c_str(), sizeof(nameBuf) - 1);
+                        std::snprintf(nameBuf, sizeof(nameBuf), "%s", tagStr.c_str());
                         nameBuf[sizeof(nameBuf) - 1] = '\0';
                         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 170.0f * uiScale);
                         if (ImGui::InputText("##EntityName", nameBuf, sizeof(nameBuf))) {
@@ -417,7 +418,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     auto renderSlot = [&](const char* label, std::string& path, uint32_t& texId) {
                                         ImGui::PushID(label);
                                         char buf[256];
-                                        std::strncpy(buf, path.c_str(), sizeof(buf));
+                                        std::snprintf(buf, sizeof(buf), "%s", path.c_str());
                                         buf[sizeof(buf) - 1] = '\0';
                                         if (ImGui::InputText(label, buf, sizeof(buf))) {
                                             path = buf;

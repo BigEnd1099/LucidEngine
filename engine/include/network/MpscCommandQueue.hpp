@@ -9,10 +9,17 @@ namespace engine::network {
 
 class MpscCommandQueue {
 public:
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324) // Intentional cache-line alignment prevents false sharing.
+#endif
     struct alignas(64) Node {
         std::atomic<Node*> next{nullptr};
         RpcCommandMessage msg{};
     };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
     explicit MpscCommandQueue(size_t preallocatedNodes = 1024);
     ~MpscCommandQueue();

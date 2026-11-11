@@ -50,11 +50,11 @@ namespace engine::renderer {
         return false;
     }
 
-    void VirtualShadowMap::dispatchPageAllocation(VkCommandBuffer cmd) {
+    void VirtualShadowMap::dispatchPageAllocation(VkCommandBuffer) {
         // GPU Compute dispatch to analyze depth pyramid and mark needed VSM pages
     }
 
-    void VirtualShadowMap::renderShadows(VkCommandBuffer cmd) {
+    void VirtualShadowMap::renderShadows(VkCommandBuffer) {
         // Rasterize depth into allocated physical tiles in the physical tile atlas
     }
 }

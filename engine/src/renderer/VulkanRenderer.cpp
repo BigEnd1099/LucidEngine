@@ -18,9 +18,15 @@
 #include <array>
 #include <iostream>
 
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_STATIC
 #include "renderer/stb_image_write.h"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #ifdef USE_GLFW
 #include "imgui.h"

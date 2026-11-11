@@ -1,3 +1,7 @@
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4100) // QuickJS callback ABI requires unused named parameters in C callbacks.
+#endif
 #include <quickjs.h>
 #include "script/QuickJSContext.hpp"
 #include "core/Engine.hpp"
@@ -853,3 +857,7 @@ namespace engine::script {
         JS_FreeValue(m_ctx, global);
     }
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

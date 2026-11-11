@@ -20,7 +20,7 @@ SinglePortUnifiedServer::SinglePortUnifiedServer(
     , m_httpServer(port, "0.0.0.0")
 {
     // 1. Handle HTTP Requests (Embedded web assets with disk hot-reload on single port)
-    m_httpServer.setOnConnectionCallback([this](const ix::HttpRequestPtr& req, std::shared_ptr<ix::ConnectionState> connState) -> ix::HttpResponsePtr {
+    m_httpServer.setOnConnectionCallback([this](const ix::HttpRequestPtr& req, std::shared_ptr<ix::ConnectionState>) -> ix::HttpResponsePtr {
         // A. Priority 1: Check live 'dist/' folder on disk for instant hot-reload when src/App.tsx is edited
         std::string reqPath = req->uri;
         size_t queryPos = reqPath.find('?');

@@ -7,5 +7,5 @@ namespace engine::renderer {
         core::Logger::info("VirtualTextureManager (Sparse Textures) initialized.");
     }
     void VirtualTextureManager::cleanup() {}
-    void VirtualTextureManager::updatePageTable(VkCommandBuffer cmd) {}
+    void VirtualTextureManager::updatePageTable(VkCommandBuffer) {}
 }

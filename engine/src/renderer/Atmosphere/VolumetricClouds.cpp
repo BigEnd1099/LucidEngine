@@ -12,7 +12,7 @@ namespace engine::renderer {
 
     void VolumetricClouds::cleanup() {}
 
-    void VolumetricClouds::dispatchCloudRaymarching(VkCommandBuffer cmd) {
+    void VolumetricClouds::dispatchCloudRaymarching(VkCommandBuffer) {
         // Compute shader dispatch for Froxel volumetric clouds (Stubbed command buffer)
     }
 
