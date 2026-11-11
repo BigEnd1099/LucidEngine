@@ -21,6 +21,7 @@ The runner disables the FPS limiter and VSync for uncapped measurements. The ren
 - `LUCID_BENCH_WIDTH` / `LUCID_BENCH_HEIGHT` — render resolution, defaults `2560 × 1440` (1440p, 16:9)
 - `LUCID_BENCH_WARMUP_MS` — warm-up per case, default `1500`
 - `LUCID_BENCH_CAPTURE_MS` — sampling period per case, default `2000`
+- `LUCID_RT_AB_REPEATS` — paired primary-hit stochastic-light A/B repeats, default `3` (clamped to 1–5)
 
 ## Scene design
 
@@ -62,6 +63,7 @@ Every run creates `benchmark-results/run-<timestamp>/` containing:
 - `REPORT.json` — machine-readable summary
 - one JSON file per test case with raw samples
 - `atrium-benchmark.jpg` — scene capture
+- `ab_editor_quality_*.jpg` — first-repeat screenshots for the primary-hit stochastic-light A/B pairs
 - `AtriumBenchmark/` — saved editable project (`.uproject`, `project.json`, `game.json` and project folders)
 
 GPU subpass values are nested inside the AO + RT aggregate; do not add them to the parent stage.
