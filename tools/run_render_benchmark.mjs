@@ -12,7 +12,9 @@ const WIDTH = Number(process.env.LUCID_BENCH_WIDTH || 2560);
 const HEIGHT = Number(process.env.LUCID_BENCH_HEIGHT || 1440);
 const WARMUP_MS = Number(process.env.LUCID_BENCH_WARMUP_MS || 1500);
 const CAPTURE_MS = Number(process.env.LUCID_BENCH_CAPTURE_MS || 2000);
-const RT_AB_REPEATS = Math.max(1, Math.min(5, Number(process.env.LUCID_RT_AB_REPEATS || 3)));
+const requestedRtAbRepeats = Number.parseInt(process.env.LUCID_RT_AB_REPEATS || '3', 10);
+const RT_AB_REPEATS = Number.isFinite(requestedRtAbRepeats)
+  ? Math.max(1, Math.min(5, requestedRtAbRepeats)) : 3;
 const SAMPLE_INTERVAL_MS = 100;
 
 if (!fs.existsSync(EXE)) {
@@ -408,6 +410,11 @@ async function captureScenario(name, features, meta = {}, profile = RT_PROFILES[
     await sleep(SAMPLE_INTERVAL_MS);
   }
 
+  const histogramMismatchSamples = samples.filter(sample => sample.rtReflectionHistoryAgeHistogramMismatch > 0).length;
+  if (histogramMismatchSamples > 0) {
+    console.warn('[WARN] ' + name + ': reflection history-age histogram did not match rtReflectionPixels in ' +
+      histogramMismatchSamples + '/' + samples.length + ' profiler snapshots.');
+  }
   const numericKeys = Object.keys(samples[0] || {}).filter(key =>
     key !== 'timestamp' && samples.some(sample => typeof sample[key] === 'number'));
   const averages = {};
@@ -568,15 +575,16 @@ function writeSummary(results, sceneMeta) {
     ].join(' | ') + ' |');
   }
   lines.push('', '## RT reflection quality settings', '',
-    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Stochastic lights | LOD bias | Half resolution | Debug mode ID |',
-    '|---|' + Array(9).fill('---:').join('|') + '|');
+    '| Test | Reflection samples | Bounces | Infinite bounces | Max roughness | Checkerboard | Secondary stochastic lights | Primary stochastic lights | LOD bias | Half resolution | Debug mode ID |',
+    '|---|' + Array(10).fill('---:').join('|') + '|');
   for (const result of results) {
     const a = result.averages;
     lines.push('| ' + result.name + ' | ' + [
       a.rtReflectionSamples ?? 0, a.rtReflectionBounces ?? 0,
       a.rtReflectionInfiniteBounces ?? 0, a.rtReflectionMaxRoughness ?? 0,
       a.rtReflectionCheckerboard ?? 0, a.rtReflectionStochasticLights ?? 0,
-      a.rtReflectionLodBias ?? 0, a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
+      a.rtReflectionPrimaryStochasticLights ?? 0, a.rtReflectionLodBias ?? 0,
+      a.rtReflectionHalfRes ?? 0, a.rtDebugMode ?? 0
     ].join(' | ') + ' |');
   }
   lines.push('', '## Reflection-history age histogram', '',
@@ -602,6 +610,26 @@ function writeSummary(results, sceneMeta) {
       a.rtReflectionTraceExecMs ?? 0, a.rtReflectionTraceMs ?? 0, a.rtReflectionTemporalMs ?? 0,
       a.rtReflectionHistoryAccepted ?? 0, a.rtReflectionHistoryAgeBin00Share ?? 0
     ].join(' | ') + ' |');
+  }
+  const abFeatureIds = [...new Set(results.filter(r => r.abComparison).map(r => r.abComparison.featureSet))];
+  lines.push('', '## Primary-hit A/B aggregate deltas (ON relative to OFF)', '',
+    '| Feature set | Metric | OFF mean | ON mean | Delta % |',
+    '|---|---|---:|---:|---:|');
+  const abMetricKeys = [
+    ['Frame time', 'frameTimeMs'], ['GPU frame time', 'gpuTimeMs'],
+    ['AO + RT stage', 'gpuAoRtMs'], ['Reflection trace execution', 'rtReflectionTraceExecMs'],
+    ['Reflection trace incl. dependency gap', 'rtReflectionTraceMs'],
+    ['Reflection temporal', 'rtReflectionTemporalMs']
+  ];
+  for (const featureSet of abFeatureIds) {
+    const off = results.filter(r => r.abComparison?.featureSet === featureSet && !r.abComparison.primaryStochasticLights);
+    const on = results.filter(r => r.abComparison?.featureSet === featureSet && r.abComparison.primaryStochasticLights);
+    for (const [label, key] of abMetricKeys) {
+      const offMean = mean(off.map(r => Number(r.averages[key] || 0)));
+      const onMean = mean(on.map(r => Number(r.averages[key] || 0)));
+      const delta = Math.abs(offMean) > 1e-9 ? ((onMean - offMean) / offMean) * 100 : 0;
+      lines.push('| ' + [featureSet, label, round(offMean), round(onMean), round(delta, 2)].join(' | ') + ' |');
+    }
   }
   lines.push('', '## Notes', '',
     '- Each case resets RT temporal history before warmup.',
