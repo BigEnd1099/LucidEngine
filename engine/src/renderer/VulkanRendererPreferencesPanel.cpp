@@ -51,7 +51,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.reload_from_scene", " Reload from Scene ")) && engine) {
                         const std::string code = engine->getCurrentScript();
-                        std::strncpy(scriptBuf, code.c_str(), sizeof(scriptBuf) - 1);
+                        std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", code.c_str());
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = false;
                         s_scriptLastRunOk = true;
@@ -73,7 +73,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                     ImGui::SameLine();
                     if (ImGui::Button(editorText("script.template_impulse", " Template: Impulse "))) {
                         std::string tpl = "// QuickJS Live Script: Impuls fizyczny Jolt\nexport function update(dt) {\n    console.log('[QuickJS] Impuls fizyczny zaaplikowany');\n}\n";
-                        std::strncpy(scriptBuf, tpl.c_str(), sizeof(scriptBuf) - 1);
+                        std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", tpl.c_str());
                         scriptBuf[sizeof(scriptBuf) - 1] = '\0';
                         s_scriptDirty = true;
                         s_scriptLastRunOk = true;
@@ -338,7 +338,7 @@ void VulkanRenderer::drawEditorPreferencesPanel(core::Engine* engine,
                         if (projectPathEdited) {
                             pref.lastProjectPath = projPathBuf;
                         } else if (!ImGui::IsItemActive() && pref.lastProjectPath != projPathBuf) {
-                            std::strncpy(projPathBuf, pref.lastProjectPath.c_str(), sizeof(projPathBuf) - 1);
+                            std::snprintf(projPathBuf, sizeof(projPathBuf), "%s", pref.lastProjectPath.c_str());
                             projPathBuf[sizeof(projPathBuf) - 1] = '\0';
                         }
                         ImGui::Checkbox(editorText("settings.load_last_project", "Automatically load the last project on startup"), &pref.loadLastProjectOnStartup);
