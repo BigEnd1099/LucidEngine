@@ -53,8 +53,11 @@ namespace engine::renderer {
             const double weight = static_cast<double>(r2.W) *
                 static_cast<double>(r2.M) * static_cast<double>(targetPdf);
             if (std::isfinite(weight) && weight <= std::numeric_limits<float>::max()) {
+                const float safeRandom = std::isfinite(randVal)
+                    ? std::clamp(randVal, 0.0f, std::nextafter(1.0f, 0.0f))
+                    : 0.5f;
                 combined.update(r2.lightIndex, r2.sampleDir, r2.radiance,
-                    static_cast<float>(weight), glm::clamp(randVal, 0.0f, 1.0f));
+                    static_cast<float>(weight), safeRandom);
             }
         }
 
