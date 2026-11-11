@@ -82,7 +82,7 @@ cmake --build engine/build/algorithm-tests --config Release --target lucid_rende
 ctest --test-dir engine/build/algorithm-tests -C Release --output-on-failure
 ```
 
-The suite currently checks ReSTIR reservoir candidate-count normalization, invalid target-PDF handling, non-normalized frustum planes, conservative handling of invalid normal-cone metadata, CPU batch culling, and profiler sample aggregation. It is opt-in so normal engine builds do not gain another executable.
+The suite currently checks ReSTIR reservoir candidate-count normalization, invalid target-PDF handling, non-normalized frustum planes, conservative handling of invalid normal-cone metadata, CPU batch culling, RenderGraph dependency ordering/cycle rejection, and profiler sample aggregation. It is opt-in so normal engine builds do not gain another executable.
 
 Profiler JSON semantics:
 - `samples.*.avgMs` is the arithmetic mean over all recorded samples.
