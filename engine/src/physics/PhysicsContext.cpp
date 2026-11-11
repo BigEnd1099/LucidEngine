@@ -42,7 +42,7 @@ namespace engine::physics {
             m_contacts.push_back(cp);
         }
 
-        virtual void OnContactPersisted(const JPH::Body &inBody1, const JPH::Body &inBody2, const JPH::ContactManifold &inManifold, JPH::ContactSettings &ioSettings) override {
+        virtual void OnContactPersisted(const JPH::Body &inBody1, const JPH::Body &inBody2, const JPH::ContactManifold &, JPH::ContactSettings &ioSettings) override {
             ioSettings.mCombinedRestitution = std::max(inBody1.GetRestitution(), inBody2.GetRestitution());
             ioSettings.mCombinedFriction = std::sqrt(std::max(0.0f, inBody1.GetFriction()) * std::max(0.0f, inBody2.GetFriction()));
         }
