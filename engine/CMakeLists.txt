@@ -222,3 +222,25 @@ target_link_libraries(engine PRIVATE
     fastgltf::fastgltf
     Vulkan::Vulkan
 )
+
+# Optional focused tests for CPU-side renderer algorithms and profiler telemetry.
+option(LUCID_BUILD_ALGORITHM_TESTS "Build Lucid renderer algorithm tests" OFF)
+if(LUCID_BUILD_ALGORITHM_TESTS)
+    enable_testing()
+    add_executable(lucid_renderer_algorithm_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_renderer_algorithms.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/Profiler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Lighting/HardwareReSTIR.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Geometry/ClusterRenderer.cpp
+    )
+    target_include_directories(lucid_renderer_algorithm_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${vma_SOURCE_DIR}/include
+    )
+    target_link_libraries(lucid_renderer_algorithm_tests PRIVATE
+        glm::glm
+        nlohmann_json::nlohmann_json
+        Vulkan::Vulkan
+    )
+    add_test(NAME lucid_renderer_algorithm_tests COMMAND lucid_renderer_algorithm_tests)
+endif()
