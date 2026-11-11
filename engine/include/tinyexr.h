@@ -602,6 +602,9 @@ extern int LoadEXRFromMemory(float **out_rgba, int *width, int *height,
 
 #ifdef TINYEXR_IMPLEMENTATION
 #ifndef TINYEXR_IMPLEMENTATION_DEFINED
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
 #define TINYEXR_IMPLEMENTATION_DEFINED
 
 #ifdef _WIN32
@@ -9300,5 +9303,8 @@ int SaveEXR(const float *data, int width, int height, int components,
 #pragma clang diagnostic pop
 #endif
 
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #endif  // TINYEXR_IMPLEMENTATION_DEFINED
 #endif  // TINYEXR_IMPLEMENTATION
