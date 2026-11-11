@@ -49,7 +49,7 @@ namespace engine::world {
         return count;
     }
 
-    void WorldPartition::update(ecs::Registry* registry, physics::PhysicsContext* physics, const glm::vec3& cameraPos, float dt) {
+    void WorldPartition::update(ecs::Registry* registry, physics::PhysicsContext* physics, const glm::vec3& cameraPos, float) {
         if (!registry) return;
 
         CellCoord camCell = toCellCoord(cameraPos);
