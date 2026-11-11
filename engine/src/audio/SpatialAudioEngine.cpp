@@ -60,7 +60,7 @@ namespace engine::audio {
         const glm::vec3& listenerPos,
         const glm::vec3& listenerForward,
         const glm::vec3& listenerVelocity,
-        float dt
+        float
     ) {
         m_activePackets.clear();
         if (!registry) return;
