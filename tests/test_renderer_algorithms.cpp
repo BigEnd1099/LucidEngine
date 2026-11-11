@@ -84,6 +84,17 @@ int main() {
     graph.execute(VK_NULL_HANDLE);
     assert(execution.size() == 2 && execution[0] == "shade" && execution[1] == "present");
 
+    // Explicit dependencies must be resolved before inferring resource hazards:
+    // a producer may be declared after its consumer and still execute first.
+    graph.clear();
+    execution.clear();
+    graph.addPass("consume-later", {"shadow-map"}, {}, [&](VkCommandBuffer) { execution.push_back("consume"); }, {"produce-first"});
+    graph.addPass("produce-first", {}, {"shadow-map"}, [&](VkCommandBuffer) { execution.push_back("produce"); });
+    assert(graph.compile());
+    assert(graph.getExecutionOrder()[0] == 1 && graph.getExecutionOrder()[1] == 0);
+    graph.execute(VK_NULL_HANDLE);
+    assert(execution.size() == 2 && execution[0] == "produce" && execution[1] == "consume");
+
     // Resource declarations infer write-after-read and read-after-write dependencies.
     graph.clear();
     graph.addPass("write-color", {}, {"color"}, [&](VkCommandBuffer) { execution.push_back("write"); });
