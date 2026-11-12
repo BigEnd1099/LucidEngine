@@ -190,6 +190,42 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histLen     += w * g.w;
             wSum        += w;
         }
+
+        // If the G-buffer velocity is stale or imperfect, retry static-world
+        // camera reprojection before declaring the pixel disoccluded. Moving
+        // objects still prefer their per-object motion vector; depth/normal
+        // validation rejects this fallback when the surface truly moved.
+        if (wSum <= 0.01 && dot(motion, motion) >= 1e-9 && pClip.w > 1e-4) {
+            hist = vec4(0.0);
+            histMoments = vec4(0.0);
+            histLen = 0.0;
+            wSum = 0.0;
+
+            vec2 cameraPrevUV = (pClip.xy / pClip.w) * 0.5 + 0.5;
+            if (all(greaterThanEqual(cameraPrevUV, vec2(0.0))) &&
+                all(lessThanEqual(cameraPrevUV, vec2(1.0)))) {
+                vec2 cameraPrevPx = cameraPrevUV * size - 0.5;
+                ivec2 cameraBase = ivec2(floor(cameraPrevPx));
+                vec2 cameraFr = cameraPrevPx - vec2(cameraBase);
+
+                for (int i = 0; i < 4; ++i) {
+                    ivec2 o = ivec2(i & 1, i >> 1);
+                    ivec2 tp = cameraBase + o;
+                    if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) continue;
+
+                    vec4 g = imageLoad(imgGeomPrev, tp);
+                    if (g.z < 0.0 || abs(g.z - pClip.w) > depthTol) continue;
+                    if (dot(rtOctDecode(g.xy), N) < 0.8) continue;
+
+                    float w = ((o.x == 0) ? (1.0 - cameraFr.x) : cameraFr.x) *
+                              ((o.y == 0) ? (1.0 - cameraFr.y) : cameraFr.y);
+                    hist += w * imageLoad(imgHistPrev, tp);
+                    histMoments += w * imageLoad(imgMomentsPrev, tp);
+                    histLen += w * g.w;
+                    wSum += w;
+                }
+            }
+        }
     }
 
     float maxHist = max(pc.f.x, 1.0);
