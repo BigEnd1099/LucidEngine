@@ -59,7 +59,7 @@ namespace engine::renderer {
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
         VkDescriptorSetLayoutBinding b[18]{};
-        for (uint32_t i = 0; i < 17; ++i) {
+        for (uint32_t i = 0; i < 18; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
             b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
