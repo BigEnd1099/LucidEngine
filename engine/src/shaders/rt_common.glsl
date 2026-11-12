@@ -362,7 +362,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         radiance += specSky * skyScale * hitReflectsLight;
     }
 
-    return sanitizeHDR(clampFirefly(radiance, isDiffuseGI ? 48.0 : 64.0));
+    return sanitizeHDR(clampFirefly(radiance, 256.0)); // Keep normal HDR energy; reject only extreme path explosions.
 }
 
 vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {
