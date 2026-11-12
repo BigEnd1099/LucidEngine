@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,11 @@ namespace engine::renderer {
         uint32_t lockOrFlags{0};    // Offset 28..31 (Std430 alignment to 32 bytes)
     };
     static_assert(sizeof(WorldRadianceCell) == 32, "Std430 alignment mismatch!");
+    static_assert(offsetof(WorldRadianceCell, irradiance) == 0, "WorldRadianceCell irradiance offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, cellKey) == 16, "WorldRadianceCell cellKey offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, packedNormal) == 20, "WorldRadianceCell packedNormal offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, lastSeenFrame) == 24, "WorldRadianceCell lastSeenFrame offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, lockOrFlags) == 28, "WorldRadianceCell lockOrFlags offset mismatch!");
 
     class WorldRadianceCache {
     public:
