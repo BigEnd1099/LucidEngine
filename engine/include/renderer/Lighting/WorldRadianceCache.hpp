@@ -30,6 +30,7 @@ namespace engine::renderer {
         void cleanup();
 
         void dispatchUpdate(VkCommandBuffer cmd,
+                            VkDescriptorSet sceneSet,
                             VkAccelerationStructureKHR tlas,
                             uint32_t frameCounter,
                             const glm::vec3& cameraPos,
