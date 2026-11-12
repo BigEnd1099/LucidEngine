@@ -330,7 +330,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
             atomicAdd(rtLocalCounters[2], 1u);
-            newLen = min(spp, maxHist);
+            newLen = 1.0;
             result = raw;
 
             // Disocclusion / rejected history: compute spatial variance over local 3x3 footprint
