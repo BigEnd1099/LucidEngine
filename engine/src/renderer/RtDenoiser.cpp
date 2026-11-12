@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[18]{};
+        VkDescriptorSetLayoutBinding b[20]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -73,21 +73,21 @@ namespace engine::renderer {
         b[15].descriptorCount = 1;
         b[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[15].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        for (uint32_t i = 16; i < 18; ++i) {
+        for (uint32_t i = 16; i < 20; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
             b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         }
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 18;
+        li.bindingCount = 20;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
 
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 36 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 40 },
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -194,7 +194,7 @@ namespace engine::renderer {
         createImages();
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
         m_needsLayoutInit = true;
-        m_historyValid = false;
+        m_reflHistoryValid = false;
         m_giHistoryValid = false;
     }
 
@@ -291,6 +291,7 @@ namespace engine::renderer {
         for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
         m_imgRefl = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
         for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
+        for (auto& rg : m_imgReflGeom) rg = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_width, m_height);
         for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
     }
 
@@ -308,6 +309,7 @@ namespace engine::renderer {
         for (auto& h : m_hist) destroy(h);
         destroy(m_imgRefl);
         for (auto& rh : m_imgReflHist) destroy(rh);
+        for (auto& rg : m_imgReflGeom) destroy(rg);
         for (auto& m : m_moments) destroy(m);
     }
 
@@ -320,7 +322,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[18]{};
+            VkWriteDescriptorSet writes[20]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -423,7 +425,23 @@ namespace engine::renderer {
             writes[17].descriptorCount = 1;
             writes[17].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[17].pImageInfo = &causticsInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 18, writes, 0, nullptr);
+
+            const VkDescriptorImageInfo reflGeomCurInfo{ VK_NULL_HANDLE, m_imgReflGeom[p].view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[18] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[18].dstSet = m_sets[p];
+            writes[18].dstBinding = 18;
+            writes[18].descriptorCount = 1;
+            writes[18].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[18].pImageInfo = &reflGeomCurInfo;
+
+            const VkDescriptorImageInfo reflGeomPrevInfo{ VK_NULL_HANDLE, m_imgReflGeom[q].view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[19] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[19].dstSet = m_sets[p];
+            writes[19].dstBinding = 19;
+            writes[19].descriptorCount = 1;
+            writes[19].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[19].pImageInfo = &reflGeomPrevInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 20, writes, 0, nullptr);
         }
     }
 
@@ -432,13 +450,13 @@ namespace engine::renderer {
 
         // All images live permanently in GENERAL (storage writes + sampled reads in the PBR pass).
         if (m_needsLayoutInit) {
-            const Image* all[13] = {
+            const Image* all[15] = {
                 &m_imgS, &m_imgA, &m_imgRawGi, &m_imgCaustics, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
                 &m_imgRefl, &m_imgReflHist[0], &m_imgReflHist[1],
-                &m_moments[0], &m_moments[1]
+                &m_moments[0], &m_moments[1], &m_imgReflGeom[0], &m_imgReflGeom[1]
             };
-            VkImageMemoryBarrier2 bars[13]{};
-            for (int i = 0; i < 13; ++i) {
+            VkImageMemoryBarrier2 bars[15]{};
+            for (int i = 0; i < 15; ++i) {
                 bars[i] = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                 bars[i].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 bars[i].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -450,11 +468,11 @@ namespace engine::renderer {
                 bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             }
             VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 13;
+            dep.imageMemoryBarrierCount = 15;
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
-            m_historyValid = false;
+            m_reflHistoryValid = false;
             m_giHistoryValid = false;
         }
 
@@ -488,7 +506,7 @@ namespace engine::renderer {
 
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
-            m_historyValid = false;
+            m_reflHistoryValid = false;
             m_giHistoryValid = false;
         }
         m_gpuTimings = {};
@@ -584,7 +602,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiHistoryValid",
             (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionHistoryValid",
-            params.reflectionsEnabled && m_historyValid ? 1.0 : 0.0);
+            params.reflectionsEnabled && m_reflHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtHistoryInvalidatedByLightChange", params.lightChanged ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
         profiler.recordMetric("rtReflectionBounces", params.reflectionBounces);
@@ -764,6 +782,7 @@ namespace engine::renderer {
 
         // Reflection work starts after the GI output dependency. Keep this barrier explicit
         // and measure its scheduling gap separately from the reflection dispatch itself.
+        bool reflectionPassRan = false;
         if (params.reflectionsEnabled && m_reflPipeline && m_reflTemporalPipeline) {
             sync();
             if (m_timestampsSupported && m_queryPool)
@@ -772,7 +791,7 @@ namespace engine::renderer {
             PushData reflPd{};
             reflPd.m = m_prevViewProj;
             reflPd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(params.reflectionSamples),
-                                 m_historyValid ? 1.0f : 0.0f, std::clamp(params.reflectionMaxRoughness, 0.02f, 1.0f));
+                                 m_reflHistoryValid ? 1.0f : 0.0f, std::clamp(params.reflectionMaxRoughness, 0.02f, 1.0f));
             reflPd.u[0] = std::clamp(params.reflectionSamples, 1u, 16u);
             reflPd.u[1] = params.frameIndex;
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
@@ -799,6 +818,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 14);
 
             bindRefl(m_reflTemporalPipeline, reflPd);
+            reflectionPassRan = params.reflectionTemporalFilterEnabled;
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 15);
             sync();
@@ -838,7 +858,7 @@ namespace engine::renderer {
         vkCmdPipelineBarrier2(cmd, &diagnosticsReadDependency);
 
         m_prevViewProj = params.viewProj;
-        m_historyValid = params.reflectionTemporalFilterEnabled;
+        m_reflHistoryValid = reflectionPassRan;
         m_parity ^= 1u;
         m_hasTimestampResults = m_timestampsSupported;
     }
