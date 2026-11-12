@@ -16,7 +16,6 @@ layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
-layout(set = 1, binding = 16, rgba16f) uniform writeonly image2D imgReflHitGeom;
 layout(set = 0, binding = 7) uniform sampler2D ssgiRadianceMap;
 
 layout(push_constant) uniform PC {
@@ -107,7 +106,6 @@ void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     ivec2 isize = imageSize(imgRefl);
     if (any(greaterThanEqual(px, isize))) return;
-    imageStore(imgReflHitGeom, px, vec4(0.0));
     vec2 size = vec2(isize);
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0 || ubo.rtParams.x < 0.5 || ubo.rtParams.w < 0.5) {
@@ -228,11 +226,6 @@ void main() {
             if (!hitGeo) {
                 if ((ubo.skyboxMode & 3) != 0) pathRadiance += throughput * sampleRtSkyRadiance(curDir);
                 break;
-            }
-            // Record the first surface seen by the reflected ray. This is independent of
-            // camera visibility, so off-screen reflected geometry gets its own denoising guide.
-            if (s == 0 && bounce == 0) {
-                imageStore(imgReflHitGeom, px, vec4(normalize(hitNorm), hitDist));
             }
 
             float bounceLod = useLodBias ? clamp(float(bounce), 0.0, 4.0) : 0.0;
