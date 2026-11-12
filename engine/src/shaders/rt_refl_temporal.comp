@@ -82,6 +82,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
 
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
+
     vec4 raw = imageLoad(imgRefl, px);
     if ((pc.u.w & (1u << 15)) != 0u) {
         float valid = raw.a > 0.0 ? 1.0 : 0.0;
@@ -102,9 +106,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         return;
     }
 
-    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
-    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
-    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
     float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
@@ -157,7 +158,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             atomicAdd(rtLocalCounters[14], 1u);
             // Re-use full history from previous frame when this pixel was active
             result = vec4((hist / wSum).rgb, 1.0);
-            historyAge = hist.a / wSum;
+            historyAge = min(hist.a / wSum, effectiveMaxHistory);
         } else {
             atomicAdd(rtLocalCounters[15], 1u);
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors with linear depth
