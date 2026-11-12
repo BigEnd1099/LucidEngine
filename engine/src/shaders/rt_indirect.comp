@@ -20,6 +20,9 @@ layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[56]; } rtDiag;
+layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
+layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 
 layout(push_constant) uniform PC {
 mat4 unused;
@@ -74,6 +77,8 @@ float d = texelFetch(uDepth, fullPx, 0).r;
 if (d >= 1.0) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
+    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
+    imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -110,6 +115,8 @@ if (dot(N, toCam) < 0.0) N = -N;
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
+    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
+    imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -117,6 +124,7 @@ const int baseSamples = int(clamp(pc.u.x, 1u, 16u));
 const uint frame = pc.u.y;
 const bool doGI = (pc.u.z & 1u) != 0u;
 const bool doAO = (pc.u.z & 2u) != 0u;
+const bool clampPathFireflies = (pc.u.z & 8u) != 0u;
 const bool useCheckerboard = (pc.u.z & 4u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
@@ -125,6 +133,8 @@ bool checkerSkip = useCheckerboard && (((px.x + px.y + int(frame)) & 1) != 0);
 if (checkerSkip) {
     // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
+    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
+    imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -138,7 +148,16 @@ float bias = 0.010 + 0.0006 * length(toCam);
 vec3 origin = P + N * bias;
 
 vec3 gi = vec3(0.0);
+vec3 causticRadiance = vec3(0.0);
+float causticHitCount = 0.0;
 float occ = 0.0;
+uint diagSurfaceHits = 0u;
+uint diagMirrorHits = 0u;
+uint diagLightTests = 0u;
+uint diagConeHits = 0u;
+uint diagVisibleHits = 0u;
+uint diagCausticContributions = 0u;
+uint diagPathBounces = 0u;
 
 for (int s = 0; s < samples; ++s) {
     vec2 u0 = fract(vec2(ign, fract(ign * 1.61803398875)) + float(s) * R2);
@@ -172,6 +191,10 @@ for (int s = 0; s < samples; ++s) {
         // in the PBR pass and in shadeRtHit(). A visible skybox must never light the
         // scene through RT GI, and rays that miss simply carry no extra radiance.
         if (!found) break;
+        if (doGI) {
+            diagSurfaceHits++;
+            if (b > 0) diagPathBounces++;
+        }
         if (!doGI) break;
 
         float bounceLod = clamp(float(b), 0.0, 4.0);
@@ -198,10 +221,12 @@ for (int s = 0; s < samples; ++s) {
         // analytically evaluate the reflection of active lights (Spot & Point) bouncing off the mirror onto this path
         bool isMirrorSurface = hitReflects && (hitMetallic > 0.4 || hitRoughness < 0.12);
         if (isMirrorSurface) {
+            diagMirrorHits++;
             vec3 hitN = normalize(hitNormal);
             vec3 reflRay = reflect(dir, hitN);
 
             for (int li = 0; li < numActiveLights; ++li) {
+                diagLightTests++;
                 float intensity = max(ubo.lightsCol[li].w, 0.0);
                 if (intensity <= 0.001) continue;
 
@@ -231,7 +256,9 @@ for (int s = 0; s < samples; ++s) {
                 float cosThreshold = cos(spreadAngle);
 
                 if (cosAngle > cosThreshold) {
+                    diagConeHits++;
                     if (!rayQueryOccluded(hitPosition + hitN * 0.01, L, max(distToLight - 0.03, 0.005))) {
+                        diagVisibleHits++;
                         float totalDist = hitDistance + distToLight;
                         float ratio = totalDist / range;
                         float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
@@ -240,6 +267,9 @@ for (int s = 0; s < samples; ++s) {
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
                         vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
                         pathRadiance += throughput * causticContrib;
+                        causticRadiance += throughput * causticContrib;
+                        causticHitCount += 1.0;
+                        diagCausticContributions++;
                     }
                 }
             }
@@ -305,11 +335,21 @@ for (int s = 0; s < samples; ++s) {
             throughput /= p;
         }
     }
-    gi += clampFirefly(pathRadiance, FIREFLY_CLAMP);
+    gi += clampPathFireflies ? clampFirefly(pathRadiance, FIREFLY_CLAMP) : pathRadiance;
 }
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
 float vis = 1.0 - occ * invSamples;
 imageStore(imgS, px, vec4(gi, vis));
+imageStore(imgRawGi, px, vec4(gi, vis));
+imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
+if (diagSurfaceHits > 0u) atomicAdd(rtDiag.counters[48], diagSurfaceHits);
+if (diagMirrorHits > 0u) atomicAdd(rtDiag.counters[49], diagMirrorHits);
+if (diagLightTests > 0u) atomicAdd(rtDiag.counters[50], diagLightTests);
+if (diagConeHits > 0u) atomicAdd(rtDiag.counters[51], diagConeHits);
+if (diagVisibleHits > 0u) atomicAdd(rtDiag.counters[52], diagVisibleHits);
+if (diagCausticContributions > 0u) atomicAdd(rtDiag.counters[53], diagCausticContributions);
+atomicAdd(rtDiag.counters[54], uint(samples));
+if (diagPathBounces > 0u) atomicAdd(rtDiag.counters[55], diagPathBounces);
 }

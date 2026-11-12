@@ -33,7 +33,7 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &dep);
         }
 
-        constexpr uint32_t kRtDiagnosticCounterCount = 48u;
+        constexpr uint32_t kRtDiagnosticCounterCount = 56u;
         constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[16]{};
+        VkDescriptorSetLayoutBinding b[18]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -73,15 +73,21 @@ namespace engine::renderer {
         b[15].descriptorCount = 1;
         b[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[15].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        for (uint32_t i = 16; i < 18; ++i) {
+            b[i].binding = i;
+            b[i].descriptorCount = 1;
+            b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 16;
+        li.bindingCount = 18;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
 
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 32 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 36 },
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -279,6 +285,8 @@ namespace engine::renderer {
     void RtDenoiser::createImages() {
         m_imgS = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
         m_imgA = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        m_imgRawGi = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        m_imgCaustics = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
         for (auto& g : m_geom) g = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
         for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
         m_imgRefl = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
@@ -294,6 +302,8 @@ namespace engine::renderer {
         };
         destroy(m_imgS);
         destroy(m_imgA);
+        destroy(m_imgRawGi);
+        destroy(m_imgCaustics);
         for (auto& g : m_geom) destroy(g);
         for (auto& h : m_hist) destroy(h);
         destroy(m_imgRefl);
@@ -310,7 +320,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[16]{};
+            VkWriteDescriptorSet writes[18]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -397,7 +407,23 @@ namespace engine::renderer {
             writes[15].descriptorCount = 1;
             writes[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[15].pBufferInfo = &diagnosticsBufferInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 16, writes, 0, nullptr);
+
+            const VkDescriptorImageInfo rawGiInfo{ VK_NULL_HANDLE, m_imgRawGi.view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[16] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[16].dstSet = m_sets[p];
+            writes[16].dstBinding = 16;
+            writes[16].descriptorCount = 1;
+            writes[16].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[16].pImageInfo = &rawGiInfo;
+
+            const VkDescriptorImageInfo causticsInfo{ VK_NULL_HANDLE, m_imgCaustics.view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[17] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[17].dstSet = m_sets[p];
+            writes[17].dstBinding = 17;
+            writes[17].descriptorCount = 1;
+            writes[17].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[17].pImageInfo = &causticsInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 18, writes, 0, nullptr);
         }
     }
 
@@ -406,13 +432,13 @@ namespace engine::renderer {
 
         // All images live permanently in GENERAL (storage writes + sampled reads in the PBR pass).
         if (m_needsLayoutInit) {
-            const Image* all[11] = {
-                &m_imgS, &m_imgA, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
+            const Image* all[13] = {
+                &m_imgS, &m_imgA, &m_imgRawGi, &m_imgCaustics, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
                 &m_imgRefl, &m_imgReflHist[0], &m_imgReflHist[1],
                 &m_moments[0], &m_moments[1]
             };
-            VkImageMemoryBarrier2 bars[11]{};
-            for (int i = 0; i < 11; ++i) {
+            VkImageMemoryBarrier2 bars[13]{};
+            for (int i = 0; i < 13; ++i) {
                 bars[i] = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                 bars[i].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 bars[i].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -424,7 +450,7 @@ namespace engine::renderer {
                 bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             }
             VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 11;
+            dep.imageMemoryBarrierCount = 13;
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
@@ -449,11 +475,15 @@ namespace engine::renderer {
                 "rtReflectionHistoryAgeBin00", "rtReflectionHistoryAgeBin01", "rtReflectionHistoryAgeBin02", "rtReflectionHistoryAgeBin03",
                 "rtReflectionHistoryAgeBin04", "rtReflectionHistoryAgeBin05", "rtReflectionHistoryAgeBin06", "rtReflectionHistoryAgeBin07",
                 "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11",
-                "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15"
+                "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15",
+                "rtGiSurfaceHits", "rtGiMirrorSurfaceHits", "rtGiCausticLightTests", "rtGiCausticConeHits",
+                "rtGiCausticVisibleHits", "rtGiCausticContributions", "rtGiTraceSamples", "rtGiPathBounces"
             };
             auto& diagnosticsProfiler = core::Profiler::get();
-            for (uint32_t i = 0; i < kRtDiagnosticCounterCount; ++i)
-                diagnosticsProfiler.recordMetric(names[i], m_diagnosticsMapped[i]);
+            for (uint32_t i = 0; i < kRtDiagnosticCounterCount; ++i) {
+                m_lastDiagnostics[i] = m_diagnosticsMapped[i];
+                diagnosticsProfiler.recordMetric(names[i], m_lastDiagnostics[i]);
+            }
         }
 
         // Retrieve previous frame's GPU timestamps if available
@@ -539,7 +569,18 @@ namespace engine::renderer {
         profiler.recordMetric("rtMaxHistory", params.maxHistory);
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
-        profiler.recordMetric("rtGiCheckerboard", params.giCheckerboard ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiCheckerboard", (params.giCheckerboard && params.giTemporalFilterEnabled) ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiTemporalFilterEnabled", params.giTemporalFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiAtrousPass1Enabled", params.giAtrousPassEnabled[0] ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiAtrousPass2Enabled", params.giAtrousPassEnabled[1] ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiAtrousPass3Enabled", params.giAtrousPassEnabled[2] ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiAtrousPass4Enabled", params.giAtrousPassEnabled[3] ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionTemporalFilterEnabled", params.reflectionTemporalFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionOutlierFilterEnabled", params.reflectionOutlierFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiHistoryClampEnabled", params.giHistoryClampEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiTemporalFireflyFilterEnabled", params.giTemporalFireflyFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiTraceFireflyClampEnabled", params.giTraceFireflyClampEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtReflectionSpatialFilterEnabled", params.reflectionSpatialFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiHistoryValid",
             (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionHistoryValid",
@@ -608,10 +649,13 @@ namespace engine::renderer {
         PushData pd{};
         pd.m = m_prevViewProj;
         pd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(samples),
-                         m_giHistoryValid ? 1.0f : 0.0f, params.svgfEnabled ? 1.0f : 0.0f);
+                         m_giHistoryValid ? 1.0f : 0.0f,
+                         (params.svgfEnabled && params.giTemporalFilterEnabled) ? 1.0f : 0.0f);
         pd.u[0] = samples;
         pd.u[1] = params.frameIndex;
-        pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) | (params.giCheckerboard ? 4u : 0u);
+        pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) |
+                  ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
+                  (params.giTraceFireflyClampEnabled ? 8u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
         const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
@@ -626,6 +670,9 @@ namespace engine::renderer {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
 
+            pd.u[0] = params.giTemporalFilterEnabled ? 0u : 1u; // bypass accumulation when disabled
+            pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
+                      (params.giTemporalFireflyFilterEnabled ? 2u : 0u);
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
@@ -634,7 +681,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
 
             // Pass 3: Atrous step 1 (hist -> A, step 1)
-            pd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
+            pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.f.y = std::max(params.maxHistory, 1.0f);
             pd.u[0] = 0u;
             bindGI(m_atrousPipelines[0], pd);
@@ -645,6 +692,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 6);
 
             // Pass 4: Atrous step 2 (A -> S, step 2)
+            pd.f.x = params.giAtrousPassEnabled[1] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             bindGI(m_atrousPipelines[1], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 7);
@@ -653,6 +701,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 8);
 
             // Pass 5: Atrous step 3 (S -> A, step 4)
+            pd.f.x = params.giAtrousPassEnabled[2] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             bindGI(m_atrousPipelines[2], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 9);
@@ -661,11 +710,12 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 10);
 
             // Pass 6: Atrous step 4 (A -> S, step 8, final output with debugMode)
+            pd.f.x = params.giAtrousPassEnabled[3] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.u[0] = static_cast<uint32_t>(params.debugMode);
             bindGI(m_atrousPipelines[3], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 11);
-            m_giHistoryValid = true;
+            m_giHistoryValid = params.giTemporalFilterEnabled;
         } else {
             // Keep the sampled output valid and neutral for the PBR combine (rgb=0, visibility=1).
             VkImageMemoryBarrier2 toClear{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
@@ -728,13 +778,15 @@ namespace engine::renderer {
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
 
             uint32_t reflFlags = 0;
-            if (params.reflectionCheckerboard)     reflFlags |= (1u << 8);
+            if (params.reflectionCheckerboard && params.reflectionTemporalFilterEnabled) reflFlags |= (1u << 8);
             if (params.reflectionStochasticLights) reflFlags |= (1u << 9);
             if (params.reflectionLodBias)          reflFlags |= (1u << 10);
             if (params.reflectionHalfRes)          reflFlags |= (1u << 11);
             if (params.reflectionPrimaryStochasticLights) reflFlags |= (1u << 12);
             if (params.reflectionShowLightBulbs)   reflFlags |= (1u << 13);
             if (params.reflectionDenoiseMirrors)   reflFlags |= (1u << 14);
+            if (!params.reflectionTemporalFilterEnabled) reflFlags |= (1u << 15);
+            if (params.reflectionOutlierFilterEnabled) reflFlags |= (1u << 16);
             reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
@@ -753,7 +805,7 @@ namespace engine::renderer {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 16);
 
-            if (params.spatialStrength > 0.001f && m_reflSpatialPipeline) {
+            if (params.reflectionSpatialFilterEnabled && params.spatialStrength > 0.001f && m_reflSpatialPipeline) {
                 bindRefl(m_reflSpatialPipeline, reflPd);
                 if (m_timestampsSupported && m_queryPool)
                     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 17);
@@ -786,7 +838,7 @@ namespace engine::renderer {
         vkCmdPipelineBarrier2(cmd, &diagnosticsReadDependency);
 
         m_prevViewProj = params.viewProj;
-        m_historyValid = true;
+        m_historyValid = params.reflectionTemporalFilterEnabled;
         m_parity ^= 1u;
         m_hasTimestampResults = m_timestampsSupported;
     }

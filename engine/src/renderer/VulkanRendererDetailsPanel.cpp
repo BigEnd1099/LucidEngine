@@ -622,24 +622,35 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::SeparatorText("RT Sampling & Denoising");
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
                         ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
-                        ImGui::Checkbox(editorText("details.rt_denoiser", "Temporal + Spatial Denoiser"), &m_rtSettings.denoiseEnabled);
+                        ImGui::Checkbox("GI Path Firefly Clamp", &m_rtSettings.giTraceFireflyClampEnabled);
+                        ImGui::Checkbox(editorText("details.rt_denoiser", "Enable GI Denoising"), &m_rtSettings.denoiseEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
+                        ImGui::Checkbox("GI Temporal Accumulation", &m_rtSettings.giTemporalFilterEnabled);
+                        ImGui::Checkbox("GI Temporal Neighborhood Clamp", &m_rtSettings.giHistoryClampEnabled);
+                        ImGui::Checkbox("GI Temporal Firefly Rejection", &m_rtSettings.giTemporalFireflyFilterEnabled);
                         ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
-                        ImGui::SliderFloat(editorText("details.rt_spatial_strength", "Spatial Filter Strength"), &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
                         ImGui::Checkbox(editorText("details.rt_svgf", "SVGF (Variance-Guided Filter)"), &m_rtSettings.svgfEnabled);
+                        ImGui::SeparatorText("À-Trous Wavelet Passes");
+                        ImGui::Checkbox("À-Trous Pass 1 (step 1)", &m_rtSettings.giAtrousPass1Enabled);
+                        ImGui::Checkbox("À-Trous Pass 2 (step 2)", &m_rtSettings.giAtrousPass2Enabled);
+                        ImGui::Checkbox("À-Trous Pass 3 (step 4)", &m_rtSettings.giAtrousPass3Enabled);
+                        ImGui::Checkbox("À-Trous Pass 4 (step 8)", &m_rtSettings.giAtrousPass4Enabled);
+                        ImGui::SliderFloat(editorText("details.rt_spatial_strength", "GI Spatial Filter Strength"), &m_rtSettings.spatialStrength, 0.0f, 1.0f, "%.2f");
                         ImGui::EndDisabled();
-
                         // Debug Visualization Modes
                         ImGui::SeparatorText("RT Debug & Diagnostics");
                         const char* debugModes[] = {
                             "0: Off (Composite Render)",
-                            "1: Raw Indirect Trace (imgS)",
+                            "1: Raw GI Trace (before temporal)",
                             "2: History Length (0..maxHistory)",
                             "3: Octahedral Geometric Normals",
                             "4: Linear Depth",
                             "5: Ambient Occlusion Only",
                             "6: Specular Reflections Only",
-                            "7: Luminance Variance (SVGF)"
+                            "7: Luminance Variance (SVGF)",
+                            "8: Raw Specular Caustics (before filtering)",
+                            "9: Caustic Contribution Density",
+                            "10: Temporal GI (before A-Trous)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
@@ -671,6 +682,26 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         m_rtSettings.maxHistory = std::clamp(m_rtSettings.maxHistory, 4, 256);
                         ImGui::EndDisabled();
                         ImGui::EndDisabled();
+
+                        ImGui::SeparatorText("RT Reflection Filtering");
+                        ImGui::BeginDisabled(!m_rtSettings.reflectionsEnabled);
+                        ImGui::Checkbox("Reflection Temporal Filter", &m_rtSettings.reflectionTemporalFilterEnabled);
+                        ImGui::Checkbox("Reflection Temporal Outlier Rejection", &m_rtSettings.reflectionOutlierFilterEnabled);
+                        ImGui::Checkbox("Reflection Spatial Filter", &m_rtSettings.reflectionSpatialFilterEnabled);
+                        ImGui::EndDisabled();
+
+                        const auto& rtDiag = m_rtDenoiser.getDiagnosticCounters();
+                        if (ImGui::TreeNode("RT Mirror / Caustics Diagnostics (previous frame)")) {
+                            ImGui::Text("GI path surface hits: %u", rtDiag[48]);
+                            ImGui::Text("Reflective surface hits: %u", rtDiag[49]);
+                            ImGui::Text("Tested light candidates: %u", rtDiag[50]);
+                            ImGui::Text("Reflection-cone matches: %u", rtDiag[51]);
+                            ImGui::Text("Unoccluded matches: %u", rtDiag[52]);
+                            ImGui::Text("Accepted caustic contributions: %u", rtDiag[53]);
+                            ImGui::Text("Traced GI/AO samples: %u", rtDiag[54]);
+                            ImGui::Text("Path surface bounces: %u", rtDiag[55]);
+                            ImGui::TreePop();
+                        }
                     }
 
                     // Zakładka World & Graphics Settings (wszystkie nowe systemy Vulkan 1.3)

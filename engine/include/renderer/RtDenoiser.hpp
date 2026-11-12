@@ -11,7 +11,7 @@ namespace engine::renderer {
     // compute pipeline, run between GTAO and the main PBR pass:
     //   1. rt_indirect  - traces N paths/pixel from the depth buffer (noisy, demodulated)
     //   2. rt_temporal  - reprojected temporal accumulation (history counted in samples)
-    //   3. rt_atrous x2 - edge-avoiding spatial filter, strength fades with history length
+    //   3. rt_atrous x4 - four independently switchable edge-avoiding wavelet stages
     // The result (rgb = GI radiance, a = AO visibility) is sampled by pbr_rt.frag.
     class RtDenoiser {
     public:
@@ -32,6 +32,14 @@ namespace engine::renderer {
             float     maxHistory{32.0f};   // effective samples kept in the temporal history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
+            bool      giTemporalFilterEnabled{true};
+            bool      giHistoryClampEnabled{true};
+            bool      giTemporalFireflyFilterEnabled{true};
+            bool      giTraceFireflyClampEnabled{true};
+            std::array<bool, 4> giAtrousPassEnabled{true, true, true, true};
+            bool      reflectionTemporalFilterEnabled{true};
+            bool      reflectionOutlierFilterEnabled{true};
+            bool      reflectionSpatialFilterEnabled{true};
             bool      lightChanged{false}; // Resets accumulation when lights or camera change
             RtDebugMode debugMode{RtDebugMode::None};
 
@@ -100,6 +108,7 @@ namespace engine::renderer {
         VkImageView reflectionOutputView() const { return m_imgRefl.view; }
         VkSampler   outputSampler() const { return m_sampler; }
         const GpuTimings& getGpuTimings() const { return m_gpuTimings; }
+        const std::array<uint32_t, 56>& getDiagnosticCounters() const { return m_lastDiagnostics; }
 
     private:
         struct Image {
@@ -129,6 +138,8 @@ namespace engine::renderer {
 
         Image m_imgS{};                    // raw trace output, then final filtered output
         Image m_imgA{};                    // a-trous ping buffer
+        Image m_imgRawGi{};                // preserved raw RT GI trace for diagnostics
+        Image m_imgCaustics{};              // unfiltered specular-caustic contribution from mirror hits
         std::array<Image, 2> m_geom{};     // oct normal, linear depth, history length (ping-pong)
         std::array<Image, 2> m_hist{};     // temporal accumulation (ping-pong)
         Image m_imgRefl{};                 // raw reflection trace
@@ -156,5 +167,6 @@ namespace engine::renderer {
         bool m_timestampsSupported{false};
         bool m_hasTimestampResults{false};
         GpuTimings m_gpuTimings{};
+        std::array<uint32_t, 56> m_lastDiagnostics{};
     };
 }

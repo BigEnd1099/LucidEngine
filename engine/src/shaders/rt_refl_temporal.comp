@@ -79,6 +79,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     float roughness = clamp(gNR.w, 0.0, 1.0);
 
     vec4 raw = imageLoad(imgRefl, px);
+    if ((pc.u.w & (1u << 15)) != 0u) {
+        float valid = raw.a > 0.0 ? 1.0 : 0.0;
+        imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
+        imageStore(imgRefl, px, raw);
+        ageBin = 0u;
+        histogramCounted = true;
+        return;
+    }
     if (raw.a <= 0.0) {
         atomicAdd(rtLocalCounters[10], 1u);
         ageBin = 0u;
@@ -181,6 +189,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             hist /= wSum;
 
             bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
+            bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
 
             if (roughness < 0.08 && !denoiseMirrors) {
                 // Mirror surfaces (roughness < 0.08) with mirror denoiser off:
@@ -225,13 +234,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
                     vec3 histY = rgbToYCoCg(hist.rgb);
-                    histY = clamp(histY, clampMinY, clampMaxY);
+                    if (outlierFilterEnabled) histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
 
                     // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 16.0 for mirrors)
                     float floorThreshold = (roughness < 0.08) ? 16.0 : 3.5;
                     float fireflyThreshold = max(3.5 * sigmaY.x, floorThreshold);
-                    if (rawY.x > m1Y.x + fireflyThreshold) {
+                    if (outlierFilterEnabled && rawY.x > m1Y.x + fireflyThreshold) {
                         rawY.x = m1Y.x + fireflyThreshold;
                         raw.rgb = max(vec3(0.0), yCoCgToRgb(rawY));
                     }

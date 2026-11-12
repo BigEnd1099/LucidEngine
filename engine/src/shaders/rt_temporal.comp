@@ -111,6 +111,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec4 raw = imageLoad(imgS, px);
 
+    if ((pc.u.x & 1u) != 0u) {
+        float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
+        imageStore(imgHistCur, px, raw);
+        imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
+        geom.w = 1.0;
+        imageStore(imgGeomCur, px, geom);
+        ageBin = 0u;
+        histogramCounted = true;
+        return;
+    }
+
     vec3 N = rtOctDecode(geom.xy);
 
     vec2 curUV = (vec2(px) + 0.5) / size;
@@ -271,14 +282,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 if (dot(motion, motion) < 1e-5) {
                     clampMaxY = max(clampMaxY, histY);
                 }
-                histY = clamp(histY, clampMinY, clampMaxY);
+                if ((pc.u.y & 1u) != 0u) histY = clamp(histY, clampMinY, clampMaxY);
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 hist.a = clamp(hist.a, aoMin, aoMax);
 
                 // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 3.0)
                 // so legitimate single-ray hits (0.1 to 2.5) in dark regions are never zero-clipped!
                 float fireflyThreshold = max(3.5 * sigmaY.x, 3.0);
-                if (rawYCoCg.x > m1Y.x + fireflyThreshold) {
+                if ((pc.u.y & 2u) != 0u && rawYCoCg.x > m1Y.x + fireflyThreshold) {
                     rawYCoCg.x = m1Y.x + fireflyThreshold;
                     raw.rgb = max(vec3(0.0), yCoCgToRgb(rawYCoCg));
                 }
