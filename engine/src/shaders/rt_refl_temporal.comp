@@ -240,8 +240,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
                     vec3 histY = rgbToYCoCg(hist.rgb);
-                    if (outlierFilterEnabled) histY = clamp(histY, clampMinY, clampMaxY);
-                    hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
 
                     // Preserve bright features that have spatial support. A single high
                     // sample is rejected only when it is a rare outlier in a populated patch.
@@ -261,6 +259,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     }
                     bool isolatedFirefly = count >= 4.0 &&
                         brightNeighborCount <= floor(count * 0.125);
+                    // Clamp accumulated history only for spatially isolated outliers.
+                    if (outlierFilterEnabled && isolatedFirefly)
+                        histY = clamp(histY, clampMinY, clampMaxY);
+                    hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                     if (outlierFilterEnabled && isolatedFirefly &&
                         rawY.x > m1Y.x + fireflyThreshold) {
                         rawY.x = m1Y.x + fireflyThreshold;
