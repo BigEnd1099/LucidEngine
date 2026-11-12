@@ -179,7 +179,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     float maxHist = max(pc.f.x, 1.0);
-    float spp = max(pc.f.y, 1.0);
     vec4 result;
     float newLen;
 
@@ -196,7 +195,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
-            newLen = min(histLen + spp * 0.5, maxHist);
+            newLen = histLen; // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
             atomicAdd(rtLocalCounters[7], 1u);
@@ -228,7 +227,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             } else {
                 result = vec4(0.0, 0.0, 0.0, 1.0);
             }
-            newLen = min(spp, maxHist);
+            newLen = 1.0;
             float rLum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
             outMoments = vec4(rLum, rLum * rLum, 0.1, 0.1);
         }
@@ -316,9 +315,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             }
             raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
-            newLen = min(histLen + spp, maxHist);
-            // Exponential Moving Average (EMA) with minimum blend factor so dynamic changes fade in a fraction of a second
-            float alpha = clamp(spp / newLen, 0.001, 1.0);
+            // History length is measured in valid frames, not accumulated rays.
+            // Each raw frame is already the average of its SPP samples, so SPP must
+            // not change the temporal response speed or make 1 SPP freeze the image.
+            newLen = min(histLen + 1.0, maxHist);
+            float alpha = 1.0 / newLen;
             result = mix(hist, raw, alpha);
 
             // SVGF moments accumulation: blend spatial and temporal variance when history is short (< 4 frames)
