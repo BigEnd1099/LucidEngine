@@ -15,6 +15,7 @@ layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
 layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
+layout(set = 1, binding = 16, rgba16f) uniform readonly image2D imgReflHitGeom;
 
 layout(push_constant) uniform PC {
     mat4 prevViewProj;
@@ -56,6 +57,7 @@ void main() {
     float zC = rtLinearDepth(d);
     float depthTol = 0.02 * zC + 0.005;
     float centerLum = lum(centerVal.rgb);
+    vec4 centerHitGeom = imageLoad(imgReflHitGeom, px);
 
     // Bit 14: optional mirror spatial denoiser (user configurable, default false)
     bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
@@ -95,6 +97,14 @@ void main() {
             if (dot(qGNR.xyz, qGNR.xyz) <= 1e-4) continue;
             vec3 nQ = normalize(qGNR.xyz);
             if (dot(nC, nQ) < 0.90) continue; // Same planar mirror only!
+
+            vec4 qHitGeom = imageLoad(imgReflHitGeom, qPx);
+            if (centerHitGeom.w > 0.0) {
+                if (qHitGeom.w <= 0.0) continue;
+                float hitNormalAgreement = dot(normalize(centerHitGeom.xyz), normalize(qHitGeom.xyz));
+                float hitDistanceTolerance = max(0.10, centerHitGeom.w * 0.035);
+                if (hitNormalAgreement < 0.78 || abs(centerHitGeom.w - qHitGeom.w) > hitDistanceTolerance) continue;
+            }
 
             vec4 qVal = imageLoad(imgReflHistCur, qPx);
             if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
@@ -150,6 +160,14 @@ void main() {
         vec3 nQ = normalize(qGNR.xyz);
         float nDot = dot(nC, nQ);
         if (nDot < 0.6) continue;
+
+        vec4 qHitGeom = imageLoad(imgReflHitGeom, qPx);
+        if (centerHitGeom.w > 0.0) {
+            if (qHitGeom.w <= 0.0) continue;
+            float hitNormalAgreement = dot(normalize(centerHitGeom.xyz), normalize(qHitGeom.xyz));
+            float hitDistanceTolerance = max(0.10, centerHitGeom.w * 0.035);
+            if (hitNormalAgreement < 0.78 || abs(centerHitGeom.w - qHitGeom.w) > hitDistanceTolerance) continue;
+        }
 
         vec4 qVal = imageLoad(imgReflHistCur, qPx);
         if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
