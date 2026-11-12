@@ -43,6 +43,21 @@ namespace engine::ecs {
                 rec.mesh = reg.get<MeshComponent>(entity);
             }
 
+            if (reg.all_of<MaterialComponent>(entity)) {
+                rec.hasMaterial = true;
+                rec.material = reg.get<MaterialComponent>(entity);
+            }
+
+            if (reg.all_of<LightComponent>(entity)) {
+                rec.hasLight = true;
+                rec.light = reg.get<LightComponent>(entity);
+            }
+
+            if (reg.all_of<ParticleEmitterComponent>(entity)) {
+                rec.hasParticleEmitter = true;
+                rec.particleEmitter = reg.get<ParticleEmitterComponent>(entity);
+            }
+
             if (reg.all_of<RigidBodyComponent>(entity)) {
                 rec.hasRigidBody = true;
                 rec.rigidBody = reg.get<RigidBodyComponent>(entity);
@@ -92,6 +107,15 @@ namespace engine::ecs {
             }
             if (rec.hasMesh) {
                 reg.emplace<MeshComponent>(newEntity, rec.mesh);
+            }
+            if (rec.hasMaterial) {
+                reg.emplace<MaterialComponent>(newEntity, rec.material);
+            }
+            if (rec.hasLight) {
+                reg.emplace<LightComponent>(newEntity, rec.light);
+            }
+            if (rec.hasParticleEmitter) {
+                reg.emplace<ParticleEmitterComponent>(newEntity, rec.particleEmitter);
             }
             if (rec.hasRigidBody) {
                 reg.emplace<RigidBodyComponent>(newEntity, rec.rigidBody);

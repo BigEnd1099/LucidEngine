@@ -42,6 +42,8 @@ namespace engine::renderer {
         bool reflectionPrimaryStochasticLights{false}; // Optional PR #49 optimization for the primary reflection hit
         bool reflectionLodBias{true};           // Variant 3: Mip LOD bias increasing with bounce depth
         bool reflectionHalfRes{false};          // Variant 4: Global half-resolution reflections with bilateral filter
+        bool reflectionShowLightBulbs{true};    // Show light sources in specular reflections (spotlights directional cone, point/area lights, default true)
+        bool reflectionDenoiseMirrors{false};   // Optional planar bilateral spatial filter for mirrors (roughness < 0.035, default false)
     };
 
 } // namespace engine::renderer

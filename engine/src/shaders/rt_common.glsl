@@ -246,11 +246,13 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, mipLod).rgb;
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
     float rawRoughness = clamp(hit.material.y * orm.g, 0.0, 1.0);
+    float hitReflectsLight = (hit.material.w > 0.5) ? 1.0 : 0.0;
 
-    // Roughness Regularization:
-    // For diffuse GI: widen GGX lobe to avoid delta fireflies while preserving directionality
-    // For reflections: minimum roughness for analytical point lights (sphere light approximation)
-    float effRoughness = isDiffuseGI ? clamp(rawRoughness, 0.20, 0.45) : max(rawRoughness, 0.12);
+    // Roughness regularization for secondary hit shading:
+    // For diffuse GI: maintain a physical microfacet floor (0.08) so analytical point/spot lights
+    // can scatter reflected specular irradiance into the room without collapsing to delta zero-probability.
+    // For reflections: preserve physical sharpness down to 0.02.
+    float effRoughness = isDiffuseGI ? clamp(rawRoughness, 0.08, 0.45) : max(rawRoughness, 0.02);
 
     vec3 shadingNormal = normalize(hitNormal);
     vec3 tangentNormal = textureLod(rtNormalTextures[nonuniformEXT(hit.textureIndices.y)], hitUv, mipLod).xyz * 2.0 - 1.0;
@@ -262,7 +264,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     hitNormal = shadingNormal;
     float emissive = max(hit.material.z, 0.0);
 
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F0 = mix(vec3(0.04), max(albedo, vec3(0.04)), metallic);
     // Diffuse is strictly for non-metallic part (pure metals do not scatter diffuse light sideways)
     vec3 diffuse = (albedo / PI);
 
@@ -272,14 +274,14 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     // Emissive surface: acts as secondary light source
     vec3 radiance = albedo * (emissive * 6.0) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - rawRoughness * 0.25)) : vec3(0.0));
 
-    // Microfacet GGX parameters
-    float a = max(effRoughness * effRoughness, 1e-5);
+    // Microfacet GGX parameters: a is linear roughness, a2 is physical alpha (squared only once)
+    float a = max(effRoughness, 0.02);
     float a2 = a * a;
-    float k = (effRoughness + 1.0) * (effRoughness + 1.0) / 8.0;
+    float k = (a + 1.0) * (a + 1.0) / 8.0;
 
-    // Specular boost for directional bounce in diffuse GI to compensate for cosine sampling
-    float giSpecBoost = isDiffuseGI ? mix(1.0, 2.5, metallic * (1.0 - rawRoughness)) : 1.0;
-    float directMetalBoost = mix(1.0, 4.0, metallic);
+    // Physically energy conserving specular reflections (no arbitrary 4x / 2.5x multipliers)
+    float giSpecBoost = 1.0;
+    float directMetalBoost = 1.0;
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float sunNdotL = max(dot(hitNormal, sunDir), 0.0);
@@ -294,7 +296,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float Vis = rtVisibilitySmithGGXCorrelated(NdotV, sunNdotL, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
+        vec3 spec = (D * Vis * F) * hitReflectsLight;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
     }
@@ -340,7 +342,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float Vis = rtVisibilitySmithGGXCorrelated(NdotV, ndotl, a);
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
-        vec3 spec = (D * Vis * F) * giSpecBoost * directMetalBoost;
+        vec3 spec = (D * Vis * F) * hitReflectsLight;
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.lightsCol[i].rgb *
                     (intensity * 4.0 * attenuation * ndotl * lightMultiplier);
@@ -357,10 +359,10 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         float roughFade = mix(1.0 - rawRoughness * 0.5, 1.0, metallic);
         vec3 specSky = sampleRtSkyRadiance(R) * mix(F0, vec3(1.0), pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0)) * roughFade;
         float skyScale = (specSkyScale >= 0.0) ? specSkyScale : (isDiffuseGI ? 0.25 : 1.0);
-        radiance += specSky * skyScale;
+        radiance += specSky * skyScale * hitReflectsLight;
     }
 
-    return sanitizeHDR(clampFirefly(radiance, isDiffuseGI ? 16.0 : 32.0));
+    return sanitizeHDR(clampFirefly(radiance, isDiffuseGI ? 48.0 : 64.0));
 }
 
 vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {

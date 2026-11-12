@@ -470,6 +470,7 @@ namespace engine::renderer {
                 float roughness = 0.42f;
                 float emissive = 0.0f;
                 uint32_t activeMaterialId = 0;
+                bool reflectsLight = true;
 
                 if (registry.get().all_of<ecs::MaterialComponent>(entity)) {
                     const auto& mat = registry.get().get<ecs::MaterialComponent>(entity);
@@ -478,6 +479,7 @@ namespace engine::renderer {
                     roughness = mat.roughness;
                     emissive  = mat.emissiveIntensity;
                     activeMaterialId = mat.materialId;
+                    reflectsLight = mat.reflectsLight;
                 } else if (meshAsset->materialId != 0 && assetManager->getMaterial(meshAsset->materialId)) {
                     core::MaterialAsset* mat = assetManager->getMaterial(meshAsset->materialId);
                     baseColor = mat->baseColorFactor;
@@ -705,7 +707,7 @@ namespace engine::renderer {
                 item.pcs.normalCol0 = glm::vec4(normalMat[0], metallic);
                 item.pcs.normalCol1 = glm::vec4(normalMat[1], roughness);
                 item.pcs.normalCol2 = glm::vec4(normalMat[2], emissive);
-                item.pcs.baseColorFactor = glm::vec4(glm::vec3(baseColor), 1.0f);
+                item.pcs.baseColorFactor = glm::vec4(glm::vec3(baseColor), reflectsLight ? 1.0f : -1.0f);
                 drawItems.push_back(item);
                 if (isRayTracingEnabled() && rtGpuInstances.size() < RT_MAX_INSTANCE_COUNT) {
                     const bool hasDeformedRtGeometry = item.vertexBuffer != meshAsset->vertexBuffer;
@@ -738,9 +740,9 @@ namespace engine::renderer {
                             gpu.baseColor = glm::vec4(glm::vec3(baseColor), 1.0f);
                             gpu.material = glm::vec4(
                                 glm::clamp(metallic, 0.0f, 1.0f),
-                                glm::clamp(roughness, 0.045f, 1.0f),
+                                glm::clamp(roughness, 0.0f, 1.0f),
                                 std::max(emissive, 0.0f),
-                                1.0f
+                                reflectsLight ? 1.0f : 0.0f
                             );
                             gpu.vertexAddress = vertexAddress;
                             gpu.indexAddress = indexAddress;
@@ -1356,6 +1358,8 @@ namespace engine::renderer {
                 rtp.reflectionPrimaryStochasticLights = m_rtSettings.reflectionPrimaryStochasticLights;
                 rtp.reflectionLodBias = m_rtSettings.reflectionLodBias;
                 rtp.reflectionHalfRes = m_rtSettings.reflectionHalfRes;
+                rtp.reflectionShowLightBulbs = m_rtSettings.reflectionShowLightBulbs;
+                rtp.reflectionDenoiseMirrors = m_rtSettings.reflectionDenoiseMirrors;
                 rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
                 rtp.spatialStrength = m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0f;
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;

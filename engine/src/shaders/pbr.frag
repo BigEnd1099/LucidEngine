@@ -268,7 +268,7 @@ float samplePointLightShadow(vec3 toLight, float currentDist, vec3 geomN, float 
     return vis / float(SAMPLES);
 }
 
-vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, float roughness, vec3 energyComp, bool softShadows) {
+vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, vec3 F0, float alpha, float roughness, vec3 energyComp, bool softShadows, float matReflects) {
     float rawNdotL = dot(N, L);
     float wrap = softShadows ? (0.14 * (1.0 - metallic) * roughness) : 0.0;
     float wrappedNdotL = clamp((rawNdotL + wrap) / ((1.0 + wrap) * (1.0 + wrap)), 0.0, 1.0);
@@ -284,9 +284,8 @@ vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float meta
     float Vis = visibilitySmithGGXCorrelated(NdotV, max(NdotL, 1e-4), alpha);
     vec3 F = fresnelSchlick(VdotH, F0);
 
-    // Odbicie bezpośredniego światła od 100% metalu jest 4x mocniejsze
-    float directMetalBoost = mix(1.0, 4.0, metallic);
-    vec3 specular = (D * Vis) * F * energyComp * NdotL * directMetalBoost;
+    // Physically correct Cook-Torrance GGX with Fdez-Aguera energy compensation
+    vec3 specular = (D * Vis) * F * energyComp * NdotL * matReflects;
     vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
     vec3 diffuse = kD * (albedo / PI) * wrappedNdotL;
     return (diffuse + specular) * radiance;
@@ -294,6 +293,7 @@ vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float meta
 
 void main() {
     bool softShadows = (ubo.bounceParams.w > 0.5);
+    float matReflectsLight = (pcs.baseColorFactor.a >= 0.0) ? 1.0 : 0.0;
 
     vec3 geomN = normalize(fragNormal);
     vec3 N = computeNormal(geomN);
@@ -314,10 +314,10 @@ void main() {
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
     float roughness = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.0, 1.0);
-    // Zachowaj fizyczną ostrość i energię odbicia bezpośredniego światła (minimum roughness = 0.04)
-    float alphaDirect = max(roughness * roughness, 0.0016);
+    // Physically correct specular roughness for direct analytical lights (minimum roughness = 0.04)
+    float alphaDirect = max(roughness, 0.04);
 
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F0 = mix(vec3(0.04), max(albedo, vec3(0.04)), metallic);
 
     vec2 dfg = texture(brdfLut, vec2(NdotV, roughness)).rg;
     vec3 energyCompensation = 1.0 + F0 * (1.0 / max(dfg.x + dfg.y, 1e-3) - 1.0);
@@ -334,7 +334,7 @@ void main() {
     if (sunIntensity > 0.001 && dot(geomN, sunDir) > minSunDot) {
         float sunShadow = computeDirectionalShadow(fragWorldPos, geomN, sunDir, viewDepth, ign, softShadows);
         vec3 sunRadiance = ubo.sunColor.rgb * sunIntensity * sunShadow;
-        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows);
+        directLighting += evaluateBRDF(N, V, sunDir, sunRadiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows, matReflectsLight);
     }
 
     // 2. Lokalnie cieniowane światła Point, Spot oraz Area
@@ -388,7 +388,7 @@ void main() {
         }
 
         vec3 radiance = lCol * (lIntensity * 4.0 * attenuation * shadowVis);
-        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows);
+        directLighting += evaluateBRDF(N, V, L, radiance, albedo, metallic, F0, alphaDirect, roughness, energyCompensation, softShadows, matReflectsLight);
     }
 
     // 3. Oświetlenie otoczenia Cubemap IBL + Fizyczne GTAO
@@ -432,7 +432,7 @@ void main() {
         vec3 prefilteredColor = sanitizeHDR(textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb);
         vec3 specularBRDF = (F0 * dfg.x + dfg.y) * energyCompensation;
         float specAO = computeSpecularAO(NdotV, combinedAO, roughness);
-        vec3 specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade;
+        vec3 specularIBL = prefilteredColor * specularBRDF * specAO * horizonFade * matReflectsLight;
 
         ambientLighting = (kD * diffuseIBL + specularIBL) * iblIntensity;
     }

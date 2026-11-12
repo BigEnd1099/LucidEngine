@@ -139,8 +139,10 @@ void main() {
                 float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
                 float deltaL = abs(lC - lQ);
                 float stdDev = sqrt(max(varC, 1e-4));
-                float sigmaL = 1.2 * max(pc.f.x, 0.1);
-                wl = exp(-deltaL / (sigmaL * stdDev + 0.05));
+                float stepScale = 1.0 / sqrt(float(step));
+                float sigmaL = 1.2 * max(pc.f.x, 0.1) * stepScale;
+                float lumaFloor = 0.03 * stepScale;
+                wl = exp(-deltaL / (sigmaL * stdDev + lumaFloor));
             }
 
             // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows

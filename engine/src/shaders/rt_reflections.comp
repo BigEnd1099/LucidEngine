@@ -117,9 +117,9 @@ void main() {
     if (dot(N, N) <= 1e-4) { imageStore(imgRefl, px, vec4(0.0)); return; }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
-    // Rough surfaces get (almost) no visible mirror reflection: skip tracing and let IBL handle them.
-    const float RT_REFL_MAX_ROUGHNESS = 0.75;
-    if (roughness > RT_REFL_MAX_ROUGHNESS) { imageStore(imgRefl, px, vec4(0.0)); return; }
+    // Dynamic roughness cutoff configured via push constants (allows rough reflections up to 1.0)
+    float maxRoughness = clamp(pc.f.w, 0.05, 1.0);
+    if (roughness > maxRoughness) { imageStore(imgRefl, px, vec4(0.0)); return; }
 
     bool useCheckerboard     = (pc.u.w & 0x00000100u) != 0u;
     bool useStochasticLights = (pc.u.w & 0x00000200u) != 0u; // Secondary reflection bounces
@@ -188,32 +188,37 @@ void main() {
             bool hitBulb = false;
             vec3 bulbRadiance = vec3(0.0);
             float closestBulbDist = closestDist;
-            for (int li = 0; li < numActiveLights; ++li) {
-                float intensity = max(ubo.lightsCol[li].w, 0.0);
-                if (intensity <= 0.001) continue;
-                vec3 lightPos = ubo.lightsPos[li].xyz;
-                float range = max(ubo.lightsPos[li].w, 0.1);
-                int type = int(round(ubo.lightsDir[li].w));
-                float bulbRadius = clamp(range * 0.02, 0.08, 0.35);
-                if (type == 2) bulbRadius = clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.1, 0.6);
-                vec3 OC = lightPos - curOrig;
-                float tProj = dot(OC, curDir);
-                if (tProj <= 0.0) continue;
-                float d2 = dot(OC, OC) - tProj * tProj;
-                float r2 = bulbRadius * bulbRadius;
-                if (d2 >= r2) continue;
-                float tHit = tProj - sqrt(max(0.0, r2 - d2));
-                if (tHit <= 0.0 || tHit >= closestBulbDist) continue;
-                float coneFade = 1.0;
-                if (type == 1) {
-                    vec3 toHit = normalize((curOrig + curDir * tHit) - lightPos);
-                    float cone = dot(toHit, normalize(ubo.lightsDir[li].xyz));
-                    coneFade = mix(0.15, 1.0, smoothstep(ubo.lightsParams[li].y, ubo.lightsParams[li].x, cone));
-                }
-                if (!rayQueryOccluded(curOrig, curDir, max(0.001, tHit - 0.02))) {
-                    closestBulbDist = tHit;
-                    bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0 * coneFade);
-                    hitBulb = true;
+            bool showLightBulbs = (pc.u.w & (1u << 13)) != 0u;
+
+            if (showLightBulbs) {
+                for (int li = 0; li < numActiveLights; ++li) {
+                    float intensity = max(ubo.lightsCol[li].w, 0.0);
+                    if (intensity <= 0.001) continue;
+                    vec3 lightPos = ubo.lightsPos[li].xyz;
+                    float range = max(ubo.lightsPos[li].w, 0.1);
+                    int type = int(round(ubo.lightsDir[li].w));
+                    float bulbRadius = clamp(range * 0.02, 0.08, 0.35);
+                    if (type == 2) bulbRadius = clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.1, 0.6);
+                    vec3 OC = lightPos - curOrig;
+                    float tProj = dot(OC, curDir);
+                    if (tProj <= 0.0) continue;
+                    float d2 = dot(OC, OC) - tProj * tProj;
+                    float r2 = bulbRadius * bulbRadius;
+                    if (d2 >= r2) continue;
+                    float tHit = tProj - sqrt(max(0.0, r2 - d2));
+                    if (tHit <= 0.0 || tHit >= closestBulbDist) continue;
+                    float coneFade = 1.0;
+                    if (type == 1) {
+                        vec3 toHit = normalize((curOrig + curDir * tHit) - lightPos);
+                        float cone = dot(toHit, normalize(ubo.lightsDir[li].xyz));
+                        if (cone <= ubo.lightsParams[li].y) continue; // Behind or outside spotlight cone -> completely invisible!
+                        coneFade = smoothstep(ubo.lightsParams[li].y, ubo.lightsParams[li].x, cone);
+                    }
+                    if (!rayQueryOccluded(curOrig, curDir, max(0.001, tHit - 0.02))) {
+                        closestBulbDist = tHit;
+                        bulbRadiance = ubo.lightsCol[li].rgb * (intensity * 6.0 * coneFade);
+                        hitBulb = true;
+                    }
                 }
             }
 
@@ -237,7 +242,8 @@ void main() {
             float maxContinueRoughness = clamp(pc.f.w, 0.05, 1.0);
             float minContinueThroughput = clamp(uintBitsToFloat(pc.u.z), 0.001, 1.0);
             float contLum = max(contW.r, max(contW.g, contW.b));
-            bool canContinue = (bounce + 1 < maxBounces) && hitRough < maxContinueRoughness &&
+            bool hitReflects = (hit.material.w > 0.5);
+            bool canContinue = hitReflects && (bounce + 1 < maxBounces) && hitRough < maxContinueRoughness &&
                 (infiniteBounces ? (contLum > 0.002) : (contLum > minContinueThroughput));
 
             int singleLight = -1;

@@ -118,6 +118,7 @@ namespace engine::ecs {
         std::string albedoPath{""};
         std::string normalPath{""};
         std::string ormPath{""};
+        bool reflectsLight{true};
     };
 
     struct LightComponent {

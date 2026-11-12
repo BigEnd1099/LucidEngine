@@ -1,6 +1,7 @@
 #include "renderer/VulkanRenderer.hpp"
 #include "renderer/EditorUiControls.hpp"
 #include "renderer/EditorLocalization.hpp"
+#include "editor/EditorActionHistory.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
 #include "imgui.h"
@@ -220,11 +221,14 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 if (ImGui::Combo(editorText("details.light_type", "Light Type"), &curType, "Point Light\0Directional (Sun)\0Spot Light\0Area Light (Rect)\0\0")) {
                                     lc.type = lightTypes[curType];
                                 }
-                                ImGui::ColorEdit3("Color", (float*)&lc.color);
-                                ImGui::DragFloat("Intensity", &lc.intensity, 0.1f, 0.0f, 100.0f, "%.2f");
+                                if (ImGui::ColorEdit3("Color", (float*)&lc.color)) {}
+                                if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                if (drawEditorDragFloat("Intensity", &lc.intensity, 0.1f, 0.0f, 100.0f, 5.0f, "%.2f")) {}
+                                if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
 
                                 if (curType == 0) { // Point
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
+                                    if (drawEditorDragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, 25.0f, "%.1f m")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                 } else if (curType == 1) { // Sun / Directional
                                     if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
                                         auto& lt = registry.get().get<ecs::TransformComponent>(selectedEntity);
@@ -292,29 +296,39 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                         }
                                     }
                                 } else if (curType == 2) { // Spot
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat(editorText("details.inner_cone", "Inner Cone"), &lc.innerConeAngle, 1.0f, 80.0f, "%.1f deg");
+                                    if (drawEditorDragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, 25.0f, "%.1f m")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                    if (drawEditorSliderFloat(editorText("details.inner_cone", "Inner Cone"), &lc.innerConeAngle, 1.0f, 80.0f, 25.0f, "%.1f deg")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                     if (lc.outerConeAngle <= lc.innerConeAngle) lc.outerConeAngle = lc.innerConeAngle + 0.5f;
-                                    ImGui::SliderFloat(editorText("details.outer_cone", "Outer Cone"), &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, "%.1f deg");
+                                    if (drawEditorSliderFloat(editorText("details.outer_cone", "Outer Cone"), &lc.outerConeAngle, lc.innerConeAngle + 0.5f, 89.0f, 35.0f, "%.1f deg")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                     if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
                                         auto& lt = registry.get().get<ecs::TransformComponent>(selectedEntity);
                                         bool changed = false;
-                                        if (ImGui::SliderFloat(editorText("details.spot_pitch", "Spot Pitch"), &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat(editorText("details.spot_yaw", "Spot Yaw"), &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                        if (drawEditorSliderFloat(editorText("details.spot_pitch", "Spot Pitch"), &lt.rotation.x, -89.0f, 89.0f, 0.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                        if (drawEditorSliderFloat(editorText("details.spot_yaw", "Spot Yaw"), &lt.rotation.y, 0.0f, 360.0f, 0.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                         if (changed) {
                                             lt.orientation = glm::quat(glm::radians(lt.rotation));
                                             if (engine) engine->syncEntityTransformPhysics(selectedEntity);
                                         }
                                     }
                                 } else if (curType == 3) { // Area
-                                    ImGui::DragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, "%.1f m");
-                                    ImGui::SliderFloat(editorText("details.area_width", "Area Width X"), &lc.areaSizeX, 0.2f, 20.0f, "%.2f m");
-                                    ImGui::SliderFloat(editorText("details.area_height", "Area Height Y"), &lc.areaSizeY, 0.2f, 20.0f, "%.2f m");
+                                    if (drawEditorDragFloat("Range (m)", &lc.range, 0.5f, 1.0f, 200.0f, 25.0f, "%.1f m")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                    if (drawEditorSliderFloat(editorText("details.area_width", "Area Width X"), &lc.areaSizeX, 0.2f, 20.0f, 2.0f, "%.2f m")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                    if (drawEditorSliderFloat(editorText("details.area_height", "Area Height Y"), &lc.areaSizeY, 0.2f, 20.0f, 2.0f, "%.2f m")) {}
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                     if (registry.get().all_of<ecs::TransformComponent>(selectedEntity)) {
                                         auto& lt = registry.get().get<ecs::TransformComponent>(selectedEntity);
                                         bool changed = false;
-                                        if (ImGui::SliderFloat(editorText("details.area_pitch", "Area Pitch"), &lt.rotation.x, -89.0f, 89.0f, "%.1f deg")) changed = true;
-                                        if (ImGui::SliderFloat(editorText("details.area_yaw", "Area Yaw"), &lt.rotation.y, 0.0f, 360.0f, "%.1f deg")) changed = true;
+                                        if (drawEditorSliderFloat(editorText("details.area_pitch", "Area Pitch"), &lt.rotation.x, -89.0f, 89.0f, 0.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+                                        if (drawEditorSliderFloat(editorText("details.area_yaw", "Area Yaw"), &lt.rotation.y, 0.0f, 360.0f, 0.0f, "%.1f deg")) changed = true;
+                                        if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
                                         if (changed) {
                                             lt.orientation = glm::quat(glm::radians(lt.rotation));
                                             if (engine) engine->syncEntityTransformPhysics(selectedEntity);
@@ -352,10 +366,25 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                     }
                                 } else {
                                     auto& mat = registry.get().get<ecs::MaterialComponent>(selectedEntity);
-                                    ImGui::ColorEdit3("Base Color (Albedo)", &mat.baseColor.x);
-                                    ImGui::SliderFloat(editorText("details.metallic", "Metallic"), &mat.metallic, 0.0f, 1.0f, "%.2f");
-                                    ImGui::SliderFloat(editorText("details.roughness", "Roughness"), &mat.roughness, 0.045f, 1.0f, "%.3f");
-                                    ImGui::DragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, "%.2f");
+                                    if (ImGui::ColorEdit3("Base Color (Albedo)", &mat.baseColor.x)) {
+                                    }
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+
+                                    if (drawEditorSliderFloat(editorText("details.metallic", "Metallic"), &mat.metallic, 0.0f, 1.0f, 0.0f, "%.2f")) {
+                                    }
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+
+                                    if (drawEditorSliderFloat(editorText("details.roughness", "Roughness"), &mat.roughness, 0.0f, 1.0f, 0.5f, "%.3f")) {
+                                    }
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+
+                                    if (drawEditorDragFloat("Emissive HDR", &mat.emissiveIntensity, 0.05f, 0.0f, 25.0f, 0.0f, "%.2f")) {
+                                    }
+                                    if (ImGui::IsItemActivated()) editor::EditorActionHistory::get().recordSnapshot(registry);
+
+                                    if (ImGui::Checkbox(editorText("details.reflects_light", "Reflects Light (Odbija światło)"), &mat.reflectsLight)) {
+                                        editor::EditorActionHistory::get().recordSnapshot(registry);
+                                    }
 
                                     ImGui::Spacing();
                                     ImGui::Separator();
@@ -572,6 +601,12 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::Checkbox(editorText("details.rt_half_res", "Global Half-Res Reflections (Variant 4)"), &m_rtSettings.reflectionHalfRes);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip(editorText("details.rt_half_res_tooltip", "Forces all reflections into half-resolution with edge-aware bilateral normal/depth reconstruction."));
+                        ImGui::Checkbox(editorText("details.rt_show_light_bulbs", "Show Light Bulbs in Reflections (Świecące kule świateł w odbiciach)"), &m_rtSettings.reflectionShowLightBulbs);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("When disabled, analytical lights do not draw visible emissive proxy orbs inside reflections. Spotlights are only ever visible within their forward cone.");
+                        ImGui::Checkbox(editorText("details.rt_denoise_mirrors", "Denoise Mirror Reflections (Filtr przestrzenny luster)"), &m_rtSettings.reflectionDenoiseMirrors);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Opcjonalny filtr usuwający fireflies dla idealnie gładkich luster (roughness < 0.035). Gdy wyłączony (domyślnie), lustro zachowuje czyste, niezmodyfikowane odbicie bez rozmycia.");
                         ImGui::EndDisabled();
                         ImGui::Checkbox(editorText("details.rt_diffuse_gi", "Ray-Traced Diffuse GI"), &m_rtSettings.giEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled);

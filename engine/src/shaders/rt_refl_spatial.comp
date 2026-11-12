@@ -1,0 +1,174 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "rt_common.glsl"
+#include "rt_screen.glsl"
+
+layout(set = 1, binding = 0) uniform sampler2D uDepth;
+layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
+layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
+layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
+
+layout(push_constant) uniform PC {
+    mat4 prevViewProj;
+    vec4 f;   // x = max history, y = samples, z = history valid, w = max roughness
+    uvec4 u;  // u.w: bit 14 = denoiseMirrors
+} pc;
+
+float lum(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 isize = imageSize(imgRefl);
+    if (any(greaterThanEqual(px, isize))) return;
+
+    float d = texelFetch(uDepth, px, 0).r;
+    if (d >= 1.0) {
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+
+    vec4 gNR = texelFetch(uGNormalRoughness, px, 0);
+    vec3 nC = gNR.xyz;
+    if (dot(nC, nC) <= 1e-4) {
+        imageStore(imgRefl, px, vec4(0.0));
+        return;
+    }
+    nC = normalize(nC);
+    float roughness = clamp(gNR.w, 0.0, 1.0);
+
+    vec4 centerVal = imageLoad(imgReflHistCur, px);
+    if (centerVal.a <= 0.0) {
+        // Fallback to direct reflection if temporal history was bypass/invalid
+        vec4 curRefl = imageLoad(imgRefl, px);
+        centerVal = vec4(curRefl.rgb, 1.0);
+    }
+
+    float zC = rtLinearDepth(d);
+    float depthTol = 0.02 * zC + 0.005;
+    float centerLum = lum(centerVal.rgb);
+
+    // Bit 14: optional mirror spatial denoiser (user configurable, default false)
+    bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
+
+    // 1. Mirror / Low-Roughness Surfaces (roughness < 0.08):
+    if (roughness < 0.08) {
+        if (!denoiseMirrors) {
+            // Keep untouched, pixel-crisp mirror reflections directly from temporal filter
+            imageStore(imgRefl, px, vec4(centerVal.rgb, 1.0));
+            return;
+        }
+
+        // Active Planar Mirror Denoiser: cleans ray tracing noise & fireflies while preserving mirror clarity
+        const ivec2 crossOffsets[8] = ivec2[](
+            ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1),
+            ivec2(-1, -1), ivec2(1, -1), ivec2(-1, 1), ivec2(1, 1)
+        );
+        const float weights[8] = float[](
+            0.15, 0.15, 0.15, 0.15,
+            0.08, 0.08, 0.08, 0.08
+        );
+
+        vec3 crossColSum = centerVal.rgb * 0.40;
+        float crossWSum = 0.40;
+        float maxNeighborLum = 0.0;
+
+        for (int k = 0; k < 8; ++k) {
+            ivec2 qPx = px + crossOffsets[k];
+            if (any(lessThan(qPx, ivec2(0))) || any(greaterThanEqual(qPx, isize))) continue;
+
+            float qD = texelFetch(uDepth, qPx, 0).r;
+            if (qD >= 1.0) continue;
+            float zQ = rtLinearDepth(qD);
+            if (abs(zC - zQ) > depthTol) continue;
+
+            vec4 qGNR = texelFetch(uGNormalRoughness, qPx, 0);
+            if (dot(qGNR.xyz, qGNR.xyz) <= 1e-4) continue;
+            vec3 nQ = normalize(qGNR.xyz);
+            if (dot(nC, nQ) < 0.90) continue; // Same planar mirror only!
+
+            vec4 qVal = imageLoad(imgReflHistCur, qPx);
+            if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
+
+            float qLum = lum(qVal.rgb);
+            maxNeighborLum = max(maxNeighborLum, qLum);
+
+            // Bilateral luma weight: preserves sharp reflection edges, cleans speckle
+            float dL = abs(centerLum - qLum);
+            float wLuma = exp(-dL / max(centerLum * 0.8 + 0.15, 0.06));
+            float w = weights[k] * wLuma;
+            crossColSum += qVal.rgb * w;
+            crossWSum += w;
+        }
+
+        vec3 cleanCol = crossColSum / max(crossWSum, 1e-4);
+        // Robust firefly suppression: if center is an isolated spike compared to neighbors
+        if (centerLum > max(maxNeighborLum * 1.5, 0.8) && maxNeighborLum > 0.0) {
+            cleanCol = mix(cleanCol, centerVal.rgb * (maxNeighborLum / max(centerLum, 1e-4)), 0.65);
+        }
+
+        imageStore(imgRefl, px, vec4(cleanCol, 1.0));
+        return;
+    }
+
+    // 2. Rough Surface Fast 3x3 Edge-Preserving Bilateral Denoiser (9-tap total):
+    // Uses native full-resolution G-Buffer normals and depth
+    float sigmaN = clamp(16.0 / max(roughness, 0.04), 4.0, 48.0);
+    vec3 sumCol = centerVal.rgb * 0.35;
+    float sumW = 0.35;
+
+    const ivec2 offsets[8] = ivec2[](
+        ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1),
+        ivec2(-1, -1), ivec2(1, -1), ivec2(-1, 1), ivec2(1, 1)
+    );
+    const float kernelW[8] = float[](
+        0.11, 0.11, 0.11, 0.11,
+        0.05, 0.05, 0.05, 0.05
+    );
+
+    for (int k = 0; k < 8; ++k) {
+        ivec2 qPx = px + offsets[k];
+        if (any(lessThan(qPx, ivec2(0))) || any(greaterThanEqual(qPx, isize))) continue;
+
+        float qD = texelFetch(uDepth, qPx, 0).r;
+        if (qD >= 1.0) continue;
+        float zQ = rtLinearDepth(qD);
+        float dz = abs(zC - zQ);
+        if (dz > depthTol) continue;
+
+        vec4 qGNR = texelFetch(uGNormalRoughness, qPx, 0);
+        if (dot(qGNR.xyz, qGNR.xyz) <= 1e-4) continue;
+        vec3 nQ = normalize(qGNR.xyz);
+        float nDot = dot(nC, nQ);
+        if (nDot < 0.6) continue;
+
+        vec4 qVal = imageLoad(imgReflHistCur, qPx);
+        if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
+
+        float qRoughness = clamp(qGNR.w, 0.0, 1.0);
+        float qLum = lum(qVal.rgb);
+        float dL = abs(centerLum - qLum);
+
+        // Combined exponential edge weight (single exp evaluation)
+        float exponent = max(0.0, 1.0 - nDot) * sigmaN
+                       + (dz / depthTol)
+                       + (abs(roughness - qRoughness) / 0.15)
+                       + (dL / max(centerLum * 1.5 + 0.15, 0.08));
+
+        float w = kernelW[k] * exp(-exponent);
+        sumCol += qVal.rgb * w;
+        sumW += w;
+    }
+
+    vec3 filtered = sumCol / max(sumW, 1e-4);
+    imageStore(imgRefl, px, vec4(filtered, 1.0));
+}

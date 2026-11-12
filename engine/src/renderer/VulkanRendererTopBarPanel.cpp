@@ -4,6 +4,7 @@
 #include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
+#include "editor/EditorActionHistory.hpp"
 #include <cmath>
 #include <cctype>
 #include <cstdio>
@@ -72,6 +73,75 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::EndMenu();
                     }
                     if (ImGui::BeginMenu(editorText("ui.edit", "Edit"))) {
+                        ImGui::BeginDisabled(state.simulationSessionActive || !editor::EditorActionHistory::get().canUndo());
+                        if (ImGui::MenuItem(editorText("ui.undo", "Undo"), "Ctrl+Z")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().undo(*engine->getRegistry(), engine->getPhysicsContext());
+                            }
+                        }
+                        ImGui::EndDisabled();
+
+                        ImGui::BeginDisabled(state.simulationSessionActive || !editor::EditorActionHistory::get().canRedo());
+                        if (ImGui::MenuItem(editorText("ui.redo", "Redo"), "Ctrl+Y / Ctrl+Shift+Z")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().redo(*engine->getRegistry(), engine->getPhysicsContext());
+                            }
+                        }
+                        ImGui::EndDisabled();
+
+                        ImGui::Separator();
+
+                        const bool hasSelection = (selectedEntity != entt::null && engine && engine->getRegistry() && engine->getRegistry()->get().valid(selectedEntity));
+
+                        ImGui::BeginDisabled(state.simulationSessionActive || !hasSelection);
+                        if (ImGui::MenuItem(editorText("ui.cut", "Cut"), "Ctrl+X")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().copyEntity(*engine->getRegistry(), selectedEntity);
+                                editor::EditorActionHistory::get().recordSnapshot(*engine->getRegistry());
+                                engine->destroyEntity(static_cast<uint32_t>(selectedEntity));
+                                selectedEntity = entt::null;
+                            }
+                        }
+                        if (ImGui::MenuItem(editorText("ui.copy", "Copy"), "Ctrl+C")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().copyEntity(*engine->getRegistry(), selectedEntity);
+                            }
+                        }
+                        ImGui::EndDisabled();
+
+                        ImGui::BeginDisabled(state.simulationSessionActive || !editor::EditorActionHistory::get().hasClipboard());
+                        if (ImGui::MenuItem(editorText("ui.paste", "Paste"), "Ctrl+V")) {
+                            if (engine && engine->getRegistry()) {
+                                entt::entity pasted = editor::EditorActionHistory::get().pasteEntity(*engine->getRegistry(), engine);
+                                if (pasted != entt::null) {
+                                    selectedEntity = pasted;
+                                    engine->setSelectedEntity(pasted);
+                                }
+                            }
+                        }
+                        ImGui::EndDisabled();
+
+                        ImGui::BeginDisabled(state.simulationSessionActive || !hasSelection);
+                        if (ImGui::MenuItem(editorText("ui.duplicate", "Duplicate"), "Ctrl+D")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().copyEntity(*engine->getRegistry(), selectedEntity);
+                                entt::entity pasted = editor::EditorActionHistory::get().pasteEntity(*engine->getRegistry(), engine, glm::vec3(1.0f, 0.0f, 1.0f));
+                                if (pasted != entt::null) {
+                                    selectedEntity = pasted;
+                                    engine->setSelectedEntity(pasted);
+                                }
+                            }
+                        }
+                        if (ImGui::MenuItem(editorText("ui.delete", "Delete"), "Delete")) {
+                            if (engine && engine->getRegistry()) {
+                                editor::EditorActionHistory::get().recordSnapshot(*engine->getRegistry());
+                                engine->destroyEntity(static_cast<uint32_t>(selectedEntity));
+                                selectedEntity = entt::null;
+                            }
+                        }
+                        ImGui::EndDisabled();
+
+                        ImGui::Separator();
                         if (ImGui::MenuItem(editorText("ui.editor_preferences", "Editor Preferences..."), "Ctrl+,")) {
                             state.showPreferencesWindow = true;
                         }
@@ -381,13 +451,19 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                     shortcutRow("Ctrl + Space", editorText("ui.shortcut_content_drawer", "Toggle Content Drawer"));
                     shortcutRow("F4", editorText("ui.shortcut_script_studio", "Toggle QuickJS Script Studio"));
                     shortcutRow("F11", editorText("ui.shortcut_immersive", "Toggle immersive viewport"));
+                    ImGui::SeparatorText(editorText("ui.shortcuts_edit", "Edit & History"));
+                    shortcutRow("Ctrl + Z", editorText("ui.shortcut_undo", "Undo last scene change"));
+                    shortcutRow("Ctrl + Y / Ctrl + Shift + Z", editorText("ui.shortcut_redo", "Redo scene change"));
+                    shortcutRow("Ctrl + C", editorText("ui.shortcut_copy", "Copy selected actor"));
+                    shortcutRow("Ctrl + X", editorText("ui.shortcut_cut", "Cut selected actor"));
+                    shortcutRow("Ctrl + V", editorText("ui.shortcut_paste", "Paste actor from clipboard"));
+                    shortcutRow("Ctrl + D", editorText("ui.shortcut_duplicate", "Duplicate selected actor"));
+                    shortcutRow("Delete", editorText("ui.shortcut_delete", "Delete selected actor"));
                     ImGui::SeparatorText(editorText("ui.shortcuts_viewport", "Viewport & Selection"));
                     shortcutRow("W / G", editorText("ui.shortcut_translate", "Move gizmo"));
                     shortcutRow("E / R", editorText("ui.shortcut_rotate", "Rotate gizmo"));
                     shortcutRow("S", editorText("ui.shortcut_scale", "Scale gizmo"));
                     shortcutRow("F", editorText("ui.shortcut_focus", "Focus selected object"));
-                    shortcutRow("Delete", editorText("ui.shortcut_delete", "Delete selected object"));
-                    shortcutRow("Ctrl + D", editorText("ui.shortcut_duplicate", "Duplicate selected object"));
                     ImGui::Spacing();
                     ImGui::TextDisabled("%s", editorText("ui.shortcuts_note", "Viewport shortcuts are disabled while editing text or during simulation where applicable."));
                 }

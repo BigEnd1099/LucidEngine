@@ -40,6 +40,8 @@ namespace engine::renderer {
             bool      reflectionPrimaryStochasticLights{false};
             bool      reflectionLodBias{true};
             bool      reflectionHalfRes{false};
+            bool      reflectionShowLightBulbs{true};
+            bool      reflectionDenoiseMirrors{false};
         };
 
         struct GpuTimings {
@@ -53,6 +55,7 @@ namespace engine::renderer {
             float atrous3Ms{0.0f};
             float reflTraceMs{0.0f};
             float reflTemporalMs{0.0f};
+            float reflSpatialMs{0.0f};
             float totalMs{0.0f};
 
             // Dispatch-only time and the following GPU dependency gap are reported separately.
@@ -67,6 +70,8 @@ namespace engine::renderer {
             float reflTraceSyncMs{0.0f};
             float reflTemporalExecMs{0.0f};
             float reflTemporalSyncMs{0.0f};
+            float reflSpatialExecMs{0.0f};
+            float reflSpatialSyncMs{0.0f};
         };
 
         bool init(VulkanContext* context, VkDescriptorSetLayout sceneSetLayout,
@@ -145,6 +150,7 @@ namespace engine::renderer {
         std::array<VkPipeline, 4> m_atrousPipelines{};
         VkPipeline m_reflPipeline{VK_NULL_HANDLE};
         VkPipeline m_reflTemporalPipeline{VK_NULL_HANDLE};
+        VkPipeline m_reflSpatialPipeline{VK_NULL_HANDLE};
 
         VkQueryPool m_queryPool{VK_NULL_HANDLE};
         bool m_timestampsSupported{false};

@@ -190,11 +190,64 @@ for (int s = 0; s < samples; ++s) {
         vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, bounceLod).rgb;
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
         float hitRoughness = clamp(hit.material.y * hitOrm.g, 0.0, 1.0);
+        bool hitReflects = (hit.material.w > 0.5);
+
+        vec3 hitF0 = mix(vec3(0.04), hitAlbedo, hitMetallic);
+
+        // Specular caustic reflection: when ray hits a reflective surface (mirror or low roughness metal),
+        // analytically evaluate the reflection of active lights (Spot & Point) bouncing off the mirror onto this path
+        bool isMirrorSurface = hitReflects && (hitMetallic > 0.4 || hitRoughness < 0.12);
+        if (isMirrorSurface) {
+            vec3 hitN = normalize(hitNormal);
+            vec3 reflRay = reflect(dir, hitN);
+
+            for (int li = 0; li < numActiveLights; ++li) {
+                float intensity = max(ubo.lightsCol[li].w, 0.0);
+                if (intensity <= 0.001) continue;
+
+                vec3 toLight = ubo.lightsPos[li].xyz - hitPosition;
+                float distToLight = length(toLight);
+                float range = max(ubo.lightsPos[li].w, 0.1);
+                if (distToLight >= range) continue;
+
+                vec3 L = toLight / max(distToLight, 1e-4);
+                float nDotL = dot(hitN, L);
+                if (nDotL <= 0.001) continue; // Light is behind the mirror plane
+
+                int type = int(round(ubo.lightsDir[li].w));
+                float coneFade = 1.0;
+                if (type == 1) {
+                    vec3 spotDir = normalize(ubo.lightsDir[li].xyz);
+                    float cone = dot(-L, spotDir);
+                    if (cone <= ubo.lightsParams[li].y) continue;
+                    coneFade = smoothstep(ubo.lightsParams[li].y, ubo.lightsParams[li].x, cone);
+                }
+
+                float cosAngle = dot(reflRay, L);
+                float bulbRadius = clamp(range * 0.02, 0.08, 0.35);
+                if (type == 2) bulbRadius = clamp(max(ubo.lightsParams[li].z, ubo.lightsParams[li].w) * 0.5, 0.1, 0.6);
+                float sinBulb = clamp(bulbRadius / max(distToLight, bulbRadius + 0.01), 0.01, 0.95);
+                float spreadAngle = clamp(sinBulb + hitRoughness * 1.2, 0.025, 0.85);
+                float cosThreshold = cos(spreadAngle);
+
+                if (cosAngle > cosThreshold) {
+                    if (!rayQueryOccluded(hitPosition + hitN * 0.01, L, max(distToLight - 0.03, 0.005))) {
+                        float totalDist = hitDistance + distToLight;
+                        float ratio = totalDist / range;
+                        float window = clamp(1.0 - pow(ratio, 4.0), 0.0, 1.0);
+                        float attenuation = (window * window) / (totalDist * totalDist + 1.0);
+                        float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
+                        vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
+                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
+                        pathRadiance += throughput * causticContrib;
+                    }
+                }
+            }
+        }
 
         rayNormal = normalize(hitNormal);
         rayOrigin = hitPosition + rayNormal * 0.014;
 
-        vec3 hitF0 = mix(vec3(0.04), hitAlbedo, hitMetallic);
         vec3 hitV = normalize(-dir);
         float hitNdotV = max(dot(rayNormal, hitV), 1e-5);
         vec3 hitF = fresnelSchlickGI(hitNdotV, hitF0);
@@ -209,7 +262,7 @@ for (int s = 0; s < samples; ++s) {
         float totalLum = specLum + diffLum;
         if (totalLum < 1e-5) break;
 
-        float hitSpecProbability = clamp(specLum / totalLum, 0.05, 0.95);
+        float hitSpecProbability = hitReflects ? clamp(specLum / totalLum, 0.05, 0.95) : 0.0;
         if (rand1() < hitSpecProbability) {
             vec3 F;
             float specWeight;

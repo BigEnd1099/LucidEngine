@@ -26,6 +26,12 @@ namespace engine::ecs {
         char tag[64]{0};
         bool hasMesh{false};
         MeshComponent mesh{};
+        bool hasMaterial{false};
+        MaterialComponent material{};
+        bool hasLight{false};
+        LightComponent light{};
+        bool hasParticleEmitter{false};
+        ParticleEmitterComponent particleEmitter{};
         bool hasRigidBody{false};
         RigidBodyComponent rigidBody{};
         bool hasVelocity{false};

@@ -114,6 +114,7 @@ namespace engine::renderer {
         VkShaderModule atrous = loadModule("rt_atrous.comp.spv");
         VkShaderModule refl = loadModule("rt_reflections.comp.spv");
         VkShaderModule reflTemp = loadModule("rt_refl_temporal.comp.spv");
+        VkShaderModule reflSpatial = loadModule("rt_refl_spatial.comp.spv");
         m_tracePipelineHandle = createPipeline(trace, -1);
         m_temporalPipeline = createPipeline(temporal, -1);
         m_atrousPipelines[0] = createPipeline(atrous, 0);
@@ -122,6 +123,8 @@ namespace engine::renderer {
         m_atrousPipelines[3] = createPipeline(atrous, 3);
         m_reflPipeline = createPipeline(refl, -1);
         m_reflTemporalPipeline = createPipeline(reflTemp, -1);
+        m_reflSpatialPipeline = createPipeline(reflSpatial, -1);
+        vkDestroyShaderModule(dev, reflSpatial, nullptr);
         vkDestroyShaderModule(dev, reflTemp, nullptr);
         vkDestroyShaderModule(dev, refl, nullptr);
         vkDestroyShaderModule(dev, trace, nullptr);
@@ -158,7 +161,7 @@ namespace engine::renderer {
         if (m_timestampsSupported) {
             VkQueryPoolCreateInfo qpci{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
             qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-            qpci.queryCount = 17;
+            qpci.queryCount = 19;
             if (vkCreateQueryPool(dev, &qpci, nullptr, &m_queryPool) != VK_SUCCESS) {
                 m_queryPool = VK_NULL_HANDLE;
                 m_timestampsSupported = false;
@@ -200,9 +203,10 @@ namespace engine::renderer {
         for (auto& p : m_atrousPipelines) { if (p) vkDestroyPipeline(dev, p, nullptr); p = VK_NULL_HANDLE; }
         if (m_temporalPipeline) vkDestroyPipeline(dev, m_temporalPipeline, nullptr);
         if (m_tracePipelineHandle) vkDestroyPipeline(dev, m_tracePipelineHandle, nullptr);
+        if (m_reflSpatialPipeline) vkDestroyPipeline(dev, m_reflSpatialPipeline, nullptr);
         if (m_reflTemporalPipeline) vkDestroyPipeline(dev, m_reflTemporalPipeline, nullptr);
         if (m_reflPipeline) vkDestroyPipeline(dev, m_reflPipeline, nullptr);
-        m_reflTemporalPipeline = m_reflPipeline = VK_NULL_HANDLE;
+        m_reflSpatialPipeline = m_reflTemporalPipeline = m_reflPipeline = VK_NULL_HANDLE;
         m_temporalPipeline = m_tracePipelineHandle = VK_NULL_HANDLE;
         if (m_pipelineLayout) vkDestroyPipelineLayout(dev, m_pipelineLayout, nullptr);
         if (m_pool) vkDestroyDescriptorPool(dev, m_pool, nullptr);
@@ -459,8 +463,8 @@ namespace engine::renderer {
         }
         m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
-            uint64_t timestamps[17]{};
-            VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 17,
+            uint64_t timestamps[19]{};
+            VkResult res = vkGetQueryPoolResults(m_context->getDevice(), m_queryPool, 0, 19,
                                                  sizeof(timestamps), timestamps, sizeof(uint64_t),
                                                  VK_QUERY_RESULT_64_BIT);
             if (res == VK_SUCCESS) {
@@ -484,7 +488,8 @@ namespace engine::renderer {
                 m_gpuTimings.atrous3Ms      = toMs(10, 12);
                 m_gpuTimings.reflTraceMs    = toMs(12, 14);
                 m_gpuTimings.reflTemporalMs = toMs(14, 16);
-                m_gpuTimings.totalMs        = toMs(0, 16);
+                m_gpuTimings.reflSpatialMs  = toMs(16, 18);
+                m_gpuTimings.totalMs        = toMs(0, 18);
 
                 // Dispatch execution excludes the following dependency barrier.
                 m_gpuTimings.traceExecMs        = toMs(0, 1);
@@ -498,6 +503,8 @@ namespace engine::renderer {
                 m_gpuTimings.reflTraceSyncMs    = toMs(13, 14);
                 m_gpuTimings.reflTemporalExecMs = toMs(14, 15);
                 m_gpuTimings.reflTemporalSyncMs = toMs(15, 16);
+                m_gpuTimings.reflSpatialExecMs  = toMs(16, 17);
+                m_gpuTimings.reflSpatialSyncMs  = toMs(17, 18);
             }
         }
         auto& profiler = core::Profiler::get();
@@ -509,6 +516,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiAtrous3Ms", m_gpuTimings.atrous3Ms);
         profiler.recordMetric("rtReflectionTraceMs", m_gpuTimings.reflTraceMs);
         profiler.recordMetric("rtReflectionTemporalMs", m_gpuTimings.reflTemporalMs);
+        profiler.recordMetric("rtReflectionSpatialMs", m_gpuTimings.reflSpatialMs);
         profiler.recordMetric("rtComputeTotalMs", m_gpuTimings.totalMs);
 
         profiler.recordMetric("rtGiTraceExecMs", m_gpuTimings.traceExecMs);
@@ -550,7 +558,7 @@ namespace engine::renderer {
 
         // Reset query pool before recording timestamps
         if (m_timestampsSupported && m_queryPool) {
-            vkCmdResetQueryPool(cmd, m_queryPool, 0, 17);
+            vkCmdResetQueryPool(cmd, m_queryPool, 0, 19);
         }
 
         // Reset per-frame RT rejection counters. Transfer writes become visible to compute atomics.
@@ -725,6 +733,8 @@ namespace engine::renderer {
             if (params.reflectionLodBias)          reflFlags |= (1u << 10);
             if (params.reflectionHalfRes)          reflFlags |= (1u << 11);
             if (params.reflectionPrimaryStochasticLights) reflFlags |= (1u << 12);
+            if (params.reflectionShowLightBulbs)   reflFlags |= (1u << 13);
+            if (params.reflectionDenoiseMirrors)   reflFlags |= (1u << 14);
             reflPd.u[3] = (params.reflectionInfiniteBounces
                 ? (0x80000000u | 8u)
                 : std::clamp(params.reflectionBounces, 2u, 4u)) | reflFlags;
@@ -742,8 +752,20 @@ namespace engine::renderer {
             sync();
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 16);
+
+            if (params.spatialStrength > 0.001f && m_reflSpatialPipeline) {
+                bindRefl(m_reflSpatialPipeline, reflPd);
+                if (m_timestampsSupported && m_queryPool)
+                    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 17);
+                sync();
+                if (m_timestampsSupported && m_queryPool)
+                    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 18);
+            } else if (m_timestampsSupported && m_queryPool) {
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 17);
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 18);
+            }
         } else if (m_timestampsSupported && m_queryPool) {
-            for (uint32_t query = 12; query <= 16; ++query)
+            for (uint32_t query = 12; query <= 18; ++query)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, query);
         }
 

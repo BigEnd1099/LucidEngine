@@ -7,6 +7,8 @@
 #ifdef USE_GLFW
 namespace engine::renderer {
 
+static ImGuiID s_activeTextEditId = 0;
+
 bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValue, float columnWidth) {
     bool changed = false;
     ImGui::PushID(label);
@@ -58,7 +60,22 @@ bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValu
             changed = true;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(editorText("ui.vector_drag_tooltip", "[Shift] Precision (10x slower)\n[Ctrl] Snap (0.5m)\n[Alt] Adjust all 3 axes together"));
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                val = resetValue;
+                if (isAlt) { values.x = values.y = values.z = resetValue; }
+                changed = true;
+            } else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                const ImVec2 m = ImGui::GetMousePos();
+                const ImVec2 rmin = ImGui::GetItemRectMin();
+                const ImVec2 rmax = ImGui::GetItemRectMax();
+                const float w = rmax.x - rmin.x;
+                if (m.x < rmin.x + w * 0.22f || m.x > rmin.x + w * 0.78f) {
+                    val = resetValue;
+                    if (isAlt) { values.x = values.y = values.z = resetValue; }
+                    changed = true;
+                }
+            }
+            ImGui::SetTooltip(editorText("ui.vector_drag_tooltip", "[Shift] Precision\n[Ctrl] Snap (0.5m)\n[Alt] Adjust all 3 axes\n[PPM/Dwuklik] Reset do %.1f"), resetValue);
         }
     };
 
@@ -71,6 +88,109 @@ bool drawEditorVec3Control(const char* label, glm::vec3& values, float resetValu
     ImGui::PopStyleVar();
     ImGui::Columns(1);
     ImGui::PopID();
+    return changed;
+}
+
+bool drawEditorSliderFloat(const char* label, float* v, float v_min, float v_max, float v_default, const char* format) {
+    if (!v) return false;
+    bool changed = false;
+    ImGuiID id = ImGui::GetID(label);
+
+    if (s_activeTextEditId == id) {
+        char inputLabel[128];
+        std::snprintf(inputLabel, sizeof(inputLabel), "##Input_%s", label);
+        const float labelW = ImGui::CalcTextSize(label).x;
+        const float availW = ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemWidth(std::max(60.0f, availW - labelW - 16.0f));
+        ImGui::SetKeyboardFocusHere(0);
+        if (ImGui::InputFloat(inputLabel, v, 0.0f, 0.0f, format, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            *v = std::clamp(*v, v_min, v_max);
+            changed = true;
+            s_activeTextEditId = 0;
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(label);
+
+        if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            *v = std::clamp(*v, v_min, v_max);
+            s_activeTextEditId = 0;
+        }
+    } else {
+        if (ImGui::SliderFloat(label, v, v_min, v_max, format)) {
+            changed = true;
+        }
+
+        if (ImGui::IsItemHovered()) {
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                *v = v_default;
+                changed = true;
+            } else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                const ImVec2 m = ImGui::GetMousePos();
+                const ImVec2 rmin = ImGui::GetItemRectMin();
+                const ImVec2 rmax = ImGui::GetItemRectMax();
+                const float w = rmax.x - rmin.x;
+                // Center 50% is the numeric text; sides are the slider track
+                if (m.x >= rmin.x + w * 0.25f && m.x <= rmin.x + w * 0.75f) {
+                    s_activeTextEditId = id;
+                } else {
+                    *v = v_default;
+                    changed = true;
+                }
+            }
+            ImGui::SetTooltip("[PPM / Dwuklik po bokach] Reset do domyslnej (%.2f)\n[Dwuklik na liczbie / Ctrl+Klik] Wpisz wartosc recznie", v_default);
+        }
+    }
+    return changed;
+}
+
+bool drawEditorDragFloat(const char* label, float* v, float v_speed, float v_min, float v_max, float v_default, const char* format) {
+    if (!v) return false;
+    bool changed = false;
+    ImGuiID id = ImGui::GetID(label);
+
+    if (s_activeTextEditId == id) {
+        char inputLabel[128];
+        std::snprintf(inputLabel, sizeof(inputLabel), "##Input_%s", label);
+        const float labelW = ImGui::CalcTextSize(label).x;
+        const float availW = ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemWidth(std::max(60.0f, availW - labelW - 16.0f));
+        ImGui::SetKeyboardFocusHere(0);
+        if (ImGui::InputFloat(inputLabel, v, 0.0f, 0.0f, format, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            *v = std::clamp(*v, v_min, v_max);
+            changed = true;
+            s_activeTextEditId = 0;
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(label);
+
+        if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            *v = std::clamp(*v, v_min, v_max);
+            s_activeTextEditId = 0;
+        }
+    } else {
+        if (ImGui::DragFloat(label, v, v_speed, v_min, v_max, format)) {
+            changed = true;
+        }
+
+        if (ImGui::IsItemHovered()) {
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                *v = v_default;
+                changed = true;
+            } else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                const ImVec2 m = ImGui::GetMousePos();
+                const ImVec2 rmin = ImGui::GetItemRectMin();
+                const ImVec2 rmax = ImGui::GetItemRectMax();
+                const float w = rmax.x - rmin.x;
+                if (m.x >= rmin.x + w * 0.25f && m.x <= rmin.x + w * 0.75f) {
+                    s_activeTextEditId = id;
+                } else {
+                    *v = v_default;
+                    changed = true;
+                }
+            }
+            ImGui::SetTooltip("[PPM / Dwuklik po bokach] Reset do domyslnej (%.2f)\n[Dwuklik na liczbie / Ctrl+Klik] Wpisz wartosc recznie", v_default);
+        }
+    }
     return changed;
 }
 

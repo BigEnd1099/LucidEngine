@@ -14,6 +14,7 @@
 #include "core/AssetManager.hpp"
 #include "core/Engine.hpp"
 #include "core/Profiler.hpp"
+#include "editor/EditorActionHistory.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -1162,9 +1163,13 @@ namespace engine::renderer {
             static float s_dragInitialOffset = 0.0f;
             static bool s_dragHasHit = false;
             static glm::vec3 s_dragInitialRotation(0.0f);
+            static glm::quat s_dragInitialOrientation(1.0f, 0.0f, 0.0f, 0.0f);
+            static glm::vec3 s_dragRotInitialVec(0.0f);
+            static bool s_dragRotUseRayPlane = false;
             static float s_lastRotAngle = 0.0f;
             static float s_accumulatedRotAngle = 0.0f;
             static ImVec2 s_dragPivotScreen(0.0f, 0.0f);
+            static ImVec2 s_dragLastMousePos(0.0f, 0.0f);
             static glm::vec3 s_dragInitialScale(1.0f);
             static float s_dragInitialDist = 1.0f;
 
@@ -1501,9 +1506,70 @@ namespace engine::renderer {
             const bool gizmoEnabled = !isSimulationSessionActive;
             if (!gizmoEnabled) s_draggingGizmoAxis = 0;
 
+            // Global Undo / Redo (accessible from any focused window or panel)
+            if (!isSimulationSessionActive && !ImGui::GetIO().WantTextInput) {
+                const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+                const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+
+                if (ctrlDown && !shiftDown && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+                    physics::PhysicsContext* phys = engine ? engine->getPhysicsContext() : nullptr;
+                    if (editor::EditorActionHistory::get().undo(registry, phys)) {
+                        if (selectedEnt != entt::null && !registry.get().valid(selectedEnt)) {
+                            selectedEnt = entt::null;
+                            if (engine) engine->setSelectedEntity(entt::null);
+                        }
+                    }
+                } else if (!isSimulationSessionActive && ((ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_Z)) || (ctrlDown && ImGui::IsKeyPressed(ImGuiKey_Y)))) {
+                    physics::PhysicsContext* phys = engine ? engine->getPhysicsContext() : nullptr;
+                    if (editor::EditorActionHistory::get().redo(registry, phys)) {
+                        if (selectedEnt != entt::null && !registry.get().valid(selectedEnt)) {
+                            selectedEnt = entt::null;
+                            if (engine) engine->setSelectedEntity(entt::null);
+                        }
+                    }
+                }
+            }
+
             if ((isHovered || isWindowFocused) && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive()) {
                 const bool ctrlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
                 const bool shiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+
+                // Copy / Cut / Paste / Duplicate
+                if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_C)) {
+                    if (selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                        editor::EditorActionHistory::get().copyEntity(registry, selectedEnt);
+                    }
+                }
+                if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_X)) {
+                    if (selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                        editor::EditorActionHistory::get().copyEntity(registry, selectedEnt);
+                        editor::EditorActionHistory::get().recordSnapshot(registry);
+                        if (engine) engine->destroyEntity(static_cast<uint32_t>(selectedEnt));
+                        else registry.destroyEntity(selectedEnt);
+                        selectedEnt = entt::null;
+                        if (engine) engine->setSelectedEntity(entt::null);
+                    }
+                }
+                if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_V)) {
+                    if (editor::EditorActionHistory::get().hasClipboard()) {
+                        entt::entity pasted = editor::EditorActionHistory::get().pasteEntity(registry, engine);
+                        if (pasted != entt::null) {
+                            selectedEnt = pasted;
+                            if (engine) engine->setSelectedEntity(pasted);
+                        }
+                    }
+                }
+                if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_D)) {
+                    if (selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                        editor::EditorActionHistory::get().copyEntity(registry, selectedEnt);
+                        entt::entity pasted = editor::EditorActionHistory::get().pasteEntity(registry, engine, glm::vec3(1.0f, 0.0f, 1.0f));
+                        if (pasted != entt::null) {
+                            selectedEnt = pasted;
+                            if (engine) engine->setSelectedEntity(pasted);
+                        }
+                    }
+                }
+
                 if (!isSimulationSessionActive && ctrlDown && shiftDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
                     saveCurrentGame(true);
                 } else if (!isSimulationSessionActive && ctrlDown && ImGui::IsKeyPressed(ImGuiKey_S)) {
@@ -1533,6 +1599,7 @@ namespace engine::renderer {
                     if (engine) engine->setCamera(t.position - front * frameDist, camYaw, camPitch, camFov);
                 }
                 if (!isSimulationSessionActive && ImGui::IsKeyPressed(ImGuiKey_Delete) && selectedEnt != entt::null && registry.get().valid(selectedEnt)) {
+                    editor::EditorActionHistory::get().recordSnapshot(registry);
                     if (engine) engine->destroyEntity(static_cast<uint32_t>(selectedEnt));
                     else registry.destroyEntity(selectedEnt);
                     selectedEnt = entt::null;
@@ -1570,11 +1637,56 @@ namespace engine::renderer {
                 const bool yVis = worldToScreen(t.position + glm::vec3(0.0f, gizmoLen, 0.0f), ptY, wY);
                 const bool zVis = worldToScreen(t.position + glm::vec3(0.0f, 0.0f, gizmoLen), ptZ, wZ);
 
+                const glm::vec3 rotAxisX = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(1,0,0)) : glm::vec3(1,0,0);
+                const glm::vec3 rotAxisY = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(0,1,0)) : glm::vec3(0,1,0);
+                const glm::vec3 rotAxisZ = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(0,0,1)) : glm::vec3(0,0,1);
+
+                const glm::vec3 planeX_U = rotAxisY;
+                const glm::vec3 planeX_V = rotAxisZ;
+                const glm::vec3 planeY_U = rotAxisX;
+                const glm::vec3 planeY_V = rotAxisZ;
+                const glm::vec3 planeZ_U = rotAxisX;
+                const glm::vec3 planeZ_V = rotAxisY;
+                const float rotScreenRadius = std::max(22.0f, hypotf(ptX.x - originScreen.x, ptX.y - originScreen.y) * 1.15f);
+
                 if (originVisible && isHovered && !s_isRmbNavigating && !s_isMmbPanning && !s_isAltOrbiting) {
-                    if (hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y) <= 14.0f) hoveredGizmoAxis = 4;
-                    else if (xVis && distToSegment(mousePos, originScreen, ptX) <= 12.0f) hoveredGizmoAxis = 1;
-                    else if (yVis && distToSegment(mousePos, originScreen, ptY) <= 12.0f) hoveredGizmoAxis = 2;
-                    else if (zVis && distToSegment(mousePos, originScreen, ptZ) <= 12.0f) hoveredGizmoAxis = 3;
+                    if (s_gizmoMode == EditorGizmoMode::ROTATE) {
+                        constexpr int GIZMO_RING_SEGS = 36;
+                        float bestDist = 10.0f * s_uiScale;
+                        int bestAxis = 0;
+
+                        auto testRing = [&](int axisIdx, const glm::vec3& u, const glm::vec3& v) {
+                            for (int k = 0; k < GIZMO_RING_SEGS; ++k) {
+                                float th0 = float(k) * 6.2831853f / float(GIZMO_RING_SEGS);
+                                float th1 = float(k + 1) * 6.2831853f / float(GIZMO_RING_SEGS);
+                                glm::vec3 p0 = t.position + gizmoLen * (u * std::cos(th0) + v * std::sin(th0));
+                                glm::vec3 p1 = t.position + gizmoLen * (u * std::cos(th1) + v * std::sin(th1));
+                                ImVec2 sc0, sc1; float w0, w1;
+                                if (worldToScreen(p0, sc0, w0) && worldToScreen(p1, sc1, w1) && w0 > 0.05f && w1 > 0.05f) {
+                                    float d = distToSegment(mousePos, sc0, sc1);
+                                    if (d < bestDist) {
+                                        bestDist = d;
+                                        bestAxis = axisIdx;
+                                    }
+                                }
+                            }
+                        };
+
+                        testRing(1, planeX_U, planeX_V);
+                        testRing(2, planeY_U, planeY_V);
+                        testRing(3, planeZ_U, planeZ_V);
+
+                        float dScreenCircle = std::abs(hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y) - rotScreenRadius);
+                        if (dScreenCircle < 8.0f * s_uiScale && dScreenCircle < bestDist) {
+                            bestAxis = 4;
+                        }
+                        hoveredGizmoAxis = bestAxis;
+                    } else {
+                        if (hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y) <= 14.0f) hoveredGizmoAxis = 4;
+                        else if (xVis && distToSegment(mousePos, originScreen, ptX) <= 12.0f) hoveredGizmoAxis = 1;
+                        else if (yVis && distToSegment(mousePos, originScreen, ptY) <= 12.0f) hoveredGizmoAxis = 2;
+                        else if (zVis && distToSegment(mousePos, originScreen, ptZ) <= 12.0f) hoveredGizmoAxis = 3;
+                    }
                 }
             }
 
@@ -1590,18 +1702,57 @@ namespace engine::renderer {
 
             if (gizmoEnabled && !blockViewportClicks && isHovered && !altDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 if (hoveredGizmoAxis > 0 && hasSelectedTransform) {
+                    editor::EditorActionHistory::get().recordSnapshot(registry);
                     s_draggingGizmoAxis = hoveredGizmoAxis;
                     auto& t = registry.get().get<ecs::TransformComponent>(selectedEnt);
                     s_dragInitialEntityPos = t.position;
                     s_dragInitialRotation  = t.rotation;
                     s_dragInitialScale     = t.scale;
+                    s_dragInitialOrientation = (glm::dot(t.orientation, t.orientation) < 0.001f)
+                        ? glm::quat(glm::radians(t.rotation))
+                        : glm::normalize(t.orientation);
                     s_dragPivotScreen      = originScreen;
+                    s_dragLastMousePos     = mousePos;
 
                     s_dragAxisVec = (s_draggingGizmoAxis == 1) ? glm::vec3(1,0,0) :
                                     (s_draggingGizmoAxis == 2) ? glm::vec3(0,1,0) :
                                     (s_draggingGizmoAxis == 3) ? glm::vec3(0,0,1) : glm::vec3(0);
 
-                    if (s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
+                    if (s_gizmoMode == EditorGizmoMode::ROTATE) {
+                        const glm::vec3 rotAxisX = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(1,0,0)) : glm::vec3(1,0,0);
+                        const glm::vec3 rotAxisY = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(0,1,0)) : glm::vec3(0,1,0);
+                        const glm::vec3 rotAxisZ = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(0,0,1)) : glm::vec3(0,0,1);
+
+                        glm::vec3 rotAxis = (s_draggingGizmoAxis == 1) ? rotAxisX :
+                                            (s_draggingGizmoAxis == 2) ? rotAxisY :
+                                            (s_draggingGizmoAxis == 3) ? rotAxisZ : -front;
+                        s_dragPlaneNormal = rotAxis;
+
+                        glm::vec3 clickRayOrig, clickRayDir;
+                        getRayFromScreen(mousePos, clickRayOrig, clickRayDir);
+                        float denom = glm::dot(clickRayDir, rotAxis);
+                        if (s_draggingGizmoAxis <= 3 && std::abs(denom) > 0.08f) {
+                            float tDist = glm::dot(s_dragInitialEntityPos - clickRayOrig, rotAxis) / denom;
+                            if (tDist > 0.05f && tDist < 5000.0f) {
+                                s_dragInitialHitPoint = clickRayOrig + tDist * clickRayDir;
+                                glm::vec3 toHit = s_dragInitialHitPoint - s_dragInitialEntityPos;
+                                if (glm::length(toHit) > 1e-4f) {
+                                    s_dragRotInitialVec = glm::normalize(toHit);
+                                    s_dragRotUseRayPlane = true;
+                                    s_lastRotAngle = 0.0f;
+                                    s_accumulatedRotAngle = 0.0f;
+                                } else {
+                                    s_dragRotUseRayPlane = false;
+                                }
+                            } else {
+                                s_dragRotUseRayPlane = false;
+                            }
+                        } else {
+                            s_dragRotUseRayPlane = false;
+                            s_lastRotAngle = atan2f(mousePos.y - originScreen.y, mousePos.x - originScreen.x) * (180.0f / 3.14159265f);
+                            s_accumulatedRotAngle = 0.0f;
+                        }
+                    } else if (s_draggingGizmoAxis >= 1 && s_draggingGizmoAxis <= 3) {
                         const glm::vec3 toCam = camPos - s_dragInitialEntityPos;
                         glm::vec3 vPerp = toCam - glm::dot(toCam, s_dragAxisVec) * s_dragAxisVec;
                         if (glm::length(vPerp) < 1e-4f) vPerp = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -1610,12 +1761,12 @@ namespace engine::renderer {
                         s_dragPlaneNormal = -front;
                     }
 
-                    glm::vec3 clickRayOrig, clickRayDir;
-                    getRayFromScreen(mousePos, clickRayOrig, clickRayDir);
-                    s_dragHasHit = intersectRayPlane(clickRayOrig, clickRayDir, s_dragInitialEntityPos, s_dragPlaneNormal, s_dragInitialHitPoint);
-                    s_dragInitialOffset = (s_dragHasHit && s_draggingGizmoAxis <= 3) ? glm::dot(s_dragInitialHitPoint - s_dragInitialEntityPos, s_dragAxisVec) : 0.0f;
-                    s_lastRotAngle = atan2f(mousePos.y - originScreen.y, mousePos.x - originScreen.x) * (180.0f / 3.14159265f);
-                    s_accumulatedRotAngle = 0.0f;
+                    if (s_gizmoMode != EditorGizmoMode::ROTATE) {
+                        glm::vec3 clickRayOrig, clickRayDir;
+                        getRayFromScreen(mousePos, clickRayOrig, clickRayDir);
+                        s_dragHasHit = intersectRayPlane(clickRayOrig, clickRayDir, s_dragInitialEntityPos, s_dragPlaneNormal, s_dragInitialHitPoint);
+                        s_dragInitialOffset = (s_dragHasHit && s_draggingGizmoAxis <= 3) ? glm::dot(s_dragInitialHitPoint - s_dragInitialEntityPos, s_dragAxisVec) : 0.0f;
+                    }
                     s_dragInitialDist = std::max(10.0f, hypotf(mousePos.x - originScreen.x, mousePos.y - originScreen.y));
                 } else if (hoveredLightEntity != entt::null) {
                     selectedEnt = hoveredLightEntity;
@@ -1684,18 +1835,67 @@ namespace engine::renderer {
                         }
                     }
                 } else if (s_gizmoMode == EditorGizmoMode::ROTATE) {
-                    const float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.14159265f);
-                    float dAngle = curAngle - s_lastRotAngle;
-                    while (dAngle > 180.0f) dAngle -= 360.0f;
-                    while (dAngle < -180.0f) dAngle += 360.0f;
-                    s_accumulatedRotAngle += dAngle;
-                    s_lastRotAngle = curAngle;
+                    const glm::vec3 rotAxisX = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(1,0,0)) : glm::vec3(1,0,0);
+                    const glm::vec3 rotAxisY = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(0,1,0)) : glm::vec3(0,1,0);
+                    const glm::vec3 rotAxisZ = s_gizmoSpaceLocal ? (s_dragInitialOrientation * glm::vec3(0,0,1)) : glm::vec3(0,0,1);
+
+                    glm::vec3 rotAxis = (s_draggingGizmoAxis == 1) ? rotAxisX :
+                                        (s_draggingGizmoAxis == 2) ? rotAxisY :
+                                        (s_draggingGizmoAxis == 3) ? rotAxisZ : -front;
+
+                    if (s_dragRotUseRayPlane && s_draggingGizmoAxis <= 3) {
+                        glm::vec3 curRayOrig, curRayDir;
+                        getRayFromScreen(mousePos, curRayOrig, curRayDir);
+                        float curDenom = glm::dot(curRayDir, rotAxis);
+                        if (std::abs(curDenom) > 0.04f) {
+                            float curT = glm::dot(s_dragInitialEntityPos - curRayOrig, rotAxis) / curDenom;
+                            if (curT > 0.05f && curT < 5000.0f) {
+                                glm::vec3 curHit = curRayOrig + curT * curRayDir;
+                                glm::vec3 curV = curHit - s_dragInitialEntityPos;
+                                if (glm::length(curV) > 1e-4f) {
+                                    curV = glm::normalize(curV);
+                                    float cosA = glm::clamp(glm::dot(s_dragRotInitialVec, curV), -1.0f, 1.0f);
+                                    float sinA = glm::dot(rotAxis, glm::cross(s_dragRotInitialVec, curV));
+                                    float curAngleDeg = glm::degrees(atan2f(sinA, cosA));
+                                    float dAngle = curAngleDeg - s_lastRotAngle;
+                                    while (dAngle > 180.0f) dAngle -= 360.0f;
+                                    while (dAngle < -180.0f) dAngle += 360.0f;
+                                    s_accumulatedRotAngle += dAngle;
+                                    s_lastRotAngle = curAngleDeg;
+                                }
+                            }
+                        }
+                    } else if (s_draggingGizmoAxis <= 3) {
+                        // Fallback for edge-on ring view: project ring tangent to screen
+                        glm::vec3 tangent3D = glm::cross(rotAxis, camPos - s_dragInitialEntityPos);
+                        if (glm::length(tangent3D) < 1e-4f) tangent3D = (s_draggingGizmoAxis == 2) ? glm::vec3(1,0,0) : glm::vec3(0,1,0);
+                        tangent3D = glm::normalize(tangent3D);
+
+                        ImVec2 sc0, sc1; float w0, w1;
+                        if (worldToScreen(s_dragInitialEntityPos, sc0, w0) && worldToScreen(s_dragInitialEntityPos + tangent3D, sc1, w1)) {
+                            glm::vec2 screenDir(sc1.x - sc0.x, sc1.y - sc0.y);
+                            if (glm::length(screenDir) > 1e-3f) {
+                                screenDir = glm::normalize(screenDir);
+                                float dPixels = glm::dot(glm::vec2(mousePos.x - s_dragLastMousePos.x, mousePos.y - s_dragLastMousePos.y), screenDir);
+                                s_accumulatedRotAngle += dPixels * 0.75f;
+                            }
+                        }
+                    } else {
+                        // Axis 4: View-plane screen circle
+                        const float curAngle = atan2f(mousePos.y - s_dragPivotScreen.y, mousePos.x - s_dragPivotScreen.x) * (180.0f / 3.14159265f);
+                        float dAngle = curAngle - s_lastRotAngle;
+                        while (dAngle > 180.0f) dAngle -= 360.0f;
+                        while (dAngle < -180.0f) dAngle += 360.0f;
+                        s_accumulatedRotAngle += dAngle;
+                        s_lastRotAngle = curAngle;
+                    }
+                    s_dragLastMousePos = mousePos;
+
                     const float finalAngle = s_snapEnabled ? std::round(s_accumulatedRotAngle / 15.0f) * 15.0f : s_accumulatedRotAngle;
-                    t.rotation = s_dragInitialRotation;
-                    if (s_draggingGizmoAxis == 1) t.rotation.x += finalAngle;
-                    else if (s_draggingGizmoAxis == 2 || s_draggingGizmoAxis == 4) t.rotation.y += finalAngle;
-                    else if (s_draggingGizmoAxis == 3) t.rotation.z += finalAngle;
-                    t.orientation = glm::quat(glm::radians(t.rotation));
+                    glm::quat dQ = glm::angleAxis(glm::radians(finalAngle), rotAxis);
+                    t.orientation = glm::normalize(dQ * s_dragInitialOrientation);
+                    t.rotation = glm::degrees(glm::eulerAngles(t.orientation));
+                    registry.updateWorldTransforms();
                     if (engine) engine->syncEntityTransformPhysics(selectedEnt);
                 } else if (s_gizmoMode == EditorGizmoMode::SCALE) {
                     float scaleFactor = hypotf(mousePos.x - s_dragPivotScreen.x, mousePos.y - s_dragPivotScreen.y) / s_dragInitialDist;
@@ -1770,13 +1970,71 @@ namespace engine::renderer {
                 float origW = 0.0f;
                 if (worldToScreen(t.position, originScreen, origW)) {
                     const int act = (s_draggingGizmoAxis > 0) ? s_draggingGizmoAxis : hoveredGizmoAxis;
-                    const ImU32 colX = (act == 1) ? IM_COL32(255, 255, 60, 255) : IM_COL32(239, 68, 68, 255);
-                    const ImU32 colY = (act == 2) ? IM_COL32(255, 255, 60, 255) : IM_COL32(34, 197, 94, 255);
-                    const ImU32 colZ = (act == 3) ? IM_COL32(255, 255, 60, 255) : IM_COL32(59, 130, 246, 255);
-                    drawList->AddLine(originScreen, ptX, colX, (act == 1) ? 4.0f : 2.8f);
-                    drawList->AddLine(originScreen, ptY, colY, (act == 2) ? 4.0f : 2.8f);
-                    drawList->AddLine(originScreen, ptZ, colZ, (act == 3) ? 4.0f : 2.8f);
-                    drawList->AddCircleFilled(originScreen, 5.5f, IM_COL32(245, 245, 255, 230));
+
+                    if (s_gizmoMode == EditorGizmoMode::ROTATE) {
+                        constexpr int GIZMO_RING_SEGS = 48;
+                        const float gizmoLen = std::max(0.7f, glm::length(camPos - t.position) * 0.14f);
+
+                        const glm::vec3 rotAxisX = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(1,0,0)) : glm::vec3(1,0,0);
+                        const glm::vec3 rotAxisY = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(0,1,0)) : glm::vec3(0,1,0);
+                        const glm::vec3 rotAxisZ = s_gizmoSpaceLocal ? (t.orientation * glm::vec3(0,0,1)) : glm::vec3(0,0,1);
+
+                        auto drawRing = [&](int axisIdx, const glm::vec3& u, const glm::vec3& v,
+                                            ImU32 frontCol, ImU32 backCol) {
+                            const bool isActive = (act == axisIdx);
+                            const float thickFront = isActive ? 4.5f : 2.8f;
+                            const float thickBack  = isActive ? 2.5f : 1.4f;
+
+                            for (int k = 0; k < GIZMO_RING_SEGS; ++k) {
+                                float th0 = float(k) * 6.2831853f / float(GIZMO_RING_SEGS);
+                                float th1 = float(k + 1) * 6.2831853f / float(GIZMO_RING_SEGS);
+                                glm::vec3 p0 = t.position + gizmoLen * (u * std::cos(th0) + v * std::sin(th0));
+                                glm::vec3 p1 = t.position + gizmoLen * (u * std::cos(th1) + v * std::sin(th1));
+                                ImVec2 sc0, sc1; float w0, w1;
+                                if (worldToScreen(p0, sc0, w0) && worldToScreen(p1, sc1, w1) && w0 > 0.05f && w1 > 0.05f) {
+                                    glm::vec3 mid = (p0 + p1) * 0.5f;
+                                    bool isFront = glm::dot(camPos - mid, mid - t.position) > 0.0f;
+                                    ImU32 col = isActive ? IM_COL32(255, 255, 60, 255) : (isFront ? frontCol : backCol);
+                                    drawList->AddLine(sc0, sc1, col, isFront ? thickFront : thickBack);
+                                }
+                            }
+                        };
+
+                        // Ring X: Red (Pitch in YZ plane)
+                        drawRing(1, rotAxisY, rotAxisZ, IM_COL32(239, 68, 68, 255), IM_COL32(180, 40, 40, 80));
+                        // Ring Y: Green (Yaw in XZ plane)
+                        drawRing(2, rotAxisX, rotAxisZ, IM_COL32(34, 197, 94, 255), IM_COL32(25, 140, 65, 80));
+                        // Ring Z: Blue (Roll in XY plane)
+                        drawRing(3, rotAxisX, rotAxisY, IM_COL32(59, 130, 246, 255), IM_COL32(40, 90, 180, 80));
+
+                        // Outer View Ring
+                        const float rotScreenRadius = std::max(22.0f, hypotf(ptX.x - originScreen.x, ptX.y - originScreen.y) * 1.15f);
+                        const ImU32 outerCol = (act == 4) ? IM_COL32(255, 255, 60, 255) : IM_COL32(200, 200, 215, 140);
+                        drawList->AddCircle(originScreen, rotScreenRadius, outerCol, 48, (act == 4) ? 3.0f : 1.5f);
+
+                        // Center indicator
+                        drawList->AddCircleFilled(originScreen, 5.0f, IM_COL32(245, 245, 255, 230));
+
+                        // Active rotation angle label & arc
+                        if (s_draggingGizmoAxis > 0) {
+                            const float finalAngle = s_snapEnabled ? std::round(s_accumulatedRotAngle / 15.0f) * 15.0f : s_accumulatedRotAngle;
+                            char angleBuf[32];
+                            std::snprintf(angleBuf, sizeof(angleBuf), "%.1f deg", finalAngle);
+                            const ImVec2 textPos(mousePos.x + 18.0f, mousePos.y - 18.0f);
+                            const ImVec2 tSz = ImGui::CalcTextSize(angleBuf);
+                            drawList->AddRectFilled(ImVec2(textPos.x - 4, textPos.y - 2), ImVec2(textPos.x + tSz.x + 4, textPos.y + tSz.y + 2), IM_COL32(20, 24, 30, 220), 4.0f);
+                            drawList->AddText(textPos, IM_COL32(255, 255, 80, 255), angleBuf);
+                        }
+                    } else {
+                        // Translation & Scale Gizmo
+                        const ImU32 colX = (act == 1) ? IM_COL32(255, 255, 60, 255) : IM_COL32(239, 68, 68, 255);
+                        const ImU32 colY = (act == 2) ? IM_COL32(255, 255, 60, 255) : IM_COL32(34, 197, 94, 255);
+                        const ImU32 colZ = (act == 3) ? IM_COL32(255, 255, 60, 255) : IM_COL32(59, 130, 246, 255);
+                        drawList->AddLine(originScreen, ptX, colX, (act == 1) ? 4.0f : 2.8f);
+                        drawList->AddLine(originScreen, ptY, colY, (act == 2) ? 4.0f : 2.8f);
+                        drawList->AddLine(originScreen, ptZ, colZ, (act == 3) ? 4.0f : 2.8f);
+                        drawList->AddCircleFilled(originScreen, 5.5f, IM_COL32(245, 245, 255, 230));
+                    }
                 }
             }
 

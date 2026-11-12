@@ -3,6 +3,7 @@
 #include "renderer/EditorLocalization.hpp"
 #include "core/Engine.hpp"
 #include "ecs/Components.hpp"
+#include "editor/EditorActionHistory.hpp"
 #include "imgui.h"
 
 #include <algorithm>
@@ -99,6 +100,7 @@ void VulkanRenderer::drawEditorPlaceActorsPanel(ecs::Registry& registry, core::E
                     ImGui::PopID();
 
                     if (clicked) {
+                        editor::EditorActionHistory::get().recordSnapshot(registry);
                         auto entity = registry.createEntity();
                         glm::vec3 spawnPos = cameraPosition + cameraForward * 7.0f;
                         if (spawnPos.y < 0.5f) spawnPos.y = 0.5f;

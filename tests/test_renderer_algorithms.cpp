@@ -6,6 +6,7 @@
 #include "renderer/Lighting/WorldRadianceCache.hpp"
 #include "renderer/Geometry/GpuCulling.hpp"
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #ifdef _MSC_VER
 #pragma warning(push, 0)
@@ -343,16 +344,120 @@ int main() {
     float wnOld = std::pow(0.90f, 32.0f); // ~0.034 (almost shut off filtering, causing grain)
     CHECK(wnNew > wnOld * 5.0f);
 
-    // Direct Lighting Specular: 100% metallic surfaces reflect direct light with 4x physical boost
-    auto calcDirectSpecular = [](float metallic, float D, float Vis, float F, float energyComp, float NdotL) {
-        float directMetalBoost = glm::mix(1.0f, 4.0f, metallic);
-        return (D * Vis) * F * energyComp * NdotL * directMetalBoost;
+    // Direct Lighting Specular & Physical Energy Conservation:
+    // Arbitrary 4x multipliers are eliminated; strict energy conservation applies.
+    auto calcDirectSpecularPhysical = [](float D, float Vis, float F, float energyComp, float NdotL) {
+        return (D * Vis) * F * energyComp * NdotL;
     };
-    float specDielectric = calcDirectSpecular(0.0f, 1.0f, 0.25f, 0.04f, 1.0f, 1.0f);
-    float specMetalRaw = calcDirectSpecular(0.0f, 1.0f, 0.25f, 1.0f, 1.0f, 1.0f);
-    float specMetalBoosted = calcDirectSpecular(1.0f, 1.0f, 0.25f, 1.0f, 1.0f, 1.0f);
-    CHECK(std::abs(specMetalBoosted - 4.0f * specMetalRaw) < 1.0e-5f);
-    CHECK(specDielectric > 0.0f);
+    float specDielectric = calcDirectSpecularPhysical(1.0f, 0.25f, 0.04f, 1.0f, 1.0f);
+    float specMetal = calcDirectSpecularPhysical(1.0f, 0.25f, 1.0f, 1.0f, 1.0f);
+    CHECK(specDielectric > 0.0f && specDielectric < specMetal);
+    CHECK(specMetal <= 1.0f); // Incident energy conservation: cannot reflect > 100%
+
+    // Interior HDRI Occlusion:
+    // When ray-traced sky visibility is 0.0 (enclosed room), ambient IBL is completely extinguished.
+    auto calcAmbientIBL = [](float skyVisibility, float giWeight, glm::vec3 envDiffuse, glm::vec3 envSpecular) {
+        float iblDiffuseFactor = (1.0f - giWeight) * skyVisibility;
+        glm::vec3 diff = envDiffuse * iblDiffuseFactor;
+        glm::vec3 spec = envSpecular * skyVisibility;
+        return diff + spec;
+    };
+    glm::vec3 brightHDRI(15.0f, 12.0f, 10.0f);
+    glm::vec3 outsideAmbient = calcAmbientIBL(1.0f, 0.0f, brightHDRI, brightHDRI);
+    glm::vec3 insideEnclosedAmbient = calcAmbientIBL(0.0f, 0.0f, brightHDRI, brightHDRI);
+    glm::vec3 insideWithGiAmbient = calcAmbientIBL(0.0f, 1.0f, brightHDRI, brightHDRI);
+    CHECK(outsideAmbient.r > 0.0f);
+    CHECK(insideEnclosedAmbient.r == 0.0f && insideEnclosedAmbient.g == 0.0f && insideEnclosedAmbient.b == 0.0f);
+    CHECK(insideWithGiAmbient.r == 0.0f && insideWithGiAmbient.g == 0.0f && insideWithGiAmbient.b == 0.0f);
+
+    // Mirror Physical Reflection (100% Metal, 0% Roughness):
+    // Smooth mirrors use exact physical Fresnel factor (1.0 for silver/metal), avoiding split-sum ~50% attenuation.
+    auto calcMirrorSpecular = [](glm::vec3 F0, glm::vec2 dfg, float energyComp, float roughness, float NdotV, bool reflectsLight) {
+        if (!reflectsLight) return glm::vec3(0.0f);
+        glm::vec3 fresnelMirror = F0 + (glm::vec3(1.0f) - F0) * std::pow(std::clamp(1.0f - NdotV, 0.0f, 1.0f), 5.0f);
+        glm::vec3 splitSumBRDF = (F0 * dfg.x + dfg.y) * energyComp;
+        float t = std::clamp(roughness / 0.20f, 0.0f, 1.0f);
+        return glm::mix(fresnelMirror, splitSumBRDF, t);
+    };
+    glm::vec3 pureMetalF0(1.0f);
+    glm::vec2 typicalDfg(0.55f, 0.02f);
+    glm::vec3 mirrorRefl = calcMirrorSpecular(pureMetalF0, typicalDfg, 1.0f, 0.0f, 0.7f, true);
+    glm::vec3 noRefl = calcMirrorSpecular(pureMetalF0, typicalDfg, 1.0f, 0.0f, 0.7f, false);
+    CHECK(std::abs(mirrorRefl.r - 1.0f) < 1.0e-5f); // 100% sharp reflection on mirror, not ~55%!
+    CHECK(noRefl.r == 0.0f); // reflectsLight = false turns off specular reflection completely
+
+    // Spotlight Reflection Cone Test:
+    // A spotlight must be completely invisible from behind or outside its cone.
+    auto calcSpotlightBulbVisibility = [](glm::vec3 rayDir, glm::vec3 spotForward, float innerCos, float outerCos) {
+        float cone = glm::dot(rayDir, spotForward);
+        if (cone <= outerCos) return 0.0f; // Outside cone or behind spotlight: 100% invisible
+        float t = std::clamp((cone - outerCos) / (innerCos - outerCos), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t); // smoothstep
+    };
+    float spotForwardVis = calcSpotlightBulbVisibility(glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 0.9f, 0.7f);
+    float spotBehindVis  = calcSpotlightBulbVisibility(glm::vec3(0.0f, 1.0f, 0.0f),  glm::vec3(0.0f, -1.0f, 0.0f), 0.9f, 0.7f);
+    float spotSideVis    = calcSpotlightBulbVisibility(glm::vec3(1.0f, 0.0f, 0.0f),  glm::vec3(0.0f, -1.0f, 0.0f), 0.9f, 0.7f);
+    CHECK(spotForwardVis == 1.0f);
+    CHECK(spotBehindVis == 0.0f); // Zero glow from behind
+    CHECK(spotSideVis == 0.0f);   // Zero glow from the side
+
+    // Specular Reflection Spatial Denoiser: Mirror vs Rough Surface Filtering
+    auto calcReflSpatialWeightFast = [](float centerRoughness, float neighborRoughness,
+                                        float dotNormal, float depthCenter, float depthNeighbor, float deltaL, bool denoiseMirrors) {
+        float depthTol = 0.02f * depthCenter + 0.005f;
+        float dz = std::abs(depthCenter - depthNeighbor);
+        if (dz > depthTol || dotNormal < 0.6f) return 0.0f;
+
+        if (centerRoughness < 0.08f) {
+            // When denoiseMirrors is false (default), spatial filter is bypassed completely for mirrors
+            if (!denoiseMirrors) return 0.0f;
+            // Planar mirror bilateral cross filter: cleans speckle along the mirror plane
+            if (dotNormal < 0.90f) return 0.0f;
+            return std::exp(-deltaL / 0.15f);
+        }
+        float sigmaN = std::clamp(16.0f / std::max(centerRoughness, 0.04f), 4.0f, 48.0f);
+        float exponent = std::max(0.0f, 1.0f - dotNormal) * sigmaN
+                       + (dz / depthTol)
+                       + (std::abs(centerRoughness - neighborRoughness) / 0.15f)
+                       + (deltaL / 0.25f);
+        return std::exp(-exponent);
+    };
+    // Mirror test: when denoiseMirrors is false -> weight 0 (bypassed, untouched raw reflection)
+    float mirrorBypassedWeight = calcReflSpatialWeightFast(0.01f, 0.01f, 1.0f, 10.0f, 10.0f, 0.02f, false);
+    CHECK(mirrorBypassedWeight == 0.0f);
+
+    // Mirror test: when denoiseMirrors is true -> planar neighbor with small deltaL has strong bilateral weight (> 0.7)
+    float mirrorDenoisedWeight = calcReflSpatialWeightFast(0.01f, 0.01f, 1.0f, 10.0f, 10.0f, 0.02f, true);
+    CHECK(mirrorDenoisedWeight > 0.7f);
+
+    // Rough metal test: roughness 0.4, planar surface (dotNormal = 1.0, depth matching) -> smooth filtering
+    float roughPlanarWeight = calcReflSpatialWeightFast(0.4f, 0.4f, 1.0f, 10.0f, 10.0f, 0.0f, false);
+    CHECK(roughPlanarWeight > 0.95f);
+
+    // Rough metal edge rejection test: dotNormal = 0.5 (discontinuous geometry) -> weight dropped to 0
+    float roughCornerWeight = calcReflSpatialWeightFast(0.4f, 0.4f, 0.5f, 10.0f, 10.0f, 0.0f, false);
+    CHECK(roughCornerWeight == 0.0f);
+
+    // 3D Rotation Gizmo Math Test: Verifying non-inverted 3D ring tracking
+    auto calc3DRingAngleDeg = [](const glm::vec3& rotAxis, const glm::vec3& v0, const glm::vec3& v1) {
+        float cosA = glm::clamp(glm::dot(v0, v1), -1.0f, 1.0f);
+        float sinA = glm::dot(rotAxis, glm::cross(v0, v1));
+        return glm::degrees(std::atan2(sinA, cosA));
+    };
+
+    // Yaw Ring (rotAxis = (0, 1, 0)): user grabs front of ring v0 = (0, 0, 1) and drags right v1 = normalize(0.2, 0, 1)
+    glm::vec3 yawAxis(0.0f, 1.0f, 0.0f);
+    glm::vec3 yawV0(0.0f, 0.0f, 1.0f);
+    glm::vec3 yawV1_Right = glm::normalize(glm::vec3(0.2f, 0.0f, 1.0f));
+    glm::vec3 yawV1_Left  = glm::normalize(glm::vec3(-0.2f, 0.0f, 1.0f));
+    float yawAngleRight = calc3DRingAngleDeg(yawAxis, yawV0, yawV1_Right);
+    float yawAngleLeft  = calc3DRingAngleDeg(yawAxis, yawV0, yawV1_Left);
+    CHECK(yawAngleRight > 0.0f);  // Dragging right produces positive angle
+    CHECK(yawAngleLeft < 0.0f);   // Dragging left produces negative angle
+
+    glm::quat yawQ_Right = glm::angleAxis(glm::radians(yawAngleRight), yawAxis);
+    glm::vec3 rotatedFront = yawQ_Right * yawV0;
+    CHECK(rotatedFront.x > 0.0f); // Front of object moved to the RIGHT (+X), matching cursor direction!
 
     std::cout << "Renderer algorithm tests passed.\n";
     return 0;
