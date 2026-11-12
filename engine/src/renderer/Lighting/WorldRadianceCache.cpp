@@ -136,12 +136,13 @@ namespace engine::renderer {
     }
 
     void WorldRadianceCache::dispatchUpdate(VkCommandBuffer cmd,
+                                           VkDescriptorSet sceneSet,
                                            VkAccelerationStructureKHR tlas,
                                            uint32_t frameCounter,
                                            const glm::vec3& cameraPos,
                                            const glm::vec3& sunDirection,
                                            const glm::vec4& sunColor) {
-        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer || tlas == VK_NULL_HANDLE) return;
+        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer || tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
@@ -163,10 +164,9 @@ namespace engine::renderer {
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
-        if (m_descriptorSet != VK_NULL_HANDLE) {
-            uint32_t setIdx = (m_sceneSetLayout != VK_NULL_HANDLE) ? 1 : 0;
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, setIdx, 1, &m_descriptorSet, 0, nullptr);
-        }
+        if (m_descriptorSet == VK_NULL_HANDLE) return;
+        const VkDescriptorSet sets[2] = { sceneSet, m_descriptorSet };
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
 
         vkCmdDispatch(cmd, SLICE_SIZE / 64, 1, 1);
 
