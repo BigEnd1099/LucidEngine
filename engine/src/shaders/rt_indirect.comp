@@ -35,10 +35,14 @@ const float MAX_RAY_DIST = 200.0;
 const float FIREFLY_CLAMP = 24.0;
 const int MAX_BOUNCES = 15;
 
-vec2 hash2(uvec2 p) {
-uint h = pcgHash(p.x + pcgHash(p.y ^ 0x9E3779B9u));
-uint h2 = pcgHash(h);
-return vec2(float(h >> 8u), float(h2 >> 8u)) * (1.0 / 16777216.0);
+// Decorrelated 2D PCG scramble keyed by pixel and frame. Used as a
+// Cranley-Patterson rotation to preserve the R2 sequence without deriving
+// both sample dimensions from a single scalar IGN value.
+vec2 hash2(uvec2 p, uint frame) {
+    uint frameSeed = pcgHash(frame ^ 0xA511E9B3u);
+    uint h0 = pcgHash(p.x ^ pcgHash(p.y + frameSeed));
+    uint h1 = pcgHash(p.y ^ pcgHash(p.x + (frameSeed ^ 0x63D83595u)));
+    return vec2(float(h0 >> 8u), float(h1 >> 8u)) * (1.0 / 16777216.0);
 }
 
 vec3 fresnelSchlickGI(float cosTheta, vec3 f0) {
@@ -141,8 +145,8 @@ if (checkerSkip) {
 int samples = baseSamples;
 
 rngInit(uvec2(px), frame);
-// Spatiotemporal Blue Noise (STBN) approximation via interleaved gradient noise + golden ratio
-float ign = fract(52.9829189 * fract(dot(vec2(px) + float(frame % 64u) * vec2(5.588238, 5.588238), vec2(0.06711056, 0.00583715))));
+// Pixel/frame-specific 2D rotation of the R2 low-discrepancy sequence.
+vec2 sampleOffset = hash2(uvec2(px), frame);
 const vec2 R2 = vec2(0.75487766624669276, 0.56984029099805327);
 float bias = 0.010 + 0.0006 * length(toCam);
 vec3 origin = P + N * bias;
@@ -160,7 +164,7 @@ uint diagCausticContributions = 0u;
 uint diagPathBounces = 0u;
 
 for (int s = 0; s < samples; ++s) {
-    vec2 u0 = fract(vec2(ign, fract(ign * 1.61803398875)) + float(s) * R2);
+    vec2 u0 = fract(sampleOffset + float(s) * R2);
 
     // This pass owns diffuse indirect lighting and AO only. Specular RT
     // reflections are evaluated independently by rt_reflections.comp and
