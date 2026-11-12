@@ -293,7 +293,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     // Alpha of the private history image stores effective accumulated sample age.
     // The public reflection output keeps alpha=1 as its validity mask for PBR.
-    ageBin = min(uint(clamp(historyAge / maxHistory, 0.0, 0.999999) * 16.0), 15u);
+    ageBin = min(uint(clamp(historyAge / effectiveMaxHistory, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
     imageStore(imgRefl, px, vec4(result.rgb, 1.0));
