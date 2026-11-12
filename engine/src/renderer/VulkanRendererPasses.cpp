@@ -1360,9 +1360,22 @@ namespace engine::renderer {
                 rtp.reflectionHalfRes = m_rtSettings.reflectionHalfRes;
                 rtp.reflectionShowLightBulbs = m_rtSettings.reflectionShowLightBulbs;
                 rtp.reflectionDenoiseMirrors = m_rtSettings.reflectionDenoiseMirrors;
-                rtp.maxHistory = m_rtSettings.denoiseEnabled ? static_cast<float>(m_rtSettings.maxHistory) : 1.0f;
-                rtp.spatialStrength = m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0f;
+                rtp.maxHistory = static_cast<float>(m_rtSettings.maxHistory);
+                rtp.spatialStrength = m_rtSettings.spatialStrength;
                 rtp.svgfEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled;
+                rtp.giTemporalFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFilterEnabled;
+                rtp.giHistoryClampEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giHistoryClampEnabled;
+                rtp.giTemporalFireflyFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFireflyFilterEnabled;
+                rtp.giTraceFireflyClampEnabled = m_rtSettings.giTraceFireflyClampEnabled;
+                rtp.giAtrousPassEnabled = {
+                    m_rtSettings.denoiseEnabled && m_rtSettings.giAtrousPass1Enabled,
+                    m_rtSettings.denoiseEnabled && m_rtSettings.giAtrousPass2Enabled,
+                    m_rtSettings.denoiseEnabled && m_rtSettings.giAtrousPass3Enabled,
+                    m_rtSettings.denoiseEnabled && m_rtSettings.giAtrousPass4Enabled
+                };
+                rtp.reflectionTemporalFilterEnabled = m_rtSettings.reflectionTemporalFilterEnabled;
+                rtp.reflectionOutlierFilterEnabled = m_rtSettings.reflectionOutlierFilterEnabled;
+                rtp.reflectionSpatialFilterEnabled = m_rtSettings.reflectionSpatialFilterEnabled;
                 rtp.lightChanged = rtLightOrCameraMoved;
                 rtp.debugMode = m_rtSettings.debugMode;
                 core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");

@@ -111,6 +111,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec4 raw = imageLoad(imgS, px);
 
+    if ((pc.u.x & 1u) != 0u) { // C++ explicitly overwrites u.x with the temporal bypass flag before this dispatch.
+        float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
+        imageStore(imgHistCur, px, raw);
+        imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
+        geom.w = 1.0;
+        imageStore(imgGeomCur, px, geom);
+        ageBin = 0u;
+        histogramCounted = true;
+        return;
+    }
+
     vec3 N = rtOctDecode(geom.xy);
 
     vec2 curUV = (vec2(px) + 0.5) / size;
@@ -168,7 +179,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     float maxHist = max(pc.f.x, 1.0);
-    float spp = max(pc.f.y, 1.0);
     vec4 result;
     float newLen;
 
@@ -185,7 +195,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
-            newLen = min(histLen + spp * 0.5, maxHist);
+            newLen = histLen; // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
             atomicAdd(rtLocalCounters[7], 1u);
@@ -217,7 +227,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             } else {
                 result = vec4(0.0, 0.0, 0.0, 1.0);
             }
-            newLen = min(spp, maxHist);
+            newLen = 1.0;
             float rLum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
             outMoments = vec4(rLum, rLum * rLum, 0.1, 0.1);
         }
@@ -271,23 +281,45 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 if (dot(motion, motion) < 1e-5) {
                     clampMaxY = max(clampMaxY, histY);
                 }
-                histY = clamp(histY, clampMinY, clampMaxY);
-                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 hist.a = clamp(hist.a, aoMin, aoMax);
 
-                // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 3.0)
-                // so legitimate single-ray hits (0.1 to 2.5) in dark regions are never zero-clipped!
-                float fireflyThreshold = max(3.5 * sigmaY.x, 3.0);
-                if (rawYCoCg.x > m1Y.x + fireflyThreshold) {
+                // A bright sample is not automatically a firefly: preserve it when
+                // nearby pixels show the same bright feature. Reject only a high sample
+                // that is statistically rare in a sufficiently populated neighborhood.
+                float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, 24.0));
+                float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
+                float brightNeighborCount = 0.0;
+                for (int fy = -1; fy <= 1; ++fy) {
+                    for (int fx = -1; fx <= 1; ++fx) {
+                        if (fx == 0 && fy == 0) continue;
+                        ivec2 fp = px + ivec2(fx, fy);
+                        if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
+                        vec4 fVal = imageLoad(imgS, fp);
+                        if (fVal.a < 0.0) continue;
+                        if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) >= supportThreshold)
+                            brightNeighborCount += 1.0;
+                    }
+                }
+                bool isolatedFirefly = count >= 4.0 &&
+                    brightNeighborCount <= floor(count * 0.125);
+                // History clamping is also gated by isolation; otherwise it dims
+                // legitimate bright emitters/reflections supported by nearby pixels.
+                if ((pc.u.y & 1u) != 0u && isolatedFirefly)
+                    histY = clamp(histY, clampMinY, clampMaxY);
+                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
+                if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
+                    rawYCoCg.x > m1Y.x + fireflyThreshold) {
                     rawYCoCg.x = m1Y.x + fireflyThreshold;
                     raw.rgb = max(vec3(0.0), yCoCgToRgb(rawYCoCg));
                 }
             }
-            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(24.0));
+            raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
-            newLen = min(histLen + spp, maxHist);
-            // Exponential Moving Average (EMA) with minimum blend factor so dynamic changes fade in a fraction of a second
-            float alpha = clamp(spp / newLen, 0.001, 1.0);
+            // History length is measured in valid frames, not accumulated rays.
+            // Each raw frame is already the average of its SPP samples, so SPP must
+            // not change the temporal response speed or make 1 SPP freeze the image.
+            newLen = min(histLen + 1.0, maxHist);
+            float alpha = 1.0 / newLen;
             result = mix(hist, raw, alpha);
 
             // SVGF moments accumulation: blend spatial and temporal variance when history is short (< 4 frames)
@@ -298,7 +330,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
             atomicAdd(rtLocalCounters[2], 1u);
-            newLen = min(spp, maxHist);
+            newLen = 1.0;
             result = raw;
 
             // Disocclusion / rejected history: compute spatial variance over local 3x3 footprint

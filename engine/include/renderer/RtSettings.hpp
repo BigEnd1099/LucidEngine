@@ -11,7 +11,10 @@ namespace engine::renderer {
         LinearDepth = 4,
         AmbientOcclusionOnly = 5,
         ReflectionsOnly = 6,
-        Variance = 7
+        Variance = 7,
+        RawSpecularCaustics = 8,
+        CausticHitDensity = 9,
+        TemporalIndirect = 10
     };
 
     struct RtSettings {
@@ -33,7 +36,18 @@ namespace engine::renderer {
         int maxHistory{32};
         float spatialStrength{1.0f};
         bool denoiseEnabled{true};
+        bool giTemporalFilterEnabled{true};
+        bool giHistoryClampEnabled{true};
+        bool giTemporalFireflyFilterEnabled{true};
+        bool giTraceFireflyClampEnabled{true};
+        bool giAtrousPass1Enabled{true};
+        bool giAtrousPass2Enabled{true};
+        bool giAtrousPass3Enabled{true};
+        bool giAtrousPass4Enabled{true};
         bool svgfEnabled{true};
+        bool reflectionTemporalFilterEnabled{true};
+        bool reflectionOutlierFilterEnabled{true};
+        bool reflectionSpatialFilterEnabled{true};
         RtDebugMode debugMode{RtDebugMode::None};
 
         // 4 RT Reflection Optimization Variants:

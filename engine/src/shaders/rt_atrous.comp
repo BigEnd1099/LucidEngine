@@ -23,6 +23,8 @@ layout(set = 1, binding = 2, rgba16f) uniform image2D imgA;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
+layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
+layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -59,9 +61,20 @@ void main() {
             return;
         }
         if (mode == 1u) {
-            // Raw indirect trace (imgHistCur in pass 0, or center in pass 1/3)
-            vec4 rawS = imageLoad(imgHistCur, px);
+            // True raw GI trace, captured before temporal accumulation or spatial filtering.
+            vec4 rawS = imageLoad(imgRawGi, px);
             storeDst(px, rawS);
+            return;
+        } else if (mode == 8u) {
+            vec4 caustic = imageLoad(imgCaustics, px);
+            storeDst(px, vec4(caustic.rgb, 1.0));
+            return;
+        } else if (mode == 9u) {
+            float density = clamp(imageLoad(imgCaustics, px).a, 0.0, 1.0);
+            storeDst(px, vec4(density, density * density, 0.0, 1.0));
+            return;
+        } else if (mode == 10u) {
+            storeDst(px, imageLoad(imgHistCur, px));
             return;
         } else if (mode == 2u) {
             // History length (false color gradient normalized to maxHistory)
