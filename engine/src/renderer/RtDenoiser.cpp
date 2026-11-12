@@ -194,7 +194,7 @@ namespace engine::renderer {
         createImages();
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
         m_needsLayoutInit = true;
-        m_historyValid = false;
+        m_reflHistoryValid = false;
         m_giHistoryValid = false;
     }
 
@@ -430,7 +430,7 @@ namespace engine::renderer {
 
         // All images live permanently in GENERAL (storage writes + sampled reads in the PBR pass).
         if (m_needsLayoutInit) {
-            const Image* all[11] = {
+            const Image* all[13] = {
                 &m_imgS, &m_imgA, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
                 &m_imgRefl, &m_imgReflHist[0], &m_imgReflHist[1],
                 &m_moments[0], &m_moments[1], &m_imgReflGeom[0], &m_imgReflGeom[1]
@@ -452,7 +452,7 @@ namespace engine::renderer {
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
-            m_historyValid = false;
+            m_reflHistoryValid = false;
             m_giHistoryValid = false;
         }
 
@@ -482,7 +482,7 @@ namespace engine::renderer {
 
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
-            m_historyValid = false;
+            m_reflHistoryValid = false;
             m_giHistoryValid = false;
         }
         m_gpuTimings = {};
@@ -567,7 +567,7 @@ namespace engine::renderer {
         profiler.recordMetric("rtGiHistoryValid",
             (params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None) && m_giHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionHistoryValid",
-            params.reflectionsEnabled && m_historyValid ? 1.0 : 0.0);
+            params.reflectionsEnabled && m_reflHistoryValid ? 1.0 : 0.0);
         profiler.recordMetric("rtHistoryInvalidatedByLightChange", params.lightChanged ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSamples", params.reflectionSamples);
         profiler.recordMetric("rtReflectionBounces", params.reflectionBounces);
@@ -738,6 +738,7 @@ namespace engine::renderer {
 
         // Reflection work starts after the GI output dependency. Keep this barrier explicit
         // and measure its scheduling gap separately from the reflection dispatch itself.
+        bool reflectionPassRan = false;
         if (params.reflectionsEnabled && m_reflPipeline && m_reflTemporalPipeline) {
             sync();
             if (m_timestampsSupported && m_queryPool)
@@ -746,7 +747,7 @@ namespace engine::renderer {
             PushData reflPd{};
             reflPd.m = m_prevViewProj;
             reflPd.f = glm::vec4(std::max(params.maxHistory, 1.0f), static_cast<float>(params.reflectionSamples),
-                                 m_historyValid ? 1.0f : 0.0f, std::clamp(params.reflectionMaxRoughness, 0.02f, 1.0f));
+                                 m_reflHistoryValid ? 1.0f : 0.0f, std::clamp(params.reflectionMaxRoughness, 0.02f, 1.0f));
             reflPd.u[0] = std::clamp(params.reflectionSamples, 1u, 16u);
             reflPd.u[1] = params.frameIndex;
             reflPd.u[2] = std::bit_cast<uint32_t>(std::clamp(params.reflectionMinThroughput, 0.001f, 1.0f));
@@ -771,6 +772,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 14);
 
             bindRefl(m_reflTemporalPipeline, reflPd);
+            reflectionPassRan = true;
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 15);
             sync();
@@ -810,9 +812,9 @@ namespace engine::renderer {
         vkCmdPipelineBarrier2(cmd, &diagnosticsReadDependency);
 
         m_prevViewProj = params.viewProj;
-        // Reflection history is valid only when the reflection pass ran this frame.
-        // Otherwise its ping-pong radiance/geometry pair would describe an older frame.
-        m_historyValid = params.reflectionsEnabled;
+        // Keep reflection validity independent from GI temporal validity. The ping-pong
+        // reflection radiance + primary geometry pair advances only when its temporal pass ran.
+        m_reflHistoryValid = reflectionPassRan;
         m_parity ^= 1u;
         m_hasTimestampResults = m_timestampsSupported;
     }
