@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[16]{};
+        VkDescriptorSetLayoutBinding b[18]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -73,8 +73,14 @@ namespace engine::renderer {
         b[15].descriptorCount = 1;
         b[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[15].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        for (uint32_t i = 16; i < 18; ++i) {
+            b[i].binding = i;
+            b[i].descriptorCount = 1;
+            b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 16;
+        li.bindingCount = 18;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
@@ -283,6 +289,7 @@ namespace engine::renderer {
         for (auto& h : m_hist) h = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
         m_imgRefl = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
         for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
+        for (auto& rg : m_imgReflGeom) rg = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_width, m_height);
         for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
     }
 
@@ -298,6 +305,7 @@ namespace engine::renderer {
         for (auto& h : m_hist) destroy(h);
         destroy(m_imgRefl);
         for (auto& rh : m_imgReflHist) destroy(rh);
+        for (auto& rg : m_imgReflGeom) destroy(rg);
         for (auto& m : m_moments) destroy(m);
     }
 
@@ -310,7 +318,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[16]{};
+            VkWriteDescriptorSet writes[18]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -397,7 +405,23 @@ namespace engine::renderer {
             writes[15].descriptorCount = 1;
             writes[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[15].pBufferInfo = &diagnosticsBufferInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 16, writes, 0, nullptr);
+
+            const VkDescriptorImageInfo reflGeomCurInfo{ VK_NULL_HANDLE, m_imgReflGeom[p].view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[16] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[16].dstSet = m_sets[p];
+            writes[16].dstBinding = 16;
+            writes[16].descriptorCount = 1;
+            writes[16].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[16].pImageInfo = &reflGeomCurInfo;
+
+            const VkDescriptorImageInfo reflGeomPrevInfo{ VK_NULL_HANDLE, m_imgReflGeom[q].view, VK_IMAGE_LAYOUT_GENERAL };
+            writes[17] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[17].dstSet = m_sets[p];
+            writes[17].dstBinding = 17;
+            writes[17].descriptorCount = 1;
+            writes[17].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[17].pImageInfo = &reflGeomPrevInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 18, writes, 0, nullptr);
         }
     }
 
@@ -409,10 +433,10 @@ namespace engine::renderer {
             const Image* all[11] = {
                 &m_imgS, &m_imgA, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
                 &m_imgRefl, &m_imgReflHist[0], &m_imgReflHist[1],
-                &m_moments[0], &m_moments[1]
+                &m_moments[0], &m_moments[1], &m_imgReflGeom[0], &m_imgReflGeom[1]
             };
-            VkImageMemoryBarrier2 bars[11]{};
-            for (int i = 0; i < 11; ++i) {
+            VkImageMemoryBarrier2 bars[13]{};
+            for (int i = 0; i < 13; ++i) {
                 bars[i] = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                 bars[i].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 bars[i].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -424,7 +448,7 @@ namespace engine::renderer {
                 bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             }
             VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 11;
+            dep.imageMemoryBarrierCount = 13;
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
