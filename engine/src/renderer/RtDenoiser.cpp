@@ -673,8 +673,7 @@ namespace engine::renderer {
         pd.u[1] = params.frameIndex;
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) |
                   ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
-                  (params.giTraceFireflyClampEnabled ? 8u : 0u) |
-                  (!params.giTemporalFilterEnabled ? 16u : 0u);
+                  (params.giTraceFireflyClampEnabled ? 8u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
 
         const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
