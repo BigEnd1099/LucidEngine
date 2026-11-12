@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[20]{};
+        VkDescriptorSetLayoutBinding b[21]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -79,8 +79,12 @@ namespace engine::renderer {
             b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         }
+        b[20].binding = 20;
+        b[20].descriptorCount = 1;
+        b[20].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[20].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 20;
+        li.bindingCount = 21;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
@@ -88,7 +92,7 @@ namespace engine::renderer {
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 40 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pi.maxSets = 2;
@@ -204,6 +208,7 @@ namespace engine::renderer {
         destroyImages();
         if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
         m_diagnosticsBuffer = VK_NULL_HANDLE;
+        m_worldCacheBuffer = VK_NULL_HANDLE;
         m_diagnosticsAllocation = VK_NULL_HANDLE;
         m_diagnosticsMapped = nullptr;
         for (auto& p : m_atrousPipelines) { if (p) vkDestroyPipeline(dev, p, nullptr); p = VK_NULL_HANDLE; }
@@ -322,7 +327,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[20]{};
+            VkWriteDescriptorSet writes[21]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -441,8 +446,37 @@ namespace engine::renderer {
             writes[19].descriptorCount = 1;
             writes[19].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[19].pImageInfo = &reflGeomPrevInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 20, writes, 0, nullptr);
+            const VkDescriptorBufferInfo worldCacheInfo{
+                m_worldCacheBuffer != VK_NULL_HANDLE ? m_worldCacheBuffer : m_diagnosticsBuffer,
+                0, VK_WHOLE_SIZE
+            };
+            writes[20] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[20].dstSet = m_sets[p];
+            writes[20].dstBinding = 20;
+            writes[20].descriptorCount = 1;
+            writes[20].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[20].pBufferInfo = &worldCacheInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 21, writes, 0, nullptr);
         }
+    }
+
+    void RtDenoiser::setWorldRadianceCacheBuffer(VkBuffer buffer) {
+        m_worldCacheBuffer = buffer;
+        if (!m_context || !m_ready || m_diagnosticsBuffer == VK_NULL_HANDLE) return;
+        const VkDescriptorBufferInfo cacheInfo{
+            m_worldCacheBuffer != VK_NULL_HANDLE ? m_worldCacheBuffer : m_diagnosticsBuffer,
+            0, VK_WHOLE_SIZE
+        };
+        VkWriteDescriptorSet writes[2]{};
+        for (uint32_t i = 0; i < 2; ++i) {
+            writes[i] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[i].dstSet = m_sets[i];
+            writes[i].dstBinding = 20;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &cacheInfo;
+        }
+        vkUpdateDescriptorSets(m_context->getDevice(), 2, writes, 0, nullptr);
     }
 
     void RtDenoiser::record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params) {
