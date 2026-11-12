@@ -179,6 +179,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     float maxHist = max(pc.f.x, 1.0);
+    float motionPixels = length(motion * vec2(isize));
+    float effectiveMaxHist = mix(maxHist, max(4.0, maxHist * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
     vec4 result;
     float newLen;
 
@@ -195,7 +197,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
-            newLen = histLen; // Checkerboard reuse adds no new temporal observation.
+            newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
             atomicAdd(rtLocalCounters[7], 1u);
@@ -289,6 +291,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, 24.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
+                float maxSupportedLum = clampMaxY.x;
                 for (int fy = -1; fy <= 1; ++fy) {
                     for (int fx = -1; fx <= 1; ++fx) {
                         if (fx == 0 && fy == 0) continue;
@@ -296,15 +299,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                         if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                         vec4 fVal = imageLoad(imgS, fp);
                         if (fVal.a < 0.0) continue;
-                        if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) >= supportThreshold)
+                        float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
+                        if (neighborLum >= supportThreshold) {
                             brightNeighborCount += 1.0;
+                            maxSupportedLum = max(maxSupportedLum, neighborLum);
+                        }
                     }
                 }
                 bool isolatedFirefly = count >= 4.0 &&
                     brightNeighborCount <= floor(count * 0.125);
-                // History clamping is also gated by isolation; otherwise it dims
-                // legitimate bright emitters/reflections supported by nearby pixels.
-                if ((pc.u.y & 1u) != 0u && isolatedFirefly)
+                // Preserve supported bright structures while still clamping unsupported history.
+                if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
+                if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
@@ -318,7 +324,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             // History length is measured in valid frames, not accumulated rays.
             // Each raw frame is already the average of its SPP samples, so SPP must
             // not change the temporal response speed or make 1 SPP freeze the image.
-            newLen = min(histLen + 1.0, maxHist);
+            newLen = min(histLen + 1.0, effectiveMaxHist);
             float alpha = 1.0 / newLen;
             result = mix(hist, raw, alpha);
 
