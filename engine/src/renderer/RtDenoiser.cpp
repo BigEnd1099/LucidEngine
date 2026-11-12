@@ -810,7 +810,9 @@ namespace engine::renderer {
         vkCmdPipelineBarrier2(cmd, &diagnosticsReadDependency);
 
         m_prevViewProj = params.viewProj;
-        m_historyValid = true;
+        // Reflection history is valid only when the reflection pass ran this frame.
+        // Otherwise its ping-pong radiance/geometry pair would describe an older frame.
+        m_historyValid = params.reflectionsEnabled;
         m_parity ^= 1u;
         m_hasTimestampResults = m_timestampsSupported;
     }
