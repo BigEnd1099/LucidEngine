@@ -32,7 +32,7 @@ uvec4 u; // x=samples, y=frame, z=flags (bit0 GI, bit1 AO), w=max bounces
 
 const float AO_DISTANCE = 1.75;
 const float MAX_RAY_DIST = 200.0;
-const float FIREFLY_CLAMP = 24.0;
+const float FIREFLY_CLAMP = 256.0; // Emergency safety ceiling, not an artistic brightness clamp.
 const int MAX_BOUNCES = 15;
 
 // Decorrelated 2D PCG scramble keyed by pixel and frame. Used as a
