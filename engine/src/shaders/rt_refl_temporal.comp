@@ -20,6 +20,8 @@ layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
 layout(set = 1, binding = 11, rgba16f) uniform image2D imgReflHistPrev;
 layout(set = 1, binding = 12) uniform sampler2D uMotion;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
+layout(set = 1, binding = 18, rgba32f) uniform image2D imgReflGeomCur;
+layout(set = 1, binding = 19, rgba32f) uniform readonly image2D imgReflGeomPrev;
 
 vec3 rgbToYCoCg(vec3 c) {
     return vec3(
@@ -57,6 +59,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0) { // sky
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
         atomicAdd(rtLocalCounters[10], 1u);
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
@@ -68,6 +71,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     vec4 gNR = texelFetch(uGNormalRoughness, px, 0);
     vec3 N = gNR.xyz;
     if (dot(N, N) <= 1e-4) {
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
         atomicAdd(rtLocalCounters[10], 1u);
         ageBin = 0u;
         histogramCounted = true;
@@ -88,6 +92,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         return;
     }
     if (raw.a <= 0.0) {
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
         atomicAdd(rtLocalCounters[10], 1u);
         ageBin = 0u;
         histogramCounted = true; // zero-age / no reflection sample
@@ -98,6 +103,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
     float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
@@ -124,14 +131,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
             if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[11], 1u); continue; }
-            float prevD = texelFetch(uDepth, tp, 0).r;
-            if (prevD >= 1.0) continue;
-            float prevLinZ = rtLinearDepth(prevD);
-            if (abs(prevLinZ - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[12], 1u); continue; }
-
-            vec4 prevGNR = texelFetch(uGNormalRoughness, tp, 0);
-            if (dot(prevGNR.xyz, prevGNR.xyz) <= 1e-4) continue;
-            if (dot(normalize(prevGNR.xyz), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
+            // Validate against the actual previous-frame primary surface, not the current
+            // G-buffer sampled at the reprojected coordinate. The latter is unrelated
+            // after camera/object motion and silently discards useful reflection history.
+            vec4 prevGeom = imageLoad(imgReflGeomPrev, tp);
+            if (prevGeom.w < 0.0) continue;
+            if (abs(prevGeom.w - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[12], 1u); continue; }
+            if (dot(normalize(prevGeom.xyz), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
 
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist += w * imageLoad(imgReflHistPrev, tp);
