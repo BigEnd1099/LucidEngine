@@ -379,7 +379,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     if (wSum <= 0.05) {
         vec4 cached = sampleWorldRadianceCache(P, N, 0xFFFFFFFFu);
         if (cached.a > 0.0)
-            result.rgb = mix(result.rgb, cached.rgb, 0.45 * cached.a);
+            result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
     }
 
     imageStore(imgHistCur, px, result);
@@ -387,7 +387,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     imageStore(imgMomentsCur, px, outMoments);
 
     geom.w = newLen;
-    ageBin = min(uint(clamp(newLen / maxHist, 0.0, 0.999999) * 16.0), 15u);
+    ageBin = min(uint(clamp(newLen / effectiveMaxHist, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
 
     imageStore(imgGeomCur, px, geom);
