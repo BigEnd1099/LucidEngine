@@ -150,8 +150,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     vec4 result;
     float historyAge = 0.0;
         float maxHistory = max(pc.f.x, 1.0);
+    bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
+    bool mirrorTemporalOnly = roughness < 0.08 && !denoiseMirrors;
     float motionPixels = length(motion * size);
-    float effectiveMaxHistory = mix(maxHistory, max(4.0, maxHistory * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
+    float effectiveMaxHistory = mirrorTemporalOnly ? maxHistory :
+        mix(maxHistory, max(4.0, maxHistory * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
@@ -196,10 +199,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             atomicAdd(rtLocalCounters[9], 1u);
             hist /= wSum;
 
-            bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
             bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
 
-            if (roughness < 0.08 && !denoiseMirrors) {
+            if (mirrorTemporalOnly) {
                 // Mirror surfaces (roughness < 0.08) with mirror denoiser off:
                 // Primary rays are deterministic, so there is ZERO directional Monte Carlo noise.
                 // Reproject and temporally accumulate without neighborhood variance clamping
