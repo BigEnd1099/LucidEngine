@@ -111,7 +111,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec4 raw = imageLoad(imgS, px);
 
-    if ((pc.u.z & 16u) != 0u) { // Explicit temporal bypass flag; never alias the SPP count.
+    if ((pc.u.x & 1u) != 0u) { // C++ explicitly overwrites u.x with the temporal bypass flag before this dispatch.
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
