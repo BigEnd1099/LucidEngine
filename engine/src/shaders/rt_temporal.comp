@@ -282,8 +282,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 if (dot(motion, motion) < 1e-5) {
                     clampMaxY = max(clampMaxY, histY);
                 }
-                if ((pc.u.y & 1u) != 0u) histY = clamp(histY, clampMinY, clampMaxY);
-                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 hist.a = clamp(hist.a, aoMin, aoMax);
 
                 // A bright sample is not automatically a firefly: preserve it when
@@ -304,6 +302,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 }
                 bool isolatedFirefly = count >= 4.0 &&
                     brightNeighborCount <= floor(count * 0.125);
+                // History clamping is also gated by isolation; otherwise it dims
+                // legitimate bright emitters/reflections supported by nearby pixels.
+                if ((pc.u.y & 1u) != 0u && isolatedFirefly)
+                    histY = clamp(histY, clampMinY, clampMaxY);
+                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
                     rawYCoCg.x > m1Y.x + fireflyThreshold) {
                     rawYCoCg.x = m1Y.x + fireflyThreshold;
