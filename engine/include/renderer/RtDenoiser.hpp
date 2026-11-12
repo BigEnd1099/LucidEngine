@@ -91,7 +91,7 @@ namespace engine::renderer {
         uint32_t getGiWidth() const { return m_giWidth; }
         uint32_t getGiHeight() const { return m_giHeight; }
         // Call when a frame was rendered without RT indirect (history would be stale).
-        void invalidateHistory() { m_historyValid = false; m_giHistoryValid = false; }
+        void invalidateHistory() { m_reflHistoryValid = false; m_giHistoryValid = false; }
 
         // Records all passes. Depth must be in DEPTH_STENCIL_READ_ONLY_OPTIMAL.
         void record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params);
@@ -122,7 +122,7 @@ namespace engine::renderer {
         uint32_t m_giWidth{0}, m_giHeight{0};
         bool m_ready{false};
         bool m_needsLayoutInit{true};
-        bool m_historyValid{false};
+        bool m_reflHistoryValid{false};
         bool m_giHistoryValid{false};
         uint32_t m_parity{0};
         glm::mat4 m_prevViewProj{1.0f};
