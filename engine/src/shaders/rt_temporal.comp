@@ -286,15 +286,31 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 hist.a = clamp(hist.a, aoMin, aoMax);
 
-                // Hampel outlier filter: suppress true fireflies (> 3.5 sigma and above floor 3.0)
-                // so legitimate single-ray hits (0.1 to 2.5) in dark regions are never zero-clipped!
+                // A bright sample is not automatically a firefly: preserve it when
+                // nearby pixels show the same bright feature. Reject only a high sample
+                // that is statistically rare in a sufficiently populated neighborhood.
                 float fireflyThreshold = max(3.5 * sigmaY.x, 3.0);
-                if ((pc.u.y & 2u) != 0u && rawYCoCg.x > m1Y.x + fireflyThreshold) {
+                float brightNeighborCount = 0.0;
+                for (int fy = -1; fy <= 1; ++fy) {
+                    for (int fx = -1; fx <= 1; ++fx) {
+                        if (fx == 0 && fy == 0) continue;
+                        ivec2 fp = px + ivec2(fx, fy);
+                        if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
+                        vec4 fVal = imageLoad(imgS, fp);
+                        if (fVal.a < 0.0) continue;
+                        if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) > m1Y.x + fireflyThreshold)
+                            brightNeighborCount += 1.0;
+                    }
+                }
+                bool isolatedFirefly = count >= 4.0 &&
+                    brightNeighborCount <= floor(count * 0.125);
+                if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
+                    rawYCoCg.x > m1Y.x + fireflyThreshold) {
                     rawYCoCg.x = m1Y.x + fireflyThreshold;
                     raw.rgb = max(vec3(0.0), yCoCgToRgb(rawYCoCg));
                 }
             }
-            raw.rgb = clamp(raw.rgb, vec3(0.0), vec3(24.0));
+            raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
             newLen = min(histLen + spp, maxHist);
             // Exponential Moving Average (EMA) with minimum blend factor so dynamic changes fade in a fraction of a second
