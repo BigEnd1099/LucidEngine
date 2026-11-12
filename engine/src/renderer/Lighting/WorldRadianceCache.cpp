@@ -142,13 +142,15 @@ namespace engine::renderer {
                                            const glm::vec3& cameraPos,
                                            const glm::vec3& sunDirection,
                                            const glm::vec4& sunColor) {
-        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer || tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
+        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer ||
+            m_sceneSetLayout == VK_NULL_HANDLE || m_descriptorSet == VK_NULL_HANDLE ||
+            tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
         // Update 4096 cells per frame in a sliding window
         constexpr uint32_t SLICE_SIZE = 4096;
-        uint32_t sliceOffset = (frameCounter * SLICE_SIZE) % CACHE_CELL_COUNT;
+        uint32_t sliceOffset = (frameCounter * SLICE_SIZE) % 32768u;
 
         struct PushConstants {
             glm::vec4 cameraPosAndCellSize;
@@ -164,7 +166,6 @@ namespace engine::renderer {
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
-        if (m_descriptorSet == VK_NULL_HANDLE) return;
         const VkDescriptorSet sets[2] = { sceneSet, m_descriptorSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
 
