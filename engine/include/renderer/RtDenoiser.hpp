@@ -103,6 +103,7 @@ namespace engine::renderer {
 
         // Records all passes. Depth must be in DEPTH_STENCIL_READ_ONLY_OPTIMAL.
         void record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params);
+        void setWorldRadianceCacheBuffer(VkBuffer buffer);
 
         VkImageView outputView() const { return m_imgS.view; }
         VkImageView reflectionOutputView() const { return m_imgRefl.view; }
@@ -148,6 +149,7 @@ namespace engine::renderer {
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
+        VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
         VmaAllocation m_diagnosticsAllocation{VK_NULL_HANDLE};
         uint32_t* m_diagnosticsMapped{nullptr};
         bool m_diagnosticsCoherent{false};
