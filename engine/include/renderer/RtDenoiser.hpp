@@ -133,7 +133,6 @@ namespace engine::renderer {
         std::array<Image, 2> m_hist{};     // temporal accumulation (ping-pong)
         Image m_imgRefl{};                 // raw reflection trace
         std::array<Image, 2> m_imgReflHist{}; // reflection temporal ping-pong
-        std::array<Image, 2> m_imgReflHitGeom{}; // first-hit normal + ray distance for reflected-world denoising
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
