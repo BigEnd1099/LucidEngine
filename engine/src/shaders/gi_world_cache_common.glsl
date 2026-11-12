@@ -10,8 +10,8 @@ struct WorldRadianceCell {
     uint lockOrFlags;    // Alignment padding (offset 28..31)
 };
 
-const uint WORLD_CACHE_CAPACITY = 524288u; // 2^19 cells
-const float WORLD_CACHE_CELL_SIZE = 1.0;   // 1m grid spacing
+const uint CACHE_CELL_COUNT = 524288u;
+const float DEFAULT_CELL_SIZE = 1.0;
 
 uint packNormalOctahedral(vec3 n) {
     n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);
@@ -42,7 +42,7 @@ uint hashWorldCell(vec3 pos, vec3 normal, float cellSize) {
         normIdx = normal.z > 0.0 ? 4u : 5u;
     }
     uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u;
-    return (h ^ (h >> 16u)) % WORLD_CACHE_CAPACITY;
+    return (h ^ (h >> 16u)) % CACHE_CELL_COUNT;
 }
 
 #endif // GI_WORLD_CACHE_COMMON_GLSL
