@@ -245,6 +245,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     // sample is rejected only when it is a rare outlier in a populated patch.
                     float floorThreshold = (roughness < 0.08) ? 16.0 : 3.5;
                     float fireflyThreshold = max(3.5 * sigmaY.x, floorThreshold);
+                    float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
                     for (int fy = -1; fy <= 1; ++fy) {
                         for (int fx = -1; fx <= 1; ++fx) {
@@ -253,7 +254,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                             if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                             vec4 fVal = imageLoad(imgRefl, fp);
                             if (fVal.a < 0.5) continue;
-                            if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) > m1Y.x + fireflyThreshold)
+                            if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) >= supportThreshold)
                                 brightNeighborCount += 1.0;
                         }
                     }
