@@ -288,6 +288,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 // nearby pixels show the same bright feature. Reject only a high sample
                 // that is statistically rare in a sufficiently populated neighborhood.
                 float fireflyThreshold = max(3.5 * sigmaY.x, 3.0);
+                float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 for (int fy = -1; fy <= 1; ++fy) {
                     for (int fx = -1; fx <= 1; ++fx) {
@@ -296,7 +297,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                         if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                         vec4 fVal = imageLoad(imgS, fp);
                         if (fVal.a < 0.0) continue;
-                        if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) > m1Y.x + fireflyThreshold)
+                        if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) >= supportThreshold)
                             brightNeighborCount += 1.0;
                     }
                 }
