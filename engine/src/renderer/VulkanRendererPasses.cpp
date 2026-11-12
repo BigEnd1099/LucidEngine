@@ -1299,6 +1299,7 @@ namespace engine::renderer {
                 const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
                 m_worldRadianceCache.dispatchUpdate(
                     m_commandBuffer,
+                    m_descriptorSet,
                     m_accelerationStructure.getTLAS(),
                     m_frameCounter,
                     glm::vec3(sceneUbo->cameraPos),
