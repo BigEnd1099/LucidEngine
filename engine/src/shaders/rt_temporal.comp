@@ -376,7 +376,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     // Recover the first frame after disocclusion from the world-space radiance cache.
-    if (wSum <= 0.05) {
+    if ((isCheckerSkipped && wSum <= 0.05) || (!isCheckerSkipped && wSum <= 0.01)) {
         vec4 cached = sampleWorldRadianceCache(P, N, 0xFFFFFFFFu);
         if (cached.a > 0.0)
             result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
