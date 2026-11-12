@@ -148,8 +148,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     bool isCheckerSkipped = (raw.a > 0.1 && raw.a < 0.4);
     vec4 result;
     float historyAge = 0.0;
-    float sampleCount = max(pc.f.y, 1.0);
-    float maxHistory = max(pc.f.x, 1.0);
+        float maxHistory = max(pc.f.x, 1.0);
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
@@ -202,9 +201,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 // Primary rays are deterministic, so there is ZERO directional Monte Carlo noise.
                 // Reproject and temporally accumulate without neighborhood variance clamping
                 // so sharp specular highlights, light bulbs, and reflection edges are NEVER crushed or dimmed!
-                historyAge = min(hist.a + sampleCount, maxHistory);
+                historyAge = min(hist.a + 1.0, maxHistory);
                 float minAlpha = 1.0 / maxHistory;
-                float alpha = (pc.f.z > 0.5) ? clamp(sampleCount / historyAge, minAlpha, 1.0) : 1.0;
+                float alpha = (pc.f.z > 0.5) ? clamp(1.0 / historyAge, minAlpha, 1.0) : 1.0;
                 result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
             } else {
                 // Rough specular surfaces or mirror denoiser enabled:
@@ -272,15 +271,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 }
 
                 raw.rgb = max(raw.rgb, vec3(0.0)); // Do not impose a fixed ceiling on legitimate specular energy.
-                historyAge = min(hist.a + sampleCount, maxHistory);
+                historyAge = min(hist.a + 1.0, maxHistory);
                 float minAlpha = 1.0 / maxHistory;
-                float alpha = (pc.f.z > 0.5) ? clamp(sampleCount / historyAge, minAlpha, 1.0) : 1.0;
+                float alpha = (pc.f.z > 0.5) ? clamp(1.0 / historyAge, minAlpha, 1.0) : 1.0;
                 result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
             }
         } else {
             atomicAdd(rtLocalCounters[10], 1u);
             result = raw;
-            historyAge = sampleCount;
+            historyAge = 1.0;
         }
     }
 
