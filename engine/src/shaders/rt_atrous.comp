@@ -47,8 +47,9 @@ void storeDst(ivec2 p, vec4 v) {
 }
 
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
-    if (PASS != 3 || pc.u.y == 0u || pc.u.z == 0u || geom.w < 2.0 ||
-        ((px.x & 3) != 2) || ((px.y & 3) != 2)) return;
+    uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
+    bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
+    if (PASS != 3 || pc.u.y == 0u || pc.u.z == 0u || geom.w < 2.0 || !writeSample) return;
     vec2 uv = (vec2(px) + 0.5) / size;
     ivec2 depthSize = textureSize(uDepth, 0);
     ivec2 depthPx = clamp(ivec2(uv * vec2(depthSize)), ivec2(0), depthSize - 1);

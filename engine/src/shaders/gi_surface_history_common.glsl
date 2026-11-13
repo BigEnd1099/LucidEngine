@@ -35,8 +35,7 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
         empty = entry.meta.x == 0u;
-        uint frameAge = currentFrame - entry.meta.z;
-        bool match = !empty && frameAge <= 2048u &&
+        bool match = !empty &&
                      entry.meta.x == lightingEpoch &&
                      all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
@@ -101,7 +100,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
     ivec3 cell = ivec3(floor(biasedPos / SURFACE_HISTORY_CELL_SIZE));
     uint packedN = packNormalOctahedral(n);
-    vec3 safeIrradiance = sanitizeHDR(clamp(irradiance, vec3(0.0), vec3(16.0)));
+    vec3 safeIrradiance = sanitizeHDR(clamp(irradiance, vec3(0.0), vec3(64.0)));
     uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
@@ -130,7 +129,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         if (sameSurface) {
             float oldAge = max(entry.radianceAge.a, 1.0);
             float nextAge = min(max(oldAge, historyLength) + 1.0, 64.0);
-            float alpha = clamp(1.0 / nextAge, 0.05, 0.25);
+            float alpha = (historyLength > oldAge) ? 0.35 : clamp(1.0 / nextAge, 0.05, 0.20);
             vec3 nextRadiance = mix(entry.radianceAge.rgb, safeIrradiance, alpha);
             surfaceHistoryCache.cells[index].radianceAge =
                 vec4(nextRadiance, max(historyLength, nextAge));

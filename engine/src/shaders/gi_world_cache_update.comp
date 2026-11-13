@@ -96,8 +96,7 @@ void main() {
         WorldRadianceCell prevCell = worldCache.cells[hIndex];
         float prevWeight = prevCell.irradiance.a;
         bool expired = (prevWeight <= 0.0) ||
-            (pc.frameAndSlice.x < prevCell.lastSeenFrame) ||
-            ((pc.frameAndSlice.x - prevCell.lastSeenFrame) > 2048u);
+            (pc.frameAndSlice.x < prevCell.lastSeenFrame);
         bool keyMismatch = prevCell.cellKey != cellKey;
         bool normalMismatch = !expired &&
             dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;
