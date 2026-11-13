@@ -25,7 +25,7 @@ layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
-shared uint rtLocalDiag[10 * 64];
+shared uint rtLocalDiag[12 * 64];
 
 vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
     vec3 n = normalize(worldNormal);
@@ -83,8 +83,8 @@ float smithG1GGXGI(float nDotV, float alpha) {
     return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
-void processPixel(out uint diagValues[10]) {
-for (int i = 0; i < 10; ++i) diagValues[i] = 0u;
+void processPixel(out uint diagValues[12]) {
+for (int i = 0; i < 12; ++i) diagValues[i] = 0u;
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
 if (any(greaterThanEqual(px, isize))) return;
@@ -239,7 +239,7 @@ for (int s = 0; s < samples; ++s) {
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
         if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.5) {
-            diagValues[9]++;
+            diagValues[10]++;
             vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
             if (cachedRadiance.a > 0.0) {
                 pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.50 * cachedRadiance.a);
@@ -392,23 +392,20 @@ diagValues[7] = diagPathBounces;
 
 void main() {
     uint lane = gl_LocalInvocationIndex;
-    uint diagValues[10];
+    uint diagValues[12];
     processPixel(diagValues);
-    for (uint metric = 0u; metric < 10u; ++metric)
+    for (uint metric = 0u; metric < 12u; ++metric)
         rtLocalDiag[metric * 64u + lane] = diagValues[metric];
     barrier();
 
     // One global atomic per non-zero metric per 8x8 workgroup, instead of
     // per-pixel atomics for every ray hit, light test and cache query.
     if (lane == 0u) {
-        for (uint metric = 0u; metric < 10u; ++metric) {
+        for (uint metric = 0u; metric < 12u; ++metric) {
             uint total = 0u;
             for (uint i = 0u; i < 64u; ++i)
                 total += rtLocalDiag[metric * 64u + i];
-            if (total == 0u) continue;
-            uint counterIndex = (metric < 8u) ? (48u + metric) :
-                                ((metric == 8u) ? 56u : 58u);
-            atomicAdd(rtDiag.counters[counterIndex], total);
+            if (total != 0u) atomicAdd(rtDiag.counters[48u + metric], total);
         }
     }
 }
