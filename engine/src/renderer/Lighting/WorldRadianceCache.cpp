@@ -133,6 +133,19 @@ namespace engine::renderer {
     void WorldRadianceCache::clear(VkCommandBuffer cmd) {
         if (!m_cellBuffer) return;
         vkCmdFillBuffer(cmd, m_cellBuffer, 0, sizeof(WorldRadianceCell) * CACHE_CELL_COUNT, 0);
+
+        VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barrier.buffer = m_cellBuffer;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.bufferMemoryBarrierCount = 1;
+        dep.pBufferMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep);
     }
 
     void WorldRadianceCache::dispatchUpdate(VkCommandBuffer cmd,
