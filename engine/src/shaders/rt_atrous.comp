@@ -88,7 +88,7 @@ void main() {
             float density = clamp(imageLoad(imgCaustics, px).a, 0.0, 1.0);
             storeDst(px, vec4(density, density * density, 0.0, 1.0));
             return;
-        } else if (mode == 10u) {
+        } else if (mode == 10u || mode == 11u || mode == 12u) {
             storeDst(px, imageLoad(imgHistCur, px));
             return;
         } else if (mode == 2u) {
