@@ -1297,16 +1297,18 @@ namespace engine::renderer {
 
             if (m_worldRadianceCache.isInitialized()) {
                 // Clear once on each toggle transition so OFF/ON never revives stale probes.
+                bool worldCacheClearedThisFrame = false;
                 if (m_worldRadianceCacheWasEnabled != m_rtSettings.worldRadianceCacheEnabled) {
                     m_worldRadianceCache.clear(m_commandBuffer);
                     m_worldRadianceCacheWasEnabled = m_rtSettings.worldRadianceCacheEnabled;
+                    worldCacheClearedThisFrame = true;
                 }
 
                 if (m_rtSettings.worldRadianceCacheEnabled && tlasReady &&
                     m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
                     // Probe radiance is light-dependent; invalidate it on actual lighting edits.
                     // Camera motion alone does not set rtLightingChanged.
-                    if (rtLightingChanged)
+                    if (rtLightingChanged && !worldCacheClearedThisFrame)
                         m_worldRadianceCache.clear(m_commandBuffer);
 
                     const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
