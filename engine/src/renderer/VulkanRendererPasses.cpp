@@ -1295,22 +1295,31 @@ namespace engine::renderer {
             const bool tlasReady = m_sceneUboMappedPtr &&
                 static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
 
-            if (tlasReady && m_worldRadianceCache.isInitialized() && m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
-                // Probe radiance is light-dependent; invalidate it on actual lighting edits.
-                // Camera motion alone does not set rtLightingChanged.
-                if (rtLightingChanged)
+            if (m_worldRadianceCache.isInitialized()) {
+                // Clear once on each toggle transition so OFF/ON never revives stale probes.
+                if (m_worldRadianceCacheWasEnabled != m_rtSettings.worldRadianceCacheEnabled) {
                     m_worldRadianceCache.clear(m_commandBuffer);
+                    m_worldRadianceCacheWasEnabled = m_rtSettings.worldRadianceCacheEnabled;
+                }
 
-                const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
-                m_worldRadianceCache.dispatchUpdate(
-                    m_commandBuffer,
-                    m_descriptorSet,
-                    m_accelerationStructure.getTLAS(),
-                    m_frameCounter,
-                    glm::vec3(sceneUbo->cameraPos),
-                    glm::vec3(sceneUbo->sunDirection),
-                    sceneUbo->sunColor
-                );
+                if (m_rtSettings.worldRadianceCacheEnabled && tlasReady &&
+                    m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
+                    // Probe radiance is light-dependent; invalidate it on actual lighting edits.
+                    // Camera motion alone does not set rtLightingChanged.
+                    if (rtLightingChanged)
+                        m_worldRadianceCache.clear(m_commandBuffer);
+
+                    const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
+                    m_worldRadianceCache.dispatchUpdate(
+                        m_commandBuffer,
+                        m_descriptorSet,
+                        m_accelerationStructure.getTLAS(),
+                        m_frameCounter,
+                        glm::vec3(sceneUbo->cameraPos),
+                        glm::vec3(sceneUbo->sunDirection),
+                        sceneUbo->sunColor
+                    );
+                }
             }
 
             const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
@@ -1335,6 +1344,8 @@ namespace engine::renderer {
             core::Profiler::get().recordMetric("rtReflectionMaxRoughness", m_rtSettings.reflectionMaxRoughness);
             core::Profiler::get().recordMetric("rtReflectionMinThroughput", m_rtSettings.reflectionMinThroughput);
             core::Profiler::get().recordMetric("rtDenoiseEnabled", m_rtSettings.denoiseEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtWorldRadianceCacheEnabled", m_rtSettings.worldRadianceCacheEnabled ? 1.0 : 0.0);
+            core::Profiler::get().recordMetric("rtGiSurfaceHistoryCacheEnabled", m_rtSettings.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtSvgfEnabled", (m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled) ? 1.0 : 0.0);
             core::Profiler::get().recordMetric("rtMaxHistory", m_rtSettings.denoiseEnabled ? m_rtSettings.maxHistory : 1.0);
             core::Profiler::get().recordMetric("rtSpatialStrength", m_rtSettings.denoiseEnabled ? m_rtSettings.spatialStrength : 0.0);
@@ -1382,6 +1393,8 @@ namespace engine::renderer {
                 rtp.reflectionTemporalFilterEnabled = m_rtSettings.reflectionTemporalFilterEnabled;
                 rtp.reflectionOutlierFilterEnabled = m_rtSettings.reflectionOutlierFilterEnabled;
                 rtp.reflectionSpatialFilterEnabled = m_rtSettings.reflectionSpatialFilterEnabled;
+                rtp.worldRadianceCacheEnabled = m_rtSettings.worldRadianceCacheEnabled;
+                rtp.giSurfaceHistoryCacheEnabled = m_rtSettings.giSurfaceHistoryCacheEnabled;
                 rtp.lightChanged = rtLightingChanged;
                 rtp.debugMode = m_rtSettings.debugMode;
                 core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");
