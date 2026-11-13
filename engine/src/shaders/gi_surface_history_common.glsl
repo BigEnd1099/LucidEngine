@@ -9,14 +9,17 @@ struct SurfaceHistoryCell {
 };
 const uint SURFACE_HISTORY_CELL_COUNT = 262144u;
 const float SURFACE_HISTORY_CELL_SIZE = 0.25;
-const uint SURFACE_HISTORY_PROBE_COUNT = 8u;
+const uint SURFACE_HISTORY_PROBE_COUNT = 16u;
 layout(set = 1, binding = 21, std430) coherent buffer SurfaceHistoryCacheBuf {
     SurfaceHistoryCell cells[];
 } surfaceHistoryCache;
 
-uint surfaceHistoryHash(ivec3 cell, uint packedNormal) {
+uint surfaceHistoryHash(ivec3 cell) {
+    // Hash only quantized world position. Normal similarity is validated after
+    // probing; hashing the exact packed normal made nearby samples of the same
+    // smooth surface start in unrelated probe sequences.
     uint h = uint(cell.x) * 73856093u ^ uint(cell.y) * 19349663u ^
-             uint(cell.z) * 83492791u ^ packedNormal * 2654435761u;
+             uint(cell.z) * 83492791u;
     return (h ^ (h >> 16u)) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 }
 
@@ -31,7 +34,7 @@ bool lockSurfaceHistory(uint index) {
 bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
     ivec3 cell = ivec3(floor(worldPos / SURFACE_HISTORY_CELL_SIZE));
     uint packedN = packNormalOctahedral(normalize(worldNormal));
-    uint base = surfaceHistoryHash(cell, packedN);
+    uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
         if (!lockSurfaceHistory(index)) return false;
@@ -52,7 +55,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
                          float historyLength, uint lightingEpoch, uint frameIndex) {
     ivec3 cell = ivec3(floor(worldPos / SURFACE_HISTORY_CELL_SIZE));
     uint packedN = packNormalOctahedral(normalize(worldNormal));
-    uint base = surfaceHistoryHash(cell, packedN);
+    uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
         if (!lockSurfaceHistory(index)) return;
