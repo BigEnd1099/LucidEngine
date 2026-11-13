@@ -64,44 +64,55 @@ void main() {
     vec3 hitRad = shadeRtHitEx(hit, hitPos, hitNormal, hitUv, hitTangent,
                                sampleDir, true, 0.25);
     uint cellKey = computeWorldCellKey(hitPos, cellNormal, cellSize);
-    uint hIndex = cellKey % CACHE_CELL_COUNT;
-    // Multiple probe rays can map to the same spatial hash cell in one dispatch.
-    // Serialize the read/modify/write so the EMA and normal/key metadata cannot tear.
-    bool acquired = false;
-    for (uint spin = 0u; spin < 64u; ++spin) {
-        if (atomicCompSwap(worldCache.cells[hIndex].lockOrFlags, 0u, 1u) == 0u) {
-            acquired = true;
-            break;
+    uint baseIndex = cellKey % CACHE_CELL_COUNT;
+
+    // Four-slot linear probing prevents a different surface with the same
+    // initial hash from evicting a still-live visible surface.
+    for (uint probe = 0u; probe < 4u; ++probe) {
+        uint hIndex = (baseIndex + probe) % CACHE_CELL_COUNT;
+        bool acquired = false;
+        for (uint spin = 0u; spin < 64u; ++spin) {
+            if (atomicCompSwap(worldCache.cells[hIndex].lockOrFlags, 0u, 1u) == 0u) {
+                acquired = true;
+                break;
+            }
         }
-    }
-    if (!acquired) return;
-    memoryBarrierBuffer();
-    WorldRadianceCell prevCell = worldCache.cells[hIndex];
-    float prevWeight = prevCell.irradiance.a;
-    vec3 prevNormal = unpackNormalOctahedral(prevCell.packedNormal);
-    bool expired = (prevWeight <= 0.0) ||
-        (pc.frameAndSlice.x < prevCell.lastSeenFrame) ||
-        ((pc.frameAndSlice.x - prevCell.lastSeenFrame) > 2048u);
-    bool keyMismatch = prevCell.cellKey != cellKey;
-    bool normalMismatch = dot(prevNormal, cellNormal) < 0.5;
+        if (!acquired) continue;
 
-    float alpha;
-    float newWeight;
-    vec3 newIrr;
-    if (expired || keyMismatch || normalMismatch) {
-        alpha = 1.0;
-        newWeight = 1.0;
-        newIrr = hitRad;
-    } else {
-        newWeight = min(prevWeight + 1.0, 32.0);
-        alpha = max(1.0 / newWeight, 0.05);
-        newIrr = mix(prevCell.irradiance.rgb, hitRad, alpha);
-    }
+        memoryBarrierBuffer();
+        WorldRadianceCell prevCell = worldCache.cells[hIndex];
+        float prevWeight = prevCell.irradiance.a;
+        bool expired = (prevWeight <= 0.0) ||
+            (pc.frameAndSlice.x < prevCell.lastSeenFrame) ||
+            ((pc.frameAndSlice.x - prevCell.lastSeenFrame) > 2048u);
+        bool keyMismatch = prevCell.cellKey != cellKey;
+        bool normalMismatch = !expired &&
+            dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;
 
-    worldCache.cells[hIndex].irradiance = vec4(sanitizeHDR(newIrr), newWeight);
-    worldCache.cells[hIndex].cellKey = cellKey;
-    worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
-    worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
-    memoryBarrierBuffer();
-    atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
+        if (!expired && (keyMismatch || normalMismatch)) {
+            // Do not evict another live surface. Release and try the next slot.
+            memoryBarrierBuffer();
+            atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
+            continue;
+        }
+
+        float newWeight;
+        vec3 newIrr;
+        if (expired) {
+            newWeight = 1.0;
+            newIrr = hitRad;
+        } else {
+            newWeight = min(prevWeight + 1.0, 32.0);
+            float alpha = max(1.0 / newWeight, 0.05);
+            newIrr = mix(prevCell.irradiance.rgb, hitRad, alpha);
+        }
+
+        worldCache.cells[hIndex].irradiance = vec4(sanitizeHDR(newIrr), newWeight);
+        worldCache.cells[hIndex].cellKey = cellKey;
+        worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
+        worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
+        memoryBarrierBuffer();
+        atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
+        return;
+    }
 }
