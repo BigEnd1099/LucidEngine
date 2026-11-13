@@ -362,7 +362,7 @@ void main() {
     uvec4 diagBallot = subgroupBallot(diagMask != 0u);
     if (subgroupBallotBitCount(diagBallot) != 0u) {
         for (uint metric = 0u; metric < 16u; ++metric) {
-            addDiagCounter(metric, pixelDiag[metric]);
+            addDiagCounter(metric, diagnosticsValid ? pixelDiag[metric] : 0u);
         }
     }
 
