@@ -67,13 +67,12 @@ layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { Wo
 
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
     vec3 n = normalize(worldNormal);
-    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.05);
-    uint cellKey = computeWorldCellKey(snappedPos, n, DEFAULT_CELL_SIZE);
+    uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
     uint idx = cellKey % CACHE_CELL_COUNT;
     WorldRadianceCell cell = worldRadianceCache.cells[idx];
     bool valid = cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
         currentFrame >= cell.lastSeenFrame &&
-        (currentFrame - cell.lastSeenFrame) <= 600u &&
+        (currentFrame - cell.lastSeenFrame) <= 2048u &&
         dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5;
     if (valid)
         return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
