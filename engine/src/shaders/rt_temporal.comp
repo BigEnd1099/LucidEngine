@@ -156,31 +156,26 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
-    // Dedicated cache diagnostics: green = a valid cache entry was loaded,
-    // red = enabled but no valid entry, blue = the corresponding cache is disabled.
-    if ((pc.u.y & 12u) != 0u) {
-        bool cacheEnabled = false;
-        bool cacheHit = false;
+    // Evaluate cache diagnostics before temporal work, but do not return here:
+    // cache writes must still run while a cache-hit debug view is selected.
+    bool cacheDebugMode = (pc.u.y & 12u) != 0u;
+    bool cacheDebugEnabled = false;
+    bool cacheDebugHit = false;
+    if (cacheDebugMode) {
         if ((pc.u.y & 4u) != 0u) {
-            cacheEnabled = (pc.u.x & 4u) != 0u;
-            if (cacheEnabled)
-                cacheHit = sampleWorldRadianceCache(P, N, pc.u.w).a > 0.0;
+            cacheDebugEnabled = (pc.u.x & 4u) != 0u;
+            if (cacheDebugEnabled)
+                cacheDebugHit = sampleWorldRadianceCache(P, N, pc.u.w).a > 0.0;
         } else if ((pc.u.y & 8u) != 0u) {
-            cacheEnabled = (pc.u.x & 2u) != 0u;
-            if (cacheEnabled) {
+            cacheDebugEnabled = (pc.u.x & 2u) != 0u;
+            if (cacheDebugEnabled) {
                 vec4 debugHistory = vec4(0.0);
-                cacheHit = loadSurfaceHistory(P, N, pc.u.z, debugHistory);
+                cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, debugHistory);
             }
         }
-        vec3 debugColor = !cacheEnabled ? vec3(0.0, 0.0, 50.0)
-                         : cacheHit ? vec3(0.0, 50.0, 0.0)
-                                    : vec3(50.0, 0.0, 0.0);
-        imageStore(imgHistCur, px, vec4(debugColor, 1.0));
-        imageStore(imgMomentsCur, px, vec4(0.0));
-        return;
     }
 
-    if ((pc.u.x & 1u) != 0u) { // bit 0 = temporal bypass; bits 1/2 independently gate surface/world caches.
+    if ((pc.u.x & 1u) != 0u && !cacheDebugMode) { // bypass normal temporal work only outside cache diagnostics.
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
@@ -425,8 +420,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
-    // Recover the first frame after disocclusion from the world-space radiance cache.
-    if ((isCheckerSkipped && wSum <= 0.05) || (!isCheckerSkipped && wSum <= 0.01)) {
+    // Re-seed young screen-space history continuously from persistent caches.
+    // A valid screen reprojection remains primary; cache data gently stabilizes it
+    // until temporal accumulation has enough observations to stand on its own.
+    if ((newLen < 16.0 || wSum < 0.5) &&
+        ((isCheckerSkipped && wSum <= 0.05) || (!isCheckerSkipped && wSum < 0.5))) {
         // Prefer an exact persistent surface match; use the lower-resolution probe
         // cache only as a conservative fallback when the surface table has no hit.
         vec4 surfaceHistory = vec4(0.0);
@@ -443,6 +441,20 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
+    // Persist temporal irradiance independently of à-trous settings and debug mode.
+    // One in sixteen pixels per frame writes, distributing updates spatially.
+    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && newLen >= 2.0 &&
+        all(equal(uvec2(px) & 3u, uvec2(pc.u.w & 3u, (pc.u.w >> 2u) & 3u)))) {
+        storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w);
+    }
+
+    if (cacheDebugMode) {
+        vec3 debugColor = !cacheDebugEnabled ? vec3(0.05, 0.15, 0.85)
+                         : cacheDebugHit ? vec3(0.0, 0.85, 0.05)
+                                         : vec3(0.85, 0.02, 0.02);
+        result = vec4(debugColor, 1.0);
+        outMoments = vec4(0.0);
+    }
     imageStore(imgHistCur, px, result);
 
     imageStore(imgMomentsCur, px, outMoments);
