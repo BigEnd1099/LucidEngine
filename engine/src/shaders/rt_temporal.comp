@@ -398,10 +398,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
-    // Persist diffuse irradiance and its temporal age for objects that leave the
-    // viewport. This is intentionally GI-only; specular reflection history remains
-    // view-dependent and is never written to this cache.
-
     imageStore(imgHistCur, px, result);
 
     imageStore(imgMomentsCur, px, outMoments);
