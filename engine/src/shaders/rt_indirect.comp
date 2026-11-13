@@ -39,12 +39,30 @@ void addDiagCounter(uint counterIdx, uint value) {
 
 vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
     vec3 n = normalize(worldNormal);
-    uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
-    uint baseIndex = cellKey % CACHE_CELL_COUNT;
-    WorldRadianceCell cell = worldRadianceCache.cells[baseIndex];
-    if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
-        dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
-        return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+    vec3 biasedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
+    vec3 gridPos = biasedPos / DEFAULT_CELL_SIZE - 0.5;
+    ivec3 baseCell = ivec3(floor(gridPos));
+    vec3 f = fract(gridPos);
+    ivec3 jitterOffset = ivec3(
+        rand1() < f.x ? 1 : 0,
+        rand1() < f.y ? 1 : 0,
+        rand1() < f.z ? 1 : 0
+    );
+    ivec3 coords[2] = ivec3[](
+        baseCell + jitterOffset,
+        ivec3(floor(biasedPos / DEFAULT_CELL_SIZE))
+    );
+    for (int c = 0; c < 2; ++c) {
+        uint cellKey = computeWorldCellKeyFromCoord(coords[c], n);
+        uint baseIndex = cellKey % CACHE_CELL_COUNT;
+        for (uint probe = 0u; probe < 4u; ++probe) {
+            WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
+            if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+                dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.65) {
+                float confidence = smoothstep(1.0, 16.0, cell.irradiance.a);
+                return vec4(cell.irradiance.rgb, confidence);
+            }
+        }
     }
     return vec4(0.0);
 }
@@ -236,7 +254,7 @@ for (int s = 0; s < samples; ++s) {
         int numActiveLights = min(ubo.numLights, 8);
         int singleLight = -1;
         float singleWeight = 1.0;
-        if (numActiveLights > 0) {
+        if (b >= 1 && numActiveLights > 0) {
             singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
             singleWeight = float(numActiveLights);
         }
@@ -252,11 +270,11 @@ for (int s = 0; s < samples; ++s) {
         vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
-        if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.5) {
+        if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.20) {
             diagValues[10]++;
             vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
             if (cachedRadiance.a > 0.0) {
-                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.50 * cachedRadiance.a);
+                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.75 * cachedRadiance.a);
                 diagValues[8]++;
             }
         }
@@ -317,7 +335,7 @@ for (int s = 0; s < samples; ++s) {
                         float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
                         vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL * singleWeight) * F_caustic;
-                        causticContrib = min(causticContrib, vec3(4.0));
+                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(16.0));
                         pathRadiance += throughput * causticContrib;
                         causticRadiance += throughput * causticContrib;
                         causticHitCount += 1.0;

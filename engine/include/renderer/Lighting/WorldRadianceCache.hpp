@@ -27,7 +27,7 @@ namespace engine::renderer {
     class WorldRadianceCache {
     public:
         static constexpr uint32_t CACHE_CELL_COUNT = 524288; // 2^19 cells = 16 MB buffer
-        static constexpr float DEFAULT_CELL_SIZE = 1.0f;     // 1 meter world cell grid
+        static constexpr float DEFAULT_CELL_SIZE = 0.65f;    // 0.65 meter world cell grid
 
         WorldRadianceCache() = default;
         ~WorldRadianceCache();

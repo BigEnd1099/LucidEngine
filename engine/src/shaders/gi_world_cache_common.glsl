@@ -11,7 +11,7 @@ struct WorldRadianceCell {
 };
 
 const uint CACHE_CELL_COUNT = 524288u;
-const float DEFAULT_CELL_SIZE = 1.0;
+const float DEFAULT_CELL_SIZE = 0.65;
 
 uint packNormalOctahedral(vec3 n) {
     n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);
@@ -37,6 +37,20 @@ vec3 unpackNormalOctahedral(uint packedN) {
         n.y = (1.0 - abs(oldXY.x)) * signNotZero.y;
     }
     return normalize(n);
+}
+
+uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal) {
+    vec3 n = normalize(normal);
+    uint normIdx = 0u;
+    if (abs(n.x) > abs(n.y) && abs(n.x) > abs(n.z)) {
+        normIdx = n.x > 0.0 ? 0u : 1u;
+    } else if (abs(n.y) > abs(n.z)) {
+        normIdx = n.y > 0.0 ? 2u : 3u;
+    } else {
+        normIdx = n.z > 0.0 ? 4u : 5u;
+    }
+    uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u;
+    return h ^ (h >> 16u);
 }
 
 uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
