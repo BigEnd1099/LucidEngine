@@ -498,23 +498,21 @@ void main() {
     rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
 
     barrier();
-    if (lane == 0u) {
-        uint histogram[16];
-        for (uint bin = 0u; bin < 16u; ++bin) histogram[bin] = 0u;
-        for (uint i = 0u; i < 64u; ++i) {
-            uint bin = rtLocalAgeBins[i];
-            if (bin < 16u) histogram[bin]++;
-        }
-        for (uint bin = 0u; bin < 16u; ++bin)
-            if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[16u + bin], histogram[bin]);
 
-        // Aggregate per-pixel counters in registers and publish once per
-        // non-empty metric for the whole 8x8 workgroup.
-        for (uint metric = 0u; metric < 8u; ++metric) {
-            uint total = 0u;
-            for (uint i = 0u; i < 64u; ++i)
-                total += rtPixelDiag[metric * 64u + i];
-            if (total != 0u) atomicAdd(rtDiag.counters[metric], total);
-        }
+    // Each lane reduces one temporal age bin; this avoids funneling all
+    // sixteen bins through a single workgroup leader.
+    if (lane < 16u) {
+        uint binCount = 0u;
+        for (uint i = 0u; i < 64u; ++i)
+            binCount += (rtLocalAgeBins[i] == lane) ? 1u : 0u;
+        if (binCount != 0u) atomicAdd(rtDiag.counters[16u + lane], binCount);
+    }
+
+    // Eight lanes independently reduce the per-pixel diagnostic counters.
+    if (lane < 8u) {
+        uint total = 0u;
+        for (uint i = 0u; i < 64u; ++i)
+            total += rtPixelDiag[lane * 64u + i];
+        if (total != 0u) atomicAdd(rtDiag.counters[lane], total);
     }
 }
