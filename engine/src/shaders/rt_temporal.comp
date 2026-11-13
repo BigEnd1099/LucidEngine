@@ -67,6 +67,7 @@ layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { Wo
 
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
     vec3 n = normalize(worldNormal);
+    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
     uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
     uint idx = cellKey % CACHE_CELL_COUNT;
     WorldRadianceCell cell = worldRadianceCache.cells[idx];
@@ -94,7 +95,7 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
     WorldRadianceCell adjacent = worldRadianceCache.cells[neighborIndex];
     if (adjacent.cellKey != neighborKey || adjacent.irradiance.a <= 0.0 ||
         currentFrame < adjacent.lastSeenFrame ||
-        (currentFrame - adjacent.lastSeenFrame) > 600u ||
+        (currentFrame - adjacent.lastSeenFrame) > 2048u ||
         dot(unpackNormalOctahedral(adjacent.packedNormal), n) <= 0.5)
         return vec4(0.0);
     return vec4(adjacent.irradiance.rgb, clamp(adjacent.irradiance.a / 8.0, 0.0, 1.0));
