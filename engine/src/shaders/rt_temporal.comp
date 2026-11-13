@@ -192,7 +192,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
         geom.w = 1.0;
         imageStore(imgGeomCur, px, geom);
-        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 && d < 1.0) {
+        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 && d < 1.0 &&
+            ((px.x & 3) == 2) && ((px.y & 3) == 2) &&
+            ((pc.u.y & 12u) != 0u)) {
             storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w, false);
         }
         ageBin = 0u;
@@ -379,7 +381,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 // across camera motion. Preserve its accumulated diffuse irradiance;
                 // only an isolated firefly is allowed to force the history downward.
                 if (!isolatedFirefly && wSum > 0.2) {
-                    clampMaxY = max(clampMaxY, histY);
+                    float allowedHistoryPeak = min(histY.x, m1Y.x + max(sigmaY.x * 6.0, 2.5));
+                    clampMaxY.x = max(clampMaxY.x, mix(clampMaxY.x, allowedHistoryPeak, 0.85));
                 }
                 // Preserve newly visible, spatially supported bright structures.
                 if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
@@ -434,31 +437,34 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
-    // Re-seed young screen-space history continuously from persistent caches.
-    // A valid screen reprojection remains primary; cache data gently stabilizes it
-    // until temporal accumulation has enough observations to stand on its own.
-    if (newLen < 16.0 || wSum < 0.5) {
-        // Prefer an exact persistent surface match; use the lower-resolution probe
-        // cache only as a conservative fallback when the surface table has no hit.
+    // Persistent caches are disocclusion recovery only. Valid per-pixel screen
+    // reprojection must never be blended with coarse 25 cm surface cells.
+    bool needsCacheReseed = (isCheckerSkipped && wSum <= 0.05) ||
+                            (!isCheckerSkipped && wSum <= 0.02);
+    if (needsCacheReseed) {
         vec4 surfaceHistory = vec4(0.0);
         bool restoredSurface = (pc.u.x & 2u) != 0u &&
-                              loadSurfaceHistory(P, N, pc.u.z, surfaceHistory);
+                               loadSurfaceHistory(P, N, pc.u.z, surfaceHistory);
         if (restoredSurface) {
-            float restoredAge = clamp(surfaceHistory.a, 1.0, effectiveMaxHist);
-            result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.70);
-            newLen = max(newLen, restoredAge);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.55);
+            newLen = clamp(surfaceHistory.a, 1.0, 4.0);
         } else if ((pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0) {
-                result.rgb = mix(result.rgb, cached.rgb, 0.45 * cached.a);
-                newLen = max(newLen, min(cached.a * 16.0, effectiveMaxHist));
+                result.rgb = mix(result.rgb, cached.rgb, 0.55 * cached.a);
+                // Probe-cache confidence is not temporal sample count. Keep the
+                // disoccluded pixel young so exact screen history can take over.
+                newLen = min(newLen, 4.0);
             }
         }
     }
 
-    // Persist every active pixel with valid geometry. Same-frame duplicate
-    // samples are rejected by the cache's surface/frame fast path.
-    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 && newLen >= 1.0) {
+    // Sparse, mature temporal samples only; the final Atrous pass owns the
+    // spatially filtered writeback for younger pixels.
+    bool surfaceHistoryDebug = (pc.u.y & 12u) != 0u;
+    bool surfaceHistoryTileCenter = ((px.x & 3) == 2) && ((px.y & 3) == 2);
+    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 &&
+        surfaceHistoryTileCenter && (newLen >= 6.0 || surfaceHistoryDebug)) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
 
