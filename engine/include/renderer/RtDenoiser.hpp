@@ -111,7 +111,7 @@ namespace engine::renderer {
         VkImageView reflectionOutputView() const { return m_imgRefl.view; }
         VkSampler   outputSampler() const { return m_sampler; }
         const GpuTimings& getGpuTimings() const { return m_gpuTimings; }
-        const std::array<uint32_t, 56>& getDiagnosticCounters() const { return m_lastDiagnostics; }
+        const std::array<uint32_t, 58>& getDiagnosticCounters() const { return m_lastDiagnostics; }
 
     private:
         struct Image {
@@ -178,6 +178,6 @@ namespace engine::renderer {
         bool m_timestampsSupported{false};
         bool m_hasTimestampResults{false};
         GpuTimings m_gpuTimings{};
-        std::array<uint32_t, 56> m_lastDiagnostics{};
+        std::array<uint32_t, 58> m_lastDiagnostics{};
     };
 }
