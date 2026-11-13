@@ -471,7 +471,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.70);
             newLen = max(newLen, restoredAge);
         } else {
-            vec4 cached = sampleWorldRadianceCache(P, N, 0xFFFFFFFFu);
+            vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0)
                 result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
         }
