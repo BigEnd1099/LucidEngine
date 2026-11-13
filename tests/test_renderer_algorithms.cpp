@@ -173,6 +173,18 @@ int main() {
     glm::vec3 unpackedNorm = WorldRadianceCache::unpackNormalOctahedral(packedNorm);
     CHECK(glm::dot(testNorm, unpackedNorm) > 0.999f);
 
+    // Lower-hemisphere folds must use both original octahedral components.
+    const glm::vec3 lowerHemisphereNormals[] = {
+        glm::normalize(glm::vec3(0.31f, -0.72f, -0.62f)),
+        glm::normalize(glm::vec3(-0.83f, 0.22f, -0.51f)),
+        glm::normalize(glm::vec3(0.04f, 0.91f, -0.41f))
+    };
+    for (const glm::vec3& normal : lowerHemisphereNormals) {
+        const uint32_t packed = WorldRadianceCache::packNormalOctahedral(normal);
+        const glm::vec3 decoded = WorldRadianceCache::unpackNormalOctahedral(packed);
+        CHECK(glm::dot(normal, decoded) > 0.999f);
+    }
+
     // Spatial hash stability & bound
     uint32_t cellHash1 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
     uint32_t cellHash2 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
