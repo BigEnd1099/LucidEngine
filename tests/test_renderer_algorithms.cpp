@@ -191,6 +191,18 @@ int main() {
     CHECK(cellHash1 == cellHash2);
     CHECK(cellHash1 < WorldRadianceCache::CACHE_CELL_COUNT);
 
+    // Normal-biased quantization must keep tiny depth-reconstruction jitter
+    // on either side of an axis-aligned plane in the same world-cache cell.
+    const glm::vec3 upNormal(0.0f, 1.0f, 0.0f);
+    const uint32_t floorBelow = WorldRadianceCache::hashWorldCell(glm::vec3(2.0f, -0.00001f, 3.0f), upNormal);
+    const uint32_t floorAbove = WorldRadianceCache::hashWorldCell(glm::vec3(2.0f,  0.00001f, 3.0f), upNormal);
+    CHECK(floorBelow == floorAbove);
+
+    const glm::vec3 rightNormal(1.0f, 0.0f, 0.0f);
+    const uint32_t wallBelow = WorldRadianceCache::hashWorldCell(glm::vec3(1.99999f, 2.0f, 3.0f), rightNormal);
+    const uint32_t wallAbove = WorldRadianceCache::hashWorldCell(glm::vec3(2.00001f, 2.0f, 3.0f), rightNormal);
+    CHECK(wallBelow == wallAbove);
+
     // GPU Frustum Culling Sphere Test
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);
     glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
