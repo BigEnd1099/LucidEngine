@@ -35,7 +35,10 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
         empty = entry.meta.x == 0u;
-        bool match = !empty &&
+        // storeSurfaceHistory claims the first empty slot in the same probe sequence.
+        // Slots are never deleted or cleared, so an empty slot terminates lookup safely.
+        if (empty) return false;
+        bool match =
                      entry.meta.x == lightingEpoch &&
                      all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
