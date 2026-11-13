@@ -23,20 +23,17 @@ uint surfaceHistoryHash(ivec3 cell) {
     return (h ^ (h >> 16u)) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 }
 
-// Writers use an odd/even sequence in meta.y. Readers never acquire the
-// writer lock; atomic sequence snapshots reject a slot while it is being updated.
+// Readers are deliberately lock-free. Same-surface writers never modify the
+// identity/epoch fields, so readers can keep matching a published key while
+// radianceAge is refreshed by another workgroup.
 bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
                                out vec4 history, out bool empty) {
     uint base = surfaceHistoryHash(cell);
     vec3 n = normalize(worldNormal);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        uint seq0 = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((seq0 & 1u) != 0u) continue;
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
-        uint seq1 = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if (seq0 != seq1 || (seq1 & 1u) != 0u) continue;
         empty = entry.meta.x == 0u;
         bool match = !empty && entry.meta.x == lightingEpoch &&
                      all(equal(entry.identity.xyz, cell)) &&
@@ -45,7 +42,6 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
             history = entry.radianceAge;
             return true;
         }
-        if (empty) return false;
     }
     return false;
 }
@@ -125,25 +121,34 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
                            dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
 
-        if (sameSurface && entry.meta.z == frameIndex) {
-            if (overwriteSameFrame) {
-                // The final Atrous pass is later in the same command stream;
-                // let its filtered radiance replace the temporal pre-denoise value.
+        if (sameSurface) {
+            if (entry.meta.z == frameIndex && !overwriteSameFrame) {
+                memoryBarrierBuffer();
+                atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
+                return;
+            }
+
+            if (entry.meta.z == frameIndex && overwriteSameFrame) {
+                // Final Atrous output replaces temporal radiance for this frame.
                 surfaceHistoryCache.cells[index].radianceAge =
                     vec4(max(irradiance, vec3(0.0)), max(entry.radianceAge.a, historyLength));
+            } else {
+                float oldAge = max(entry.radianceAge.a, 1.0);
+                float nextAge = min(oldAge + 1.0, 64.0);
+                float alpha = max(1.0 / nextAge, 0.025);
+                vec3 nextRadiance = mix(entry.radianceAge.rgb, max(irradiance, vec3(0.0)), alpha);
+                surfaceHistoryCache.cells[index].radianceAge =
+                    vec4(nextRadiance, max(historyLength, nextAge));
             }
+            // Existing key and lighting epoch remain stable for lock-free readers.
+            surfaceHistoryCache.cells[index].meta.z = frameIndex;
             memoryBarrierBuffer();
             atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
             return;
         }
-        if (empty || sameSurface || staleEpoch) {
-            float oldAge = sameSurface ? max(entry.radianceAge.a, 1.0) : 0.0;
-            float nextAge = min(oldAge + 1.0, 64.0);
-            float alpha = sameSurface ? max(1.0 / nextAge, 0.025) : 1.0;
-            vec3 nextRadiance = sameSurface
-                ? mix(entry.radianceAge.rgb, max(irradiance, vec3(0.0)), alpha)
-                : max(irradiance, vec3(0.0));
-            surfaceHistoryCache.cells[index].radianceAge = vec4(nextRadiance, max(historyLength, nextAge));
+        if (empty || staleEpoch) {
+            surfaceHistoryCache.cells[index].radianceAge =
+                vec4(max(irradiance, vec3(0.0)), max(historyLength, 1.0));
             surfaceHistoryCache.cells[index].identity = ivec4(cell, int(packedN));
             surfaceHistoryCache.cells[index].meta.x = lightingEpoch;
             surfaceHistoryCache.cells[index].meta.z = frameIndex;
