@@ -31,12 +31,10 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
     vec3 n = normalize(worldNormal);
     uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
     uint baseIndex = cellKey % CACHE_CELL_COUNT;
-    for (uint probe = 0u; probe < 2u; ++probe) {
-        WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-        if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
-            dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
-            return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
-        }
+    WorldRadianceCell cell = worldRadianceCache.cells[baseIndex];
+    if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+        dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
+        return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
     }
     return vec4(0.0);
 }
