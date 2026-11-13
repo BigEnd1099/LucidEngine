@@ -220,13 +220,47 @@ if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
 endif()
 
+# Copy compiled shaders to the executable directory and the actual source-tree
+# locations searched by utils::readFile(). CMAKE_CURRENT_BINARY_DIR already
+# contains the compiler outputs and is also covered by FileIO's build/ paths.
+# CMAKE_SOURCE_DIR is the engine project root in this repository layout; do not
+# append another /engine or it creates the invalid engine/engine/... destination.
+set(SPV_COPY_COMMANDS
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:engine>"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders"
+)
 foreach(SPV_FILE ${SPV_FILES})
-    add_custom_command(TARGET engine POST_BUILD
+    list(APPEND SPV_COPY_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${SPV_FILE}
-        $<TARGET_FILE_DIR:engine>
+        "${SPV_FILE}"
+        "$<TARGET_FILE_DIR:engine>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SPV_FILE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SPV_FILE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders"
     )
 endforeach()
+add_custom_target(CopyCompiledShaders ALL
+    ${SPV_COPY_COMMANDS}
+    DEPENDS ${SPV_FILES}
+    VERBATIM
+)
+add_dependencies(CopyCompiledShaders CompileShaders)
+add_dependencies(engine CopyCompiledShaders)
+
+# Keep a POST_BUILD copy as a final guarantee for the freshly linked executable.
+# The always-built dependency above also handles shader-only changes without relinking.
+add_custom_command(TARGET engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:engine>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${SPV_FILES}
+    "$<TARGET_FILE_DIR:engine>"
+    VERBATIM
+)
 
 add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

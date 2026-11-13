@@ -13,12 +13,12 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
-layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
-layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
+layout(set = 1, binding = 9, rgba16f) uniform writeonly image2D imgRefl;
+layout(set = 1, binding = 10, rgba16f) uniform readonly image2D imgReflHistCur;
 
 layout(push_constant) uniform PC {
     mat4 prevViewProj;
-    vec4 f;   // x = max history, y = samples, z = history valid, w = max roughness
+    vec4 f;   // x = spatial strength (0 = resolve-only copy), remaining fields are shared push-constant data
     uvec4 u;  // u.w: bit 14 = denoiseMirrors
 } pc;
 
@@ -47,10 +47,9 @@ void main() {
     float roughness = clamp(gNR.w, 0.0, 1.0);
 
     vec4 centerVal = imageLoad(imgReflHistCur, px);
-    if (centerVal.a <= 0.0) {
-        // Fallback to direct reflection if temporal history was bypass/invalid
-        vec4 curRefl = imageLoad(imgRefl, px);
-        centerVal = vec4(curRefl.rgb, 1.0);
+    if (pc.f.x <= 0.001 || centerVal.a <= 0.0) {
+        imageStore(imgRefl, px, vec4(centerVal.rgb, centerVal.a > 0.0 ? 1.0 : 0.0));
+        return;
     }
 
     float zC = rtLinearDepth(d);
@@ -97,7 +96,7 @@ void main() {
             if (dot(nC, nQ) < 0.90) continue; // Same planar mirror only!
 
             vec4 qVal = imageLoad(imgReflHistCur, qPx);
-            if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
+            if (qVal.a <= 0.0) continue;
 
             float qLum = lum(qVal.rgb);
             maxNeighborLum = max(maxNeighborLum, qLum);
@@ -152,7 +151,7 @@ void main() {
         if (nDot < 0.6) continue;
 
         vec4 qVal = imageLoad(imgReflHistCur, qPx);
-        if (qVal.a <= 0.0) qVal = imageLoad(imgRefl, qPx);
+        if (qVal.a <= 0.0) continue;
 
         float qRoughness = clamp(qGNR.w, 0.0, 1.0);
         float qLum = lum(qVal.rgb);

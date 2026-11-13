@@ -777,7 +777,10 @@ namespace engine::renderer {
                   ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
                   (params.giTraceFireflyClampEnabled ? 8u : 0u) |
                   (params.worldRadianceCacheEnabled ? 16u : 0u) |
-                  (params.giSurfaceHistoryCacheEnabled ? 32u : 0u);
+                  (params.giSurfaceHistoryCacheEnabled ? 32u : 0u) |
+                  (params.debugMode == RtDebugMode::RawIndirect ? 64u : 0u) |
+                  ((params.debugMode == RtDebugMode::RawSpecularCaustics ||
+                    params.debugMode == RtDebugMode::CausticHitDensity) ? 128u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
         // rt_indirect.comp reads the persistent surface cache's lighting epoch
         // from f.x as raw uint bits; restore the temporal pass' max-history value
@@ -953,8 +956,13 @@ namespace engine::renderer {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 16);
 
-            if (params.reflectionSpatialFilterEnabled && params.spatialStrength > 0.001f && m_reflSpatialPipeline) {
-                bindRefl(m_reflSpatialPipeline, reflPd);
+            if (m_reflSpatialPipeline) {
+                // Always run the resolve pass: when filtering is disabled it copies
+                // temporal history into imgRefl, which is the image sampled by PBR.
+                PushData spatialPd = reflPd;
+                spatialPd.f.x = (params.reflectionSpatialFilterEnabled && params.spatialStrength > 0.001f)
+                    ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
+                bindRefl(m_reflSpatialPipeline, spatialPd);
                 if (m_timestampsSupported && m_queryPool)
                     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 17);
                 sync();

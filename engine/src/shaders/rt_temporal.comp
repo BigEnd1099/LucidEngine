@@ -1,4 +1,7 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 
 #extension GL_EXT_ray_query : require
 
@@ -121,9 +124,15 @@ layout(push_constant) uniform PC {
 
 
 
-shared uint rtLocalCounters[48];
+void addDiagCounter(uint counterIdx, uint value) {
+    uint sgSum = subgroupAdd(value);
+    if (subgroupElect() && sgSum != 0u) {
+        atomicAdd(rtDiag.counters[counterIdx], sgSum);
+    }
+}
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint pixelDiag[8]) {
+    for (int i = 0; i < 8; ++i) pixelDiag[i] = 0u;
     histogramCounted = false;
     ageBin = 0u;
 
@@ -136,11 +145,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
 
 
-    atomicAdd(rtLocalCounters[0], 1u);
+    pixelDiag[0]++;
     vec4 geom = imageLoad(imgGeomCur, px);
 
     if (geom.z < 0.0) { // sky
-        atomicAdd(rtLocalCounters[2], 1u);
+        pixelDiag[2]++;
 
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
@@ -210,11 +219,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     vec2 motion = texelFetch(uMotion, fullMotionPx, 0).xy;
 
     vec4 pClip = pc.prevViewProj * vec4(P, 1.0);
+    vec2 cameraPrevUV = (pClip.w > 0.0001) ? ((pClip.xy / pClip.w) * 0.5 + 0.5) : curUV;
+    vec2 effectivePrevUV = (dot(motion, motion) >= 0.000000001) ? (curUV - motion) : cameraPrevUV;
+    float motionPixels = length((curUV - effectivePrevUV) * size);
     if (pc.f.z > 0.5) {
-        vec2 prevUV = curUV - motion;
-        if (dot(motion, motion) < 1e-9 && pClip.w > 1e-4) {
-            prevUV = (pClip.xy / pClip.w) * 0.5 + 0.5;
-        }
+        vec2 prevUV = effectivePrevUV;
 
         vec2 prevPx = prevUV * size - 0.5;
         ivec2 base = ivec2(floor(prevPx));
@@ -226,14 +235,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[3], 1u); continue; }
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { pixelDiag[3]++; continue; }
 
             vec4 g = imageLoad(imgGeomPrev, tp);
             if (g.z < 0.0) continue;
 
             // Disocclusion tests: slope-adjusted depth + surface normal
-            if (abs(g.z - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[4], 1u); continue; }
-            if (dot(rtOctDecode(g.xy), N) < 0.8) { atomicAdd(rtLocalCounters[5], 1u); continue; }
+            if (abs(g.z - pClip.w) > depthTol) { pixelDiag[4]++; continue; }
+            if (dot(rtOctDecode(g.xy), N) < 0.8) { pixelDiag[5]++; continue; }
 
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist        += w * imageLoad(imgHistPrev, tp);
@@ -259,16 +268,36 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     bool isCheckerSkipped = (raw.a < -0.5);
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[6], 1u);
+            pixelDiag[6]++;
             // Full temporal reuse from the alternating frame when this pixel was traced
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
+            vec3 checkerHistY = rgbToYCoCg(result.rgb);
+            vec3 checkerMinY = vec3(1e20);
+            vec3 checkerMaxY = vec3(-1e20);
+            float checkerCount = 0.0;
+            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+            for (int ci = 0; ci < 4; ++ci) {
+                ivec2 cp = px + checkerOffsets[ci];
+                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                vec4 cv = imageLoad(imgS, cp);
+                if (cv.a < 0.0) continue;
+                vec3 cy = rgbToYCoCg(cv.rgb);
+                checkerMinY = min(checkerMinY, cy);
+                checkerMaxY = max(checkerMaxY, cy);
+                checkerCount += 1.0;
+            }
+            if (checkerCount > 0.0) {
+                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
+                checkerHistY = clamp(checkerHistY, checkerMinY - margin, checkerMaxY + margin);
+                result.rgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+            }
             newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
-            atomicAdd(rtLocalCounters[7], 1u);
+            pixelDiag[7]++;
             // Disocclusion / invalid history: bilateral reconstruction from the 4 active neighbors in current frame
             vec4 neighborSum = vec4(0.0);
             float weightSum = 0.0;
@@ -303,7 +332,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     } else {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[1], 1u);
+            pixelDiag[1]++;
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
@@ -341,8 +370,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
                 // Variance floor: prevent zero-clipping of weak indirect light in dark areas
                 vec3 effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
-                vec3 clampMinY = m1Y - gamma * effectiveSigma;
-                vec3 clampMaxY = m1Y + gamma * effectiveSigma;
+                vec3 clampMinY = m1Y - effectiveSigma * 2.0;
+                vec3 clampMaxY = m1Y + effectiveSigma * 2.75;
                 clampMinY.x = max(0.0, clampMinY.x);
                 clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
@@ -375,14 +404,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 // A valid reprojection (wSum > 0.2) identifies the same surface
                 // across camera motion. Preserve its accumulated diffuse irradiance;
                 // only an isolated firefly is allowed to force the history downward.
-                if (!isolatedFirefly && wSum > 0.2) {
-                    // Do not exponentially decay accumulated history while the camera moves.
-                    // Protect mature history fully; retain a soft ceiling only for very young pixels.
-                    vec3 safeHistPeak = (histLen >= 4.0) ? histY : min(histY, m1Y + max(sigmaY * 6.0, vec3(8.0)));
-                    clampMaxY = max(clampMaxY, safeHistPeak);
+                if (!isolatedFirefly && wSum > 0.2 && (pc.u.x & 2u) != 0u) {
+                    vec4 cachedSurf = vec4(0.0);
+                    float cachedCov = 0.0;
+                    if (loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25) {
+                        vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
+                        clampMaxY.x = max(clampMaxY.x, min(histY.x, cachedY.x * 1.25 + sigmaY.x));
+                    }
                 }
                 // Preserve newly visible, spatially supported bright structures.
-                if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
+                if (!isolatedFirefly && motionPixels <= 0.1)
+                    clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
@@ -405,10 +437,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             // to prevent variance starvation, edge-stopping collapse, and noisy boiling on disocclusions.
             vec2 accumulatedMoments = mix(histMoments.xy, curSampleMoments, alpha);
             float temporalVar = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
-            float variance = (newLen < 4.0) ? mix(spatialVar, temporalVar, clamp((newLen - 1.0) / 3.0, 0.0, 1.0)) : temporalVar;
+            // Keep a spatial variance floor while the temporal history is still young.
+            // Surface-cache restoration must not starve SVGF of the variance signal
+            // needed by the a-trous edge-stopping weights.
+            float variance = (newLen < 8.0) ? max(spatialVar, temporalVar) : temporalVar;
+            variance = max(variance, 0.005);
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
-            atomicAdd(rtLocalCounters[2], 1u);
+            pixelDiag[2]++;
             newLen = 1.0;
             result = raw;
 
@@ -446,7 +482,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         if (restoredSurface && surfaceHistory.a > newLen) {
             float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
-            newLen = clamp(max(newLen, surfaceHistory.a), 4.0, effectiveMaxHist);
+            newLen = clamp(max(newLen, min(surfaceHistory.a, 4.0)), 1.0, effectiveMaxHist);
+            float restoredVariance = max(outMoments.z, 0.005);
+            outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
         } else if (isDisoccluded && (pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0) {
@@ -484,19 +522,30 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 }
 
 void main() {
-    uint lane = gl_LocalInvocationIndex;
-    if (lane < 48u) rtLocalCounters[lane] = 0u;
-    barrier();
-
     uint ageBin = 0u;
     bool histogramCounted = false;
+    uint pixelDiag[8];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted);
-    if (histogramCounted) atomicAdd(rtLocalCounters[16u + ageBin], 1u);
+    processPixel(px, ageBin, histogramCounted, pixelDiag);
 
-    barrier();
-    if (lane < 48u) {
-        uint count = rtLocalCounters[lane];
-        if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
+    uint diagMask = 0u;
+    for (uint metric = 0u; metric < 8u; ++metric) diagMask |= pixelDiag[metric];
+    uvec4 diagBallot = subgroupBallot(diagMask != 0u);
+    if (subgroupBallotBitCount(diagBallot) != 0u) {
+        for (uint metric = 0u; metric < 8u; ++metric) {
+            addDiagCounter(metric, pixelDiag[metric]);
+        }
+    }
+
+    // Sky/out-of-bounds-only subgroups have no age-bin work to reduce.
+    uvec4 histogramBallot = subgroupBallot(histogramCounted);
+    if (subgroupBallotBitCount(histogramBallot) != 0u) {
+        for (uint bin = 0u; bin < 16u; ++bin) {
+            uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
+            uint binCount = subgroupBallotBitCount(ballot);
+            if (subgroupElect() && binCount != 0u) {
+                atomicAdd(rtDiag.counters[16u + bin], binCount);
+            }
+        }
     }
 }

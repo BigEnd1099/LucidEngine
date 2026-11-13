@@ -164,7 +164,7 @@ namespace engine::renderer {
             double drawItems{0.0};
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
-            std::array<double, 20> effectStages{};
+            std::array<double, 21> effectStages{};
             std::array<double, 48> rtDiagnostics{};
             std::unordered_map<std::string, double> cpuScopes;
         };
@@ -206,7 +206,8 @@ namespace engine::renderer {
                 "rtReflectionTraceMs", "rtReflectionTemporalMs", "rtComputeTotalMs",
                 "rtGiTraceExecMs", "rtGiTraceSyncMs", "rtGiTemporalExecMs", "rtGiTemporalSyncMs",
                 "rtGiAtrous0ExecMs", "rtGiAtrous0SyncMs", "rtReflectionStartSyncMs", "rtReflectionTraceExecMs",
-                "rtReflectionTraceSyncMs", "rtReflectionTemporalExecMs", "rtReflectionTemporalSyncMs"
+                "rtReflectionTraceSyncMs", "rtReflectionTemporalExecMs", "rtReflectionTemporalSyncMs",
+                "gpuWorldRadianceCacheUpdateMs"
             };
             for (size_t i = 0; i < sample.effectStages.size(); ++i)
                 sample.effectStages[i] = metrics.value(effectMetricNames[i], 0.0);
@@ -274,7 +275,7 @@ namespace engine::renderer {
         for (size_t i = 0; i < avgGpuStages.size(); ++i) {
             avgGpuStages[i] = average([i](const ProfilerWindowSample& s) { return s.gpuStages[i]; });
         }
-        std::array<double, 20> avgEffectStages{};
+        std::array<double, 21> avgEffectStages{};
         for (size_t i = 0; i < avgEffectStages.size(); ++i) {
             avgEffectStages[i] = average([i](const ProfilerWindowSample& s) { return s.effectStages[i]; });
         }
@@ -381,7 +382,8 @@ namespace engine::renderer {
                     "RT GI temporal dispatch", "RT GI temporal dependency gap",
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
                     "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
-                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
+                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap",
+                    "World radiance cache compute dispatch"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i)
                     report << effectStageLabels[i] << ": " << avgEffectStages[i] << " ms\n";
@@ -589,7 +591,8 @@ namespace engine::renderer {
                     "RT GI temporal dispatch", "RT GI temporal dependency gap",
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
                     "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
-                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap"
+                    "RT reflections temporal dispatch", "RT reflections temporal dependency gap",
+                    "World radiance cache compute dispatch"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i) {
                     ImGui::TableNextRow();

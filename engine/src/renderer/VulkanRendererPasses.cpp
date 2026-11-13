@@ -73,9 +73,9 @@ namespace engine::renderer {
         // The frame fence guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
-            uint64_t timestamps[11]{};
+            uint64_t timestamps[13]{};
             const VkResult queryResult = vkGetQueryPoolResults(
-                m_context->getDevice(), m_timestampQueryPool, 0, 11,
+                m_context->getDevice(), m_timestampQueryPool, 0, 13,
                 sizeof(timestamps), timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT);
             if (queryResult == VK_SUCCESS) {
@@ -98,6 +98,7 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
                 core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", m_screenSpaceAoGiPassActive ? elapsedMs(4, 9) : 0.0);
                 core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", m_screenSpaceAoGiPassActive ? elapsedMs(9, 10) : 0.0);
+                core::Profiler::get().recordMetric("gpuWorldRadianceCacheUpdateMs", elapsedMs(11, 12));
                 core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
                 core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
                 core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
@@ -128,7 +129,7 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (m_timestampQueryPool) {
-            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 11);
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 13);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
         }
 
@@ -1291,9 +1292,10 @@ namespace engine::renderer {
         // PASS 2C: RT INDIRECT (diffuse GI + AO): trace -> temporal accumulation -> a-trous
         // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
         // =========================================================================
+        bool worldCacheUpdateRecorded = false;
+        const bool tlasReady = m_sceneUboMappedPtr &&
+            static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
         {
-            const bool tlasReady = m_sceneUboMappedPtr &&
-                static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
 
             if (m_worldRadianceCache.isInitialized()) {
                 // Clear once on each toggle transition so OFF/ON never revives stale probes.
@@ -1312,19 +1314,26 @@ namespace engine::renderer {
                         m_worldRadianceCache.clear(m_commandBuffer);
 
                     const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
-                    m_worldRadianceCache.dispatchUpdate(
+                    worldCacheUpdateRecorded = m_worldRadianceCache.dispatchUpdate(
                         m_commandBuffer,
                         m_descriptorSet,
                         m_accelerationStructure.getTLAS(),
                         m_frameCounter,
                         glm::vec3(sceneUbo->cameraPos),
                         glm::vec3(sceneUbo->sunDirection),
-                        sceneUbo->sunColor
+                        sceneUbo->sunColor,
+                        m_timestampQueryPool
                     );
                 }
             }
+        if (m_timestampQueryPool && !worldCacheUpdateRecorded) {
+            // Keep the query pair valid when the cache is disabled or no update
+            // dispatch can be recorded; report zero rather than a stale frame.
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 11);
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 12);
+        }
 
-            const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
+        const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
                 m_rtGraphicsPipeline != VK_NULL_HANDLE &&
                 m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&
                 tlasReady && m_descriptorSet != VK_NULL_HANDLE &&

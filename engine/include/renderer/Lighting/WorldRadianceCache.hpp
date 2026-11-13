@@ -35,13 +35,16 @@ namespace engine::renderer {
         void init(VulkanContext* context, VkDescriptorPool descriptorPool, VkDescriptorSetLayout sceneSetLayout = VK_NULL_HANDLE);
         void cleanup();
 
-        void dispatchUpdate(VkCommandBuffer cmd,
+        // Returns true when the update dispatch was recorded. Optional timestamp
+        // queries 11/12 bracket only the compute dispatch, excluding cache clears/barriers.
+        bool dispatchUpdate(VkCommandBuffer cmd,
                             VkDescriptorSet sceneSet,
                             VkAccelerationStructureKHR tlas,
                             uint32_t frameCounter,
                             const glm::vec3& cameraPos,
                             const glm::vec3& sunDirection,
-                            const glm::vec4& sunColor);
+                            const glm::vec4& sunColor,
+                            VkQueryPool timingQueryPool = VK_NULL_HANDLE);
 
         void clear(VkCommandBuffer cmd);
 

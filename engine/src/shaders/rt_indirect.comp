@@ -1,4 +1,7 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_EXT_ray_query : require
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_scalar_block_layout : require
@@ -25,18 +28,23 @@ layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
-shared uint rtWorldCacheDiag[2];
+void addDiagCounter(uint counterIdx, uint value) {
+    // Every active invocation in the subgroup must execute subgroupAdd.
+    // Zero-valued lanes participate; only the elected lane performs the SSBO atomic.
+    uint sgSum = subgroupAdd(value);
+    if (subgroupElect() && sgSum != 0u) {
+        atomicAdd(rtDiag.counters[counterIdx], sgSum);
+    }
+}
 
 vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
     vec3 n = normalize(worldNormal);
     uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
     uint baseIndex = cellKey % CACHE_CELL_COUNT;
-    for (uint probe = 0u; probe < 2u; ++probe) {
-        WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-        if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
-            dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
-            return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
-        }
+    WorldRadianceCell cell = worldRadianceCache.cells[baseIndex];
+    if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+        dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
+        return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
     }
     return vec4(0.0);
 }
@@ -85,9 +93,12 @@ float smithG1GGXGI(float nDotV, float alpha) {
     return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
-void processPixel() {
+void processPixel(out uint diagValues[12], out bool diagnosticsValid) {
+diagnosticsValid = false;
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
+const bool debugRawGi = (pc.u.z & 64u) != 0u;
+const bool debugCaustics = (pc.u.z & 128u) != 0u;
 if (any(greaterThanEqual(px, isize))) return;
 vec2 size = vec2(isize);
 
@@ -99,8 +110,8 @@ float d = texelFetch(uDepth, fullPx, 0).r;
 if (d >= 1.0) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
-    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -137,8 +148,8 @@ if (dot(N, toCam) < 0.0) N = -N;
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -155,11 +166,13 @@ bool checkerSkip = useCheckerboard && (((px.x + px.y + int(frame)) & 1) != 0);
 if (checkerSkip) {
     // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
-    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
+for (int i = 0; i < 12; ++i) diagValues[i] = 0u;
+diagnosticsValid = true;
 int samples = baseSamples;
 
 rngInit(uvec2(px), frame);
@@ -223,7 +236,7 @@ for (int s = 0; s < samples; ++s) {
         int numActiveLights = min(ubo.numLights, 8);
         int singleLight = -1;
         float singleWeight = 1.0;
-        if (b >= 1 && numActiveLights > 0) {
+        if (numActiveLights > 0) {
             singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
             singleWeight = float(numActiveLights);
         }
@@ -240,11 +253,11 @@ for (int s = 0; s < samples; ++s) {
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
         if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.5) {
-            atomicAdd(rtWorldCacheDiag[1], 1u);
+            diagValues[10]++;
             vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
             if (cachedRadiance.a > 0.0) {
                 pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.50 * cachedRadiance.a);
-                atomicAdd(rtWorldCacheDiag[0], 1u);
+                diagValues[8]++;
             }
         }
 
@@ -256,12 +269,14 @@ for (int s = 0; s < samples; ++s) {
         // Specular caustic reflection: when ray hits a reflective surface (mirror or low roughness metal),
         // analytically evaluate the reflection of active lights (Spot & Point) bouncing off the mirror onto this path
         bool isMirrorSurface = hitReflects && (hitMetallic > 0.4 || hitRoughness < 0.12);
-        if (isMirrorSurface) {
+        // Specular caustics are evaluated only at the first hit and only on
+        // genuinely smooth reflective surfaces; later bounces skip this extra light loop.
+        if (b == 0 && isMirrorSurface && hitRoughness < 0.15) {
             diagMirrorHits++;
             vec3 hitN = normalize(hitNormal);
             vec3 reflRay = reflect(dir, hitN);
 
-            for (int li = 0; li < numActiveLights; ++li) {
+            for (int li = (singleLight >= 0 ? singleLight : 0); li < (singleLight >= 0 ? singleLight + 1 : numActiveLights); ++li) {
                 diagLightTests++;
                 float intensity = max(ubo.lightsCol[li].w, 0.0);
                 if (intensity <= 0.001) continue;
@@ -301,7 +316,8 @@ for (int s = 0; s < samples; ++s) {
                         float attenuation = (window * window) / (totalDist * totalDist + 1.0);
                         float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
-                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
+                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL * singleWeight) * F_caustic;
+                        causticContrib = min(causticContrib, vec3(4.0));
                         pathRadiance += throughput * causticContrib;
                         causticRadiance += throughput * causticContrib;
                         causticHitCount += 1.0;
@@ -379,28 +395,33 @@ gi = sanitizeHDR(gi * invSamples);
 
 float vis = 1.0 - occ * invSamples;
 imageStore(imgS, px, vec4(gi, vis));
-imageStore(imgRawGi, px, vec4(gi, vis));
-imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
-if (diagSurfaceHits > 0u) atomicAdd(rtDiag.counters[48], diagSurfaceHits);
-if (diagMirrorHits > 0u) atomicAdd(rtDiag.counters[49], diagMirrorHits);
-if (diagLightTests > 0u) atomicAdd(rtDiag.counters[50], diagLightTests);
-if (diagConeHits > 0u) atomicAdd(rtDiag.counters[51], diagConeHits);
-if (diagVisibleHits > 0u) atomicAdd(rtDiag.counters[52], diagVisibleHits);
-if (diagCausticContributions > 0u) atomicAdd(rtDiag.counters[53], diagCausticContributions);
-atomicAdd(rtDiag.counters[54], uint(samples));
-if (diagPathBounces > 0u) atomicAdd(rtDiag.counters[55], diagPathBounces);
+if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
+if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
+diagValues[0] = diagSurfaceHits;
+diagValues[1] = diagMirrorHits;
+diagValues[2] = diagLightTests;
+diagValues[3] = diagConeHits;
+diagValues[4] = diagVisibleHits;
+diagValues[5] = diagCausticContributions;
+diagValues[6] = uint(samples);
+diagValues[7] = diagPathBounces;
 }
 
 void main() {
-    uint lane = gl_LocalInvocationIndex;
-    if (lane < 2u) rtWorldCacheDiag[lane] = 0u;
-    barrier();
-    processPixel();
-    barrier();
-    if (lane == 0u) {
-        uint cacheHits = rtWorldCacheDiag[0];
-        uint cacheQueries = rtWorldCacheDiag[1];
-        if (cacheHits != 0u) atomicAdd(rtDiag.counters[56], cacheHits);
-        if (cacheQueries != 0u) atomicAdd(rtDiag.counters[58], cacheQueries);
+    uint diagValues[12];
+    bool diagnosticsValid = false;
+    processPixel(diagValues, diagnosticsValid);
+
+    // Skip the diagnostic reductions entirely for subgroups with no hit/query
+    // counters (e.g. sky-only tiles). The ballot result is subgroup-uniform.
+    uint diagMask = 0u;
+    if (diagnosticsValid) {
+        for (uint metric = 0u; metric < 12u; ++metric) diagMask |= diagValues[metric];
+    }
+    uvec4 diagBallot = subgroupBallot(diagMask != 0u);
+    if (subgroupBallotBitCount(diagBallot) != 0u) {
+        for (uint metric = 0u; metric < 12u; ++metric) {
+            addDiagCounter(48u + metric, diagnosticsValid ? diagValues[metric] : 0u);
+        }
     }
 }
