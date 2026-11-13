@@ -65,21 +65,33 @@ layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: re
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
+bool trySampleWorldRadianceCache(uint cellKey, vec3 n, uint currentFrame, out vec4 result) {
+    uint baseIndex = cellKey % CACHE_CELL_COUNT;
+    for (uint probe = 0u; probe < 4u; ++probe) {
+        uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
+        WorldRadianceCell cell = worldRadianceCache.cells[idx];
+        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
+            continue;
+        if (currentFrame < cell.lastSeenFrame ||
+            (currentFrame - cell.lastSeenFrame) > 2048u)
+            continue;
+        if (dot(unpackNormalOctahedral(cell.packedNormal), n) <= 0.5)
+            continue;
+        result = vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+        return true;
+    }
+    return false;
+}
+
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
     vec3 n = normalize(worldNormal);
-    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
     uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
-    uint idx = cellKey % CACHE_CELL_COUNT;
-    WorldRadianceCell cell = worldRadianceCache.cells[idx];
-    bool valid = cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
-        currentFrame >= cell.lastSeenFrame &&
-        (currentFrame - cell.lastSeenFrame) <= 2048u &&
-        dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5;
-    if (valid)
-        return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+    vec4 cached = vec4(0.0);
+    if (trySampleWorldRadianceCache(cellKey, n, currentFrame, cached))
+        return cached;
 
-    // Retry the adjacent voxel closest to the snapped point. This catches tiny
-    // hit-position/G-buffer reconstruction differences at cell boundaries.
+    // Retry the adjacent voxel closest to the normal-biased point.
+    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
     vec3 gridPos = snappedPos / DEFAULT_CELL_SIZE;
     ivec3 baseCell = ivec3(floor(gridPos));
     vec3 fraction = fract(gridPos);
@@ -91,14 +103,9 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
     neighbor[axis] += (fraction[axis] < 0.5) ? -1 : 1;
     vec3 neighborCenter = (vec3(neighbor) + vec3(0.5)) * DEFAULT_CELL_SIZE;
     uint neighborKey = computeWorldCellKey(neighborCenter, n, DEFAULT_CELL_SIZE);
-    uint neighborIndex = neighborKey % CACHE_CELL_COUNT;
-    WorldRadianceCell adjacent = worldRadianceCache.cells[neighborIndex];
-    if (adjacent.cellKey != neighborKey || adjacent.irradiance.a <= 0.0 ||
-        currentFrame < adjacent.lastSeenFrame ||
-        (currentFrame - adjacent.lastSeenFrame) > 2048u ||
-        dot(unpackNormalOctahedral(adjacent.packedNormal), n) <= 0.5)
-        return vec4(0.0);
-    return vec4(adjacent.irradiance.rgb, clamp(adjacent.irradiance.a / 8.0, 0.0, 1.0));
+    if (trySampleWorldRadianceCache(neighborKey, n, currentFrame, cached))
+        return cached;
+    return vec4(0.0);
 }
 
 
