@@ -51,23 +51,29 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
 }
 
 bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
-    vec3 gridPos = worldPos / SURFACE_HISTORY_CELL_SIZE;
-    ivec3 primaryCell = ivec3(floor(gridPos));
-    bool empty = false;
-    if (tryLoadSurfaceHistoryCell(primaryCell, worldNormal, lightingEpoch, history, empty))
-        return true;
+    vec3 n = normalize(worldNormal);
+    vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
+    vec3 candidates[2] = vec3[](
+        biasedPos,
+        worldPos - n * (SURFACE_HISTORY_CELL_SIZE * 0.15)
+    );
 
-    // A tiny position/normal quantization difference can put the same surface
-    // on opposite sides of a 25 cm cell boundary. Probe the nearest adjacent cell.
-    vec3 fraction = fract(gridPos);
-    vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
-    int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
-               ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
-    ivec3 neighborOffset = ivec3(0);
-    neighborOffset[axis] = (fraction[axis] < 0.5) ? -1 : 1;
-    if (edgeDistance[axis] <= 0.10) {
-        if (tryLoadSurfaceHistoryCell(primaryCell + neighborOffset, worldNormal,
-                                       lightingEpoch, history, empty))
+    for (int candidate = 0; candidate < 2; ++candidate) {
+        vec3 gridPos = candidates[candidate] / SURFACE_HISTORY_CELL_SIZE;
+        ivec3 baseCell = ivec3(floor(gridPos));
+        bool empty = false;
+        if (tryLoadSurfaceHistoryCell(baseCell, n, lightingEpoch, history, empty))
+            return true;
+
+        // Also probe the closest adjacent cell. This covers residual position
+        // reconstruction error on sloped surfaces and near cell boundaries.
+        vec3 fraction = fract(gridPos);
+        vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
+        int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
+                   ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
+        ivec3 neighborOffset = ivec3(0);
+        neighborOffset[axis] = (fraction[axis] < 0.5) ? -1 : 1;
+        if (tryLoadSurfaceHistoryCell(baseCell + neighborOffset, n, lightingEpoch, history, empty))
             return true;
     }
     return false;
@@ -75,39 +81,30 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
 
 void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
                          float historyLength, uint lightingEpoch, uint frameIndex) {
-    ivec3 cell = ivec3(floor(worldPos / SURFACE_HISTORY_CELL_SIZE));
-    uint packedN = packNormalOctahedral(normalize(worldNormal));
+    vec3 n = normalize(worldNormal);
+    vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
+    ivec3 cell = ivec3(floor(biasedPos / SURFACE_HISTORY_CELL_SIZE));
+    uint packedN = packNormalOctahedral(n);
     uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        // Avoid contending on cells already updated by another pixel this frame.
-        SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
-        if (existing.meta.x == lightingEpoch &&
-            all(equal(existing.identity.xyz, cell)) &&
-            dot(unpackNormalOctahedral(uint(existing.identity.w)), normalize(worldNormal)) > 0.75 &&
-            existing.meta.z == frameIndex)
+
+        // A single non-spinning slot claim prevents torn identity/radiance writes.
+        // If another invocation owns this slot, skip this update; the next frame
+        // retries it. Never redirect a contended write into a duplicate hash slot.
+        uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if ((seq & 1u) != 0u) return;
+        if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             return;
-        uint seq = 0u;
-        bool acquired = false;
-        // Retry this slot while another writer is publishing it. Moving to the
-        // next probe on contention could create duplicate entries for one surface.
-        for (uint spin = 0u; spin < 32u; ++spin) {
-            seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-            if ((seq & 1u) != 0u) continue;
-            if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) == seq) {
-                acquired = true;
-                break;
-            }
-        }
-        if (!acquired) return;
+
         memoryBarrierBuffer();
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
         bool sameSurface = !empty && entry.meta.x == lightingEpoch &&
                            all(equal(entry.identity.xyz, cell)) &&
-                           dot(unpackNormalOctahedral(uint(entry.identity.w)), normalize(worldNormal)) > 0.75;
+                           dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.75;
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
-        // One representative pixel per quantized surface cell is enough per frame.
+
         if (sameSurface && entry.meta.z == frameIndex) {
             memoryBarrierBuffer();
             atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
@@ -128,6 +125,9 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
             atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
             return;
         }
+
+        // The slot is occupied by a different key; release and probe the next slot.
+        memoryBarrierBuffer();
         atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
     }
 }
