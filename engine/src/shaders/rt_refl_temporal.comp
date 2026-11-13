@@ -166,14 +166,34 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
     bool mirrorTemporalOnly = roughness < 0.08 && !denoiseMirrors;
     float motionPixels = length(motion * size);
-    float effectiveMaxHistory = mirrorTemporalOnly ? maxHistory :
-        mix(maxHistory, max(4.0, maxHistory * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
+    float effectiveMaxHistory = mirrorTemporalOnly
+        ? mix(8.0, 1.0, clamp(motionPixels * 0.5, 0.0, 1.0))
+        : mix(maxHistory, 2.0, clamp(motionPixels * 0.25, 0.0, 1.0));
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             pixelDiag[14] += 1u;
             // Re-use full history from previous frame when this pixel was active
-            result = vec4((hist / wSum).rgb, 1.0);
+            vec3 checkerHistY = rgbToYCoCg((hist / wSum).rgb);
+            vec3 checkerMinY = vec3(1e20);
+            vec3 checkerMaxY = vec3(-1e20);
+            float checkerCount = 0.0;
+            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+            for (int ci = 0; ci < 4; ++ci) {
+                ivec2 cp = px + checkerOffsets[ci];
+                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                vec4 cv = imageLoad(imgRefl, cp);
+                if (cv.a < 0.5) continue;
+                vec3 cy = rgbToYCoCg(cv.rgb);
+                checkerMinY = min(checkerMinY, cy);
+                checkerMaxY = max(checkerMaxY, cy);
+                checkerCount += 1.0;
+            }
+            if (checkerCount > 0.0) {
+                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
+                checkerHistY = clamp(checkerHistY, checkerMinY - margin, checkerMaxY + margin);
+            }
+            result = vec4(max(vec3(0.0), yCoCgToRgb(checkerHistY)), 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
         } else {
             pixelDiag[15] += 1u;
@@ -214,7 +234,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 
             bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
 
-            if (mirrorTemporalOnly) {
+            if (mirrorTemporalOnly && motionPixels < 0.05) {
                 // Mirror surfaces (roughness < 0.08) with mirror denoiser off:
                 // Primary rays are deterministic, so there is ZERO directional Monte Carlo noise.
                 // Reproject and temporally accumulate without neighborhood variance clamping
@@ -247,12 +267,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     m1Y /= count;
                     m2Y /= count;
                     vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
-                    float gamma = 1.5 + 1.5 * clamp(hist.a / 16.0, 0.0, 1.0);
-
-                    // Variance floor: prevent zero-clipping of weak reflections in dark areas
-                    vec3 effectiveSigma = max(sigmaY, vec3(0.06, 0.03, 0.03));
-                    vec3 clampMinY = m1Y - gamma * effectiveSigma;
-                    vec3 clampMaxY = m1Y + gamma * effectiveSigma;
+                    float sigmaScale = mix(2.0, 0.85, clamp(motionPixels * 0.2, 0.0, 1.0));
+                    vec3 clampMinY = m1Y - sigmaY * sigmaScale;
+                    vec3 clampMaxY = m1Y + sigmaY * sigmaScale;
                     clampMinY.x = max(0.0, clampMinY.x);
                     clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
@@ -282,7 +299,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     bool isolatedFirefly = count >= 4.0 &&
                         brightNeighborCount <= floor(count * 0.125);
                     // Expand the upper bound for bright features supported by neighboring samples.
-                    if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
+                    if (!isolatedFirefly && motionPixels <= 0.1)
+                        clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                     if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
