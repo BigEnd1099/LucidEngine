@@ -46,26 +46,44 @@ bool trySampleWorldRadianceCache(uint cellKey, vec3 n, uint currentFrame, out ve
 
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
     vec3 n = normalize(worldNormal);
-    uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
-    vec4 cached = vec4(0.0);
-    if (trySampleWorldRadianceCache(cellKey, n, currentFrame, cached))
-        return cached;
+    // Interpolate the eight neighboring voxel centers. Probe rays are sparse,
+    // so an exact-key lookup plus a single boundary retry misses most useful
+    // cached radiance even when a nearby cell on the same surface is populated.
+    vec3 biasedGrid = (worldPos + n * (DEFAULT_CELL_SIZE * 0.25)) /
+                      DEFAULT_CELL_SIZE - 0.5;
+    ivec3 baseCell = ivec3(floor(biasedGrid));
+    vec3 f = fract(biasedGrid);
+    vec3 radianceSum = vec3(0.0);
+    float weightSum = 0.0;
+    float confidenceSum = 0.0;
 
-    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
-    vec3 gridPos = snappedPos / DEFAULT_CELL_SIZE;
-    ivec3 baseCell = ivec3(floor(gridPos));
-    vec3 fraction = fract(gridPos);
-    vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
-    int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
-               ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
-    if (edgeDistance[axis] > 0.10) return vec4(0.0);
-    ivec3 neighbor = baseCell;
-    neighbor[axis] += (fraction[axis] < 0.5) ? -1 : 1;
-    vec3 neighborCenter = (vec3(neighbor) + vec3(0.5)) * DEFAULT_CELL_SIZE;
-    uint neighborKey = computeWorldCellKey(neighborCenter, n, DEFAULT_CELL_SIZE);
-    if (trySampleWorldRadianceCache(neighborKey, n, currentFrame, cached))
-        return cached;
-    return vec4(0.0);
+    for (int z = 0; z <= 1; ++z) {
+        float wz = (z == 0) ? (1.0 - f.z) : f.z;
+        for (int y = 0; y <= 1; ++y) {
+            float wy = (y == 0) ? (1.0 - f.y) : f.y;
+            for (int x = 0; x <= 1; ++x) {
+                float wx = (x == 0) ? (1.0 - f.x) : f.x;
+                float w = wx * wy * wz;
+                if (w <= 0.0001) continue;
+                ivec3 cell = baseCell + ivec3(x, y, z);
+                vec3 center = (vec3(cell) + vec3(0.5)) * DEFAULT_CELL_SIZE;
+                // Cancel the normal bias inside computeWorldCellKey so this
+                // center resolves to the intended integer voxel coordinate.
+                uint key = computeWorldCellKey(center - n * (DEFAULT_CELL_SIZE * 0.25),
+                                               n, DEFAULT_CELL_SIZE);
+                vec4 cached = vec4(0.0);
+                if (trySampleWorldRadianceCache(key, n, currentFrame, cached)) {
+                    radianceSum += cached.rgb * w;
+                    confidenceSum += cached.a * w;
+                    weightSum += w;
+                }
+            }
+        }
+    }
+    if (weightSum <= 0.001) return vec4(0.0);
+    float spatialCoverage = clamp(weightSum * 2.0, 0.0, 1.0);
+    return vec4(radianceSum / weightSum,
+                clamp(confidenceSum / weightSum, 0.0, 1.0) * spatialCoverage);
 }
 
 
@@ -268,6 +286,7 @@ for (int s = 0; s < samples; ++s) {
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         if ((pc.u.z & 16u) != 0u &&
             max(max(hitDiffuseAlbedo.r, hitDiffuseAlbedo.g), hitDiffuseAlbedo.b) > 0.01) {
+            atomicAdd(rtDiag.counters[58], 1u);
             vec4 cachedRadiance = sampleWorldRadianceCache(hitPosition, hitNormal, pc.u.y);
             if (cachedRadiance.a > 0.0) {
                 float cacheBlend = 0.35 * clamp(cachedRadiance.a, 0.0, 1.0);
@@ -413,6 +432,7 @@ if (doGI && (pc.u.z & 32u) != 0u) {
     vec4 surfaceHistory = vec4(0.0);
     float surfaceCoverage = 0.0;
     uint lightingEpoch = floatBitsToUint(pc.f.x);
+    atomicAdd(rtDiag.counters[59], 1u);
     if (loadSurfaceHistory(P, N, lightingEpoch, frame, surfaceHistory, surfaceCoverage)) {
         float historyConfidence = clamp(surfaceHistory.a / 16.0, 0.0, 1.0);
         float surfaceBlend = 0.25 * historyConfidence * surfaceCoverage;
