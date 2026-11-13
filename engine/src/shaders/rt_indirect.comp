@@ -29,7 +29,7 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
     uint idx = hashWorldCell(worldPos, worldNormal, 1.0);
     WorldRadianceCell cell = worldRadianceCache.cells[idx];
     if (cell.cellKey != idx || cell.irradiance.a <= 0.0) return vec4(0.0);
-    if (currentFrame < cell.lastSeenFrame || (currentFrame - cell.lastSeenFrame) > 240u) return vec4(0.0);
+    if (currentFrame < cell.lastSeenFrame || (currentFrame - cell.lastSeenFrame) > 120u) return vec4(0.0);
     vec3 cachedNormal = unpackNormalOctahedral(cell.packedNormal);
     if (dot(cachedNormal, normalize(worldNormal)) <= 0.5) return vec4(0.0);
     return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
