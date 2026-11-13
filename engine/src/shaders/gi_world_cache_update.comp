@@ -61,6 +61,17 @@ void main() {
     }
 
     uint hIndex = hashWorldCell(cellPos, cellNormal, cellSize);
+    // Multiple probe rays can map to the same spatial hash cell in one dispatch.
+    // Serialize the read/modify/write so the EMA and normal/key metadata cannot tear.
+    bool acquired = false;
+    for (uint spin = 0u; spin < 64u; ++spin) {
+        if (atomicCompSwap(worldCache.cells[hIndex].lockOrFlags, 0u, 1u) == 0u) {
+            acquired = true;
+            break;
+        }
+    }
+    if (!acquired) return;
+    memoryBarrierBuffer();
     WorldRadianceCell prevCell = worldCache.cells[hIndex];
     float prevWeight = prevCell.irradiance.a;
     vec3 prevNormal = unpackNormalOctahedral(prevCell.packedNormal);
@@ -87,5 +98,6 @@ void main() {
     worldCache.cells[hIndex].cellKey = hIndex;
     worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
     worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
-    worldCache.cells[hIndex].lockOrFlags = 0u;
+    memoryBarrierBuffer();
+    atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
 }
