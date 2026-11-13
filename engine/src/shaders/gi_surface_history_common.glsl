@@ -100,7 +100,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         if (existing.meta.x == lightingEpoch &&
             all(equal(existing.identity.xyz, cell)) &&
             dot(unpackNormalOctahedral(uint(existing.identity.w)), n) > 0.75 &&
-            existing.meta.z == frameIndex)
+            existing.meta.z == frameIndex && !overwriteSameFrame)
             return;
 
         // One CAS attempt: no spinlock. A contended writer skips this frame;
