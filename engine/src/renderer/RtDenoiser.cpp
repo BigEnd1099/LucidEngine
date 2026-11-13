@@ -778,7 +778,9 @@ namespace engine::renderer {
                   (params.giTraceFireflyClampEnabled ? 8u : 0u) |
                   (params.worldRadianceCacheEnabled ? 16u : 0u) |
                   (params.giSurfaceHistoryCacheEnabled ? 32u : 0u) |
-                  (params.debugMode == RtDebugMode::RawIndirect ? 64u : 0u);
+                  (params.debugMode == RtDebugMode::RawIndirect ? 64u : 0u) |
+                  ((params.debugMode == RtDebugMode::RawSpecularCaustics ||
+                    params.debugMode == RtDebugMode::CausticHitDensity) ? 128u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
         // rt_indirect.comp reads the persistent surface cache's lighting epoch
         // from f.x as raw uint bits; restore the temporal pass' max-history value

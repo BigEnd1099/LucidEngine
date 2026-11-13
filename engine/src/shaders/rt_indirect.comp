@@ -98,6 +98,7 @@ diagnosticsValid = false;
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
 const bool debugRawGi = (pc.u.z & 64u) != 0u;
+const bool debugCaustics = (pc.u.z & 128u) != 0u;
 if (any(greaterThanEqual(px, isize))) return;
 vec2 size = vec2(isize);
 
@@ -110,7 +111,7 @@ if (d >= 1.0) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -148,7 +149,7 @@ imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -166,7 +167,7 @@ if (checkerSkip) {
     // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
-    imageStore(imgCaustics, px, vec4(0.0));
+    if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
 
@@ -394,7 +395,7 @@ gi = sanitizeHDR(gi * invSamples);
 float vis = 1.0 - occ * invSamples;
 imageStore(imgS, px, vec4(gi, vis));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
-imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
+if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;
 diagValues[1] = diagMirrorHits;
 diagValues[2] = diagLightTests;
