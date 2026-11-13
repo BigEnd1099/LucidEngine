@@ -795,7 +795,7 @@ namespace engine::renderer {
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
                       (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
                       (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u) |
-                      (!params.giAtrousPassEnabled[3] ? 16u : 0u);
+                      (!params.giAtrousPassEnabled[3] ? 16u : 0u); // bit 4: temporal cache write when final Atrous is bypassed
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
