@@ -33,7 +33,7 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &dep);
         }
 
-        constexpr uint32_t kRtDiagnosticCounterCount = 58u;
+        constexpr uint32_t kRtDiagnosticCounterCount = 60u;
         constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
@@ -580,7 +580,8 @@ namespace engine::renderer {
                 "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15",
                 "rtGiSurfaceHits", "rtGiMirrorSurfaceHits", "rtGiCausticLightTests", "rtGiCausticConeHits",
                 "rtGiCausticVisibleHits", "rtGiCausticContributions", "rtGiTraceSamples", "rtGiPathBounces",
-                "rtGiWorldRadianceCacheActiveHits", "rtGiSurfaceHistoryCacheActiveHits"
+                "rtGiWorldRadianceCacheActiveHits", "rtGiSurfaceHistoryCacheActiveHits",
+                "rtGiWorldRadianceCacheQueries", "rtGiSurfaceHistoryCacheQueries"
             };
             auto& diagnosticsProfiler = core::Profiler::get();
             for (uint32_t i = 0; i < kRtDiagnosticCounterCount; ++i) {
