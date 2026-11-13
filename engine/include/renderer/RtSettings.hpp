@@ -14,7 +14,9 @@ namespace engine::renderer {
         Variance = 7,
         RawSpecularCaustics = 8,
         CausticHitDensity = 9,
-        TemporalIndirect = 10
+        TemporalIndirect = 10,
+        WorldRadianceCacheHits = 11,
+        SurfaceHistoryCacheHits = 12
     };
 
     struct RtSettings {
@@ -45,6 +47,8 @@ namespace engine::renderer {
         bool giAtrousPass3Enabled{true};
         bool giAtrousPass4Enabled{true};
         bool svgfEnabled{true};
+        bool worldRadianceCacheEnabled{true};
+        bool giSurfaceHistoryCacheEnabled{true};
         bool reflectionTemporalFilterEnabled{true};
         bool reflectionOutlierFilterEnabled{true};
         bool reflectionSpatialFilterEnabled{true};

@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -11,12 +12,17 @@ namespace engine::renderer {
     // Exactly 32 bytes aligned to 16 bytes for std430 SSBO layout
     struct alignas(16) WorldRadianceCell {
         glm::vec4 irradiance{0.0f}; // Offset 0..15 (RGB = radiance, A = sampleCount / weight)
-        uint32_t cellKey{0};        // Offset 16..19 (32-bit spatial key for atomicCompSwap in GLSL)
+        uint32_t cellKey{0};        // Offset 16..19 (full 32-bit spatial key, not slot index)
         uint32_t packedNormal{0};   // Offset 20..23 (Octahedral 16-bit + 16-bit flags)
         uint32_t lastSeenFrame{0};  // Offset 24..27 (TTL / frame index)
-        uint32_t lockOrFlags{0};    // Offset 28..31 (Std430 alignment to 32 bytes)
+        uint32_t lockOrFlags{0};    // Offset 28..31 (atomic writer lock / flags)
     };
     static_assert(sizeof(WorldRadianceCell) == 32, "Std430 alignment mismatch!");
+    static_assert(offsetof(WorldRadianceCell, irradiance) == 0, "WorldRadianceCell irradiance offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, cellKey) == 16, "WorldRadianceCell cellKey offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, packedNormal) == 20, "WorldRadianceCell packedNormal offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, lastSeenFrame) == 24, "WorldRadianceCell lastSeenFrame offset mismatch!");
+    static_assert(offsetof(WorldRadianceCell, lockOrFlags) == 28, "WorldRadianceCell lockOrFlags offset mismatch!");
 
     class WorldRadianceCache {
     public:
@@ -30,6 +36,7 @@ namespace engine::renderer {
         void cleanup();
 
         void dispatchUpdate(VkCommandBuffer cmd,
+                            VkDescriptorSet sceneSet,
                             VkAccelerationStructureKHR tlas,
                             uint32_t frameCounter,
                             const glm::vec3& cameraPos,
@@ -63,6 +70,7 @@ namespace engine::renderer {
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_updatePipeline{VK_NULL_HANDLE};
         bool m_initialized{false};
+        bool m_needsClear{true};
     };
 
 } // namespace engine::renderer

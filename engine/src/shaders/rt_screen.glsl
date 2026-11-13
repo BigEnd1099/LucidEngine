@@ -32,13 +32,21 @@ vec3 rtViewPosFromLinear(vec2 pixelCenter, float linZ, vec2 size) {
 vec2 rtOctEncode(vec3 n) {
     n /= (abs(n.x) + abs(n.y) + abs(n.z));
     vec2 e = n.xy;
-    if (n.z < 0.0) e = (1.0 - abs(e.yx)) * vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+    if (n.z < 0.0) {
+        vec2 oldXY = e;
+        vec2 signNotZero = vec2(oldXY.x >= 0.0 ? 1.0 : -1.0, oldXY.y >= 0.0 ? 1.0 : -1.0);
+        e = (1.0 - abs(oldXY.yx)) * signNotZero;
+    }
     return e;
 }
 
 vec3 rtOctDecode(vec2 e) {
     vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
-    if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+    if (n.z < 0.0) {
+        vec2 oldXY = n.xy;
+        vec2 signNotZero = vec2(oldXY.x >= 0.0 ? 1.0 : -1.0, oldXY.y >= 0.0 ? 1.0 : -1.0);
+        n.xy = (1.0 - abs(oldXY.yx)) * signNotZero;
+    }
     return normalize(n);
 }
 

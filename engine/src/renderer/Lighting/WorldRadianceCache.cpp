@@ -133,21 +133,42 @@ namespace engine::renderer {
     void WorldRadianceCache::clear(VkCommandBuffer cmd) {
         if (!m_cellBuffer) return;
         vkCmdFillBuffer(cmd, m_cellBuffer, 0, sizeof(WorldRadianceCell) * CACHE_CELL_COUNT, 0);
+        m_needsClear = false;
+
+        VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barrier.buffer = m_cellBuffer;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.bufferMemoryBarrierCount = 1;
+        dep.pBufferMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep);
     }
 
     void WorldRadianceCache::dispatchUpdate(VkCommandBuffer cmd,
+                                           VkDescriptorSet sceneSet,
                                            VkAccelerationStructureKHR tlas,
                                            uint32_t frameCounter,
                                            const glm::vec3& cameraPos,
                                            const glm::vec3& sunDirection,
                                            const glm::vec4& sunColor) {
-        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer || tlas == VK_NULL_HANDLE) return;
+        if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer ||
+            m_sceneSetLayout == VK_NULL_HANDLE || m_descriptorSet == VK_NULL_HANDLE ||
+            tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
+
+        // Buffer allocations are not zero-initialized. Guarantee a valid empty table
+        // even when the first usable TLAS appears after the renderer's initial frame.
+        if (m_needsClear) clear(cmd);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
         // Update 4096 cells per frame in a sliding window
         constexpr uint32_t SLICE_SIZE = 4096;
-        uint32_t sliceOffset = (frameCounter * SLICE_SIZE) % CACHE_CELL_COUNT;
+        uint32_t sliceOffset = (frameCounter * SLICE_SIZE) % 32768u;
 
         struct PushConstants {
             glm::vec4 cameraPosAndCellSize;
@@ -163,10 +184,8 @@ namespace engine::renderer {
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
-        if (m_descriptorSet != VK_NULL_HANDLE) {
-            uint32_t setIdx = (m_sceneSetLayout != VK_NULL_HANDLE) ? 1 : 0;
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, setIdx, 1, &m_descriptorSet, 0, nullptr);
-        }
+        const VkDescriptorSet sets[2] = { sceneSet, m_descriptorSet };
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
 
         vkCmdDispatch(cmd, SLICE_SIZE / 64, 1, 1);
 
@@ -207,10 +226,13 @@ namespace engine::renderer {
             m_cellAlloc = VK_NULL_HANDLE;
         }
         m_initialized = false;
+        m_needsClear = true;
     }
 
     uint32_t WorldRadianceCache::hashWorldCell(const glm::vec3& pos, const glm::vec3& normal, float cellSize) {
-        glm::ivec3 cellCoord = glm::ivec3(glm::floor(pos / cellSize));
+        const glm::vec3 n = glm::normalize(normal);
+        const glm::vec3 biasedPos = pos + n * (cellSize * 0.25f);
+        glm::ivec3 cellCoord = glm::ivec3(glm::floor(biasedPos / cellSize));
         uint32_t normIdx = 0u;
         if (std::abs(normal.x) > std::abs(normal.y) && std::abs(normal.x) > std::abs(normal.z)) {
             normIdx = normal.x > 0.0f ? 0u : 1u;
@@ -228,10 +250,18 @@ namespace engine::renderer {
 
     uint32_t WorldRadianceCache::packNormalOctahedral(const glm::vec3& n) {
         glm::vec3 norm = n / (std::abs(n.x) + std::abs(n.y) + std::abs(n.z) + 1e-6f);
-        glm::vec2 oct = (norm.z >= 0.0f) ? glm::vec2(norm.x, norm.y)
-                                         : (1.0f - glm::abs(glm::vec2(norm.y, norm.x))) * glm::sign(glm::vec2(norm.x, norm.y));
-        glm::uvec2 u = glm::uvec2(glm::clamp(oct * 0.5f + 0.5f, 0.0f, 1.0f) * 65535.0f);
-        return (u.x & 0xFFFFu) | ((u.y & 0xFFFFu) << 16u);
+        glm::vec2 oct(norm.x, norm.y);
+        if (norm.z < 0.0f) {
+            const glm::vec2 oldXY = oct;
+            const glm::vec2 signNotZero(
+                oldXY.x >= 0.0f ? 1.0f : -1.0f,
+                oldXY.y >= 0.0f ? 1.0f : -1.0f);
+            oct = (1.0f - glm::abs(glm::vec2(oldXY.y, oldXY.x))) * signNotZero;
+        }
+        oct = glm::clamp(oct * 0.5f + 0.5f, 0.0f, 1.0f);
+        const uint32_t ux = static_cast<uint32_t>(oct.x * 65535.0f + 0.5f);
+        const uint32_t uy = static_cast<uint32_t>(oct.y * 65535.0f + 0.5f);
+        return (uy << 16u) | ux;
     }
 
     glm::vec3 WorldRadianceCache::unpackNormalOctahedral(uint32_t packedN) {
@@ -239,9 +269,14 @@ namespace engine::renderer {
         oct = oct * 2.0f - 1.0f;
         glm::vec3 n = glm::vec3(oct.x, oct.y, 1.0f - std::abs(oct.x) - std::abs(oct.y));
         if (n.z < 0.0f) {
-            glm::vec2 signNotZero = glm::vec2(n.x >= 0.0f ? 1.0f : -1.0f, n.y >= 0.0f ? 1.0f : -1.0f);
-            n.x = (1.0f - std::abs(n.y)) * signNotZero.x;
-            n.y = (1.0f - std::abs(n.x)) * signNotZero.y;
+            // Both folded components must use the original octahedral coordinates.
+            // Updating n.x before evaluating n.y otherwise introduces a CPU/GPU mismatch.
+            const float oldX = n.x;
+            const float oldY = n.y;
+            const float signX = oldX >= 0.0f ? 1.0f : -1.0f;
+            const float signY = oldY >= 0.0f ? 1.0f : -1.0f;
+            n.x = (1.0f - std::abs(oldY)) * signX;
+            n.y = (1.0f - std::abs(oldX)) * signY;
         }
         return glm::normalize(n);
     }

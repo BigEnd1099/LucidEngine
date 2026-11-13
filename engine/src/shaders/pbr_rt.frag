@@ -601,7 +601,8 @@ void main() {
         hdrColor = mix(inscatterColor, hdrColor, fogTransmittance);
     }
 
-    // Debug modes: if active, display the debug buffer directly
+    // Debug modes 10-12 (temporal/cache diagnostics) display the compute
+    // output directly: do not multiply it by material albedo, sun or PBR lighting.
     if (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.w > 0.5) {
         if (ubo.rtFeatureParams.w > 5.5 && ubo.rtFeatureParams.w < 6.5) {
             vec3 reflSample = texelFetch(rtReflectionsTex, ivec2(gl_FragCoord.xy), 0).rgb;

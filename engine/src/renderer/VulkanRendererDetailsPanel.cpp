@@ -623,6 +623,13 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
                         ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
                         ImGui::Checkbox("GI Path Firefly Clamp", &m_rtSettings.giTraceFireflyClampEnabled);
+                        ImGui::SeparatorText("GI Radiance Caches");
+                        ImGui::Checkbox("World Radiance Probe Cache", &m_rtSettings.worldRadianceCacheEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Controls probe-cache updates and temporal GI fallback sampling. Toggling clears cached probes to prevent stale re-use.");
+                        ImGui::Checkbox("Persistent GI Surface History Cache", &m_rtSettings.giSurfaceHistoryCacheEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Controls world-space diffuse history restore and final à-trous writeback. Toggling invalidates the cache epoch.");
                         ImGui::Checkbox(editorText("details.rt_denoiser", "Enable GI Denoising"), &m_rtSettings.denoiseEnabled);
                         ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
                         ImGui::Checkbox("GI Temporal Accumulation", &m_rtSettings.giTemporalFilterEnabled);
@@ -650,7 +657,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "7: Luminance Variance (SVGF)",
                             "8: Raw Specular Caustics (before filtering)",
                             "9: Caustic Contribution Density",
-                            "10: Temporal GI (before A-Trous)"
+                            "10: Temporal GI (before A-Trous)",
+                            "11: World Radiance Cache Hits (green=hit, red=miss, blue=disabled)",
+                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {

@@ -20,14 +20,32 @@ layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[56]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
+layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
+
+shared uint rtWorldCacheDiag[2];
+
+vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
+    vec3 n = normalize(worldNormal);
+    uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
+    uint baseIndex = cellKey % CACHE_CELL_COUNT;
+    for (uint probe = 0u; probe < 2u; ++probe) {
+        WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
+        if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+            dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
+            return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+        }
+    }
+    return vec4(0.0);
+}
+
 
 layout(push_constant) uniform PC {
 mat4 unused;
 vec4 f;
-uvec4 u; // x=samples, y=frame, z=flags (bit0 GI, bit1 AO), w=max bounces
+uvec4 u; // x=samples, y=frame, z=GI/AO/cache flags, w=max bounces; f.x carries surface-cache epoch bits
 } pc;
 
 const float AO_DISTANCE = 1.75;
@@ -67,7 +85,7 @@ float smithG1GGXGI(float nDotV, float alpha) {
     return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
-void main() {
+void processPixel() {
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
 if (any(greaterThanEqual(px, isize))) return;
@@ -210,12 +228,26 @@ for (int s = 0; s < samples; ++s) {
             singleWeight = float(numActiveLights);
         }
 
-        pathRadiance += throughput * shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent, dir, true, -1.0, singleLight, singleWeight, bounceLod);
-
         vec3 hitAlbedo = hit.baseColor.rgb *
             pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, bounceLod).rgb, vec3(0.0)), vec3(2.2));
         vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, bounceLod).rgb;
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
+        vec3 hitDiffuseAlbedo = hitAlbedo * (1.0 - hitMetallic);
+
+        // Keep directly evaluated hit lighting intact. The world cache supplies
+        // an additional indirect estimate only at the final requested bounce.
+        vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
+                                        dir, true, -1.0, singleLight, singleWeight, bounceLod);
+        pathRadiance += throughput * hitRadiance;
+        if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.5) {
+            atomicAdd(rtWorldCacheDiag[1], 1u);
+            vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
+            if (cachedRadiance.a > 0.0) {
+                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.50 * cachedRadiance.a);
+                atomicAdd(rtWorldCacheDiag[0], 1u);
+            }
+        }
+
         float hitRoughness = clamp(hit.material.y * hitOrm.g, 0.0, 1.0);
         bool hitReflects = (hit.material.w > 0.5);
 
@@ -344,6 +376,7 @@ for (int s = 0; s < samples; ++s) {
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
+
 float vis = 1.0 - occ * invSamples;
 imageStore(imgS, px, vec4(gi, vis));
 imageStore(imgRawGi, px, vec4(gi, vis));
@@ -356,4 +389,18 @@ if (diagVisibleHits > 0u) atomicAdd(rtDiag.counters[52], diagVisibleHits);
 if (diagCausticContributions > 0u) atomicAdd(rtDiag.counters[53], diagCausticContributions);
 atomicAdd(rtDiag.counters[54], uint(samples));
 if (diagPathBounces > 0u) atomicAdd(rtDiag.counters[55], diagPathBounces);
+}
+
+void main() {
+    uint lane = gl_LocalInvocationIndex;
+    if (lane < 2u) rtWorldCacheDiag[lane] = 0u;
+    barrier();
+    processPixel();
+    barrier();
+    if (lane == 0u) {
+        uint cacheHits = rtWorldCacheDiag[0];
+        uint cacheQueries = rtWorldCacheDiag[1];
+        if (cacheHits != 0u) atomicAdd(rtDiag.counters[56], cacheHits);
+        if (cacheQueries != 0u) atomicAdd(rtDiag.counters[58], cacheQueries);
+    }
 }

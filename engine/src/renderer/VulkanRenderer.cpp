@@ -74,6 +74,7 @@ namespace engine::renderer {
         m_worldRadianceCache.init(m_context, m_descriptorPool, m_descriptorSetLayout);
         m_gpuCulling.init(m_context, m_descriptorPool, m_width, m_height);
         initRtDenoiser();
+        m_rtDenoiser.setWorldRadianceCacheBuffer(m_worldRadianceCache.getCellBuffer());
         initCaptureResources();
 
 #ifdef USE_GLFW

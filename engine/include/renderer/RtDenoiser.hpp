@@ -29,7 +29,7 @@ namespace engine::renderer {
             bool      reflectionInfiniteBounces{false}; // adaptive path, capped at 16 hits
             float     reflectionMaxRoughness{0.60f};
             float     reflectionMinThroughput{0.06f};
-            float     maxHistory{32.0f};   // effective samples kept in the temporal history
+            float     maxHistory{32.0f};   // valid temporal frames kept in history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
             bool      giTemporalFilterEnabled{true};
@@ -40,7 +40,9 @@ namespace engine::renderer {
             bool      reflectionTemporalFilterEnabled{true};
             bool      reflectionOutlierFilterEnabled{true};
             bool      reflectionSpatialFilterEnabled{true};
-            bool      lightChanged{false}; // Resets accumulation when lights or camera change
+            bool      worldRadianceCacheEnabled{true};
+            bool      giSurfaceHistoryCacheEnabled{true};
+            bool      lightChanged{false}; // Resets accumulation when scene lighting changes
             RtDebugMode debugMode{RtDebugMode::None};
 
             bool      reflectionCheckerboard{true};
@@ -103,12 +105,13 @@ namespace engine::renderer {
 
         // Records all passes. Depth must be in DEPTH_STENCIL_READ_ONLY_OPTIMAL.
         void record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params);
+        void setWorldRadianceCacheBuffer(VkBuffer buffer);
 
         VkImageView outputView() const { return m_imgS.view; }
         VkImageView reflectionOutputView() const { return m_imgRefl.view; }
         VkSampler   outputSampler() const { return m_sampler; }
         const GpuTimings& getGpuTimings() const { return m_gpuTimings; }
-        const std::array<uint32_t, 56>& getDiagnosticCounters() const { return m_lastDiagnostics; }
+        const std::array<uint32_t, 60>& getDiagnosticCounters() const { return m_lastDiagnostics; }
 
     private:
         struct Image {
@@ -148,6 +151,13 @@ namespace engine::renderer {
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
+        VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
+        VkBuffer m_surfaceHistoryBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
+        bool m_surfaceHistoryNeedsClear{true};
+        uint32_t m_surfaceHistoryLightingEpoch{1u};
+        bool m_surfaceHistoryCacheStateKnown{false};
+        bool m_surfaceHistoryCacheWasEnabled{true};
         VmaAllocation m_diagnosticsAllocation{VK_NULL_HANDLE};
         uint32_t* m_diagnosticsMapped{nullptr};
         bool m_diagnosticsCoherent{false};
@@ -168,6 +178,6 @@ namespace engine::renderer {
         bool m_timestampsSupported{false};
         bool m_hasTimestampResults{false};
         GpuTimings m_gpuTimings{};
-        std::array<uint32_t, 56> m_lastDiagnostics{};
+        std::array<uint32_t, 60> m_lastDiagnostics{};
     };
 }

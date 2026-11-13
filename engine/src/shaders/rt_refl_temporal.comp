@@ -82,6 +82,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
 
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
+
     vec4 raw = imageLoad(imgRefl, px);
     if ((pc.u.w & (1u << 15)) != 0u) {
         float valid = raw.a > 0.0 ? 1.0 : 0.0;
@@ -102,9 +106,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         return;
     }
 
-    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
-    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
-    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
     float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
@@ -127,35 +128,44 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         // Slope-aware depth tolerance for reflections
         float depthTol = (0.03 * pClip.w + 0.01) / nDotV;
 
+        uint rejectedBounds = 0u;
+        uint rejectedDepth = 0u;
+        uint rejectedNormal = 0u;
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[11], 1u); continue; }
-            // Validate against the actual previous-frame primary surface, not the current
-            // G-buffer sampled at the reprojected coordinate. The latter is unrelated
-            // after camera/object motion and silently discards useful reflection history.
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { rejectedBounds++; continue; }
             vec4 prevGeom = imageLoad(imgReflGeomPrev, tp);
             if (prevGeom.w < 0.0) continue;
-            if (abs(prevGeom.w - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[12], 1u); continue; }
-            if (dot(normalize(prevGeom.xyz), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
-
+            if (abs(prevGeom.w - pClip.w) > depthTol) { rejectedDepth++; continue; }
+            if (dot(normalize(prevGeom.xyz), N) < 0.85) { rejectedNormal++; continue; }
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist += w * imageLoad(imgReflHistPrev, tp);
             wSum += w;
         }
+        if (rejectedBounds != 0u) atomicAdd(rtLocalCounters[11], rejectedBounds);
+        if (rejectedDepth != 0u) atomicAdd(rtLocalCounters[12], rejectedDepth);
+        if (rejectedNormal != 0u) atomicAdd(rtLocalCounters[13], rejectedNormal);
+
+
     }
 
     bool isCheckerSkipped = (raw.a > 0.1 && raw.a < 0.4);
     vec4 result;
     float historyAge = 0.0;
         float maxHistory = max(pc.f.x, 1.0);
+    bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
+    bool mirrorTemporalOnly = roughness < 0.08 && !denoiseMirrors;
+    float motionPixels = length(motion * size);
+    float effectiveMaxHistory = mirrorTemporalOnly ? maxHistory :
+        mix(maxHistory, max(4.0, maxHistory * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             atomicAdd(rtLocalCounters[14], 1u);
             // Re-use full history from previous frame when this pixel was active
             result = vec4((hist / wSum).rgb, 1.0);
-            historyAge = hist.a / wSum;
+            historyAge = min(hist.a / wSum, effectiveMaxHistory);
         } else {
             atomicAdd(rtLocalCounters[15], 1u);
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors with linear depth
@@ -193,16 +203,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             atomicAdd(rtLocalCounters[9], 1u);
             hist /= wSum;
 
-            bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
             bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
 
-            if (roughness < 0.08 && !denoiseMirrors) {
+            if (mirrorTemporalOnly) {
                 // Mirror surfaces (roughness < 0.08) with mirror denoiser off:
                 // Primary rays are deterministic, so there is ZERO directional Monte Carlo noise.
                 // Reproject and temporally accumulate without neighborhood variance clamping
                 // so sharp specular highlights, light bulbs, and reflection edges are NEVER crushed or dimmed!
-                historyAge = min(hist.a + 1.0, maxHistory);
-                float minAlpha = 1.0 / maxHistory;
+                historyAge = min(hist.a + 1.0, effectiveMaxHistory);
+                float minAlpha = 1.0 / effectiveMaxHistory;
                 float alpha = (pc.f.z > 0.5) ? clamp(1.0 / historyAge, minAlpha, 1.0) : 1.0;
                 result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
             } else {
@@ -242,10 +251,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
                     // Preserve bright features that have spatial support. A single high
                     // sample is rejected only when it is a rare outlier in a populated patch.
-                    float floorThreshold = (roughness < 0.08) ? 16.0 : 3.5;
-                    float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, 64.0));
+                    float floorThreshold = (roughness < 0.08) ? 64.0 : 16.0;
+                    float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, floorThreshold));
                     float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
+                    float maxSupportedLum = clampMaxY.x;
                     for (int fy = -1; fy <= 1; ++fy) {
                         for (int fx = -1; fx <= 1; ++fx) {
                             if (fx == 0 && fy == 0) continue;
@@ -253,14 +263,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                             if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                             vec4 fVal = imageLoad(imgRefl, fp);
                             if (fVal.a < 0.5) continue;
-                            if (dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722)) >= supportThreshold)
+                            float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
+                            if (neighborLum >= supportThreshold) {
                                 brightNeighborCount += 1.0;
+                                maxSupportedLum = max(maxSupportedLum, neighborLum);
+                            }
                         }
                     }
                     bool isolatedFirefly = count >= 4.0 &&
                         brightNeighborCount <= floor(count * 0.125);
-                    // Clamp accumulated history only for spatially isolated outliers.
-                    if (outlierFilterEnabled && isolatedFirefly)
+                    // Expand the upper bound for bright features supported by neighboring samples.
+                    if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
+                    if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                     if (outlierFilterEnabled && isolatedFirefly &&
@@ -285,7 +299,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     // Alpha of the private history image stores effective accumulated sample age.
     // The public reflection output keeps alpha=1 as its validity mask for PBR.
-    ageBin = min(uint(clamp(historyAge / maxHistory, 0.0, 0.999999) * 16.0), 15u);
+    ageBin = min(uint(clamp(historyAge / effectiveMaxHistory, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
     imageStore(imgRefl, px, vec4(result.rgb, 1.0));

@@ -173,11 +173,43 @@ int main() {
     glm::vec3 unpackedNorm = WorldRadianceCache::unpackNormalOctahedral(packedNorm);
     CHECK(glm::dot(testNorm, unpackedNorm) > 0.999f);
 
+    // Exact negative-Z axis is the octahedral lower-hemisphere singular case:
+    // it must encode to the upper-right octahedral corner and decode unchanged.
+    const glm::vec3 negativeZ(0.0f, 0.0f, -1.0f);
+    const uint32_t packedNegativeZ = WorldRadianceCache::packNormalOctahedral(negativeZ);
+    CHECK(packedNegativeZ == 0xFFFFFFFFu);
+    const glm::vec3 unpackedNegativeZ = WorldRadianceCache::unpackNormalOctahedral(packedNegativeZ);
+    CHECK(glm::dot(negativeZ, unpackedNegativeZ) > 0.999f);
+
+    // Lower-hemisphere folds must use both original octahedral components.
+    const glm::vec3 lowerHemisphereNormals[] = {
+        glm::normalize(glm::vec3(0.31f, -0.72f, -0.62f)),
+        glm::normalize(glm::vec3(-0.83f, 0.22f, -0.51f)),
+        glm::normalize(glm::vec3(0.04f, 0.91f, -0.41f))
+    };
+    for (const glm::vec3& normal : lowerHemisphereNormals) {
+        const uint32_t packed = WorldRadianceCache::packNormalOctahedral(normal);
+        const glm::vec3 decoded = WorldRadianceCache::unpackNormalOctahedral(packed);
+        CHECK(glm::dot(normal, decoded) > 0.999f);
+    }
+
     // Spatial hash stability & bound
     uint32_t cellHash1 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
     uint32_t cellHash2 = WorldRadianceCache::hashWorldCell(glm::vec3(12.3f, 4.5f, -8.1f), testNorm);
     CHECK(cellHash1 == cellHash2);
     CHECK(cellHash1 < WorldRadianceCache::CACHE_CELL_COUNT);
+
+    // Normal-biased quantization must keep tiny depth-reconstruction jitter
+    // on either side of an axis-aligned plane in the same world-cache cell.
+    const glm::vec3 upNormal(0.0f, 1.0f, 0.0f);
+    const uint32_t floorBelow = WorldRadianceCache::hashWorldCell(glm::vec3(2.0f, -0.00001f, 3.0f), upNormal);
+    const uint32_t floorAbove = WorldRadianceCache::hashWorldCell(glm::vec3(2.0f,  0.00001f, 3.0f), upNormal);
+    CHECK(floorBelow == floorAbove);
+
+    const glm::vec3 rightNormal(1.0f, 0.0f, 0.0f);
+    const uint32_t wallBelow = WorldRadianceCache::hashWorldCell(glm::vec3(1.99999f, 2.0f, 3.0f), rightNormal);
+    const uint32_t wallAbove = WorldRadianceCache::hashWorldCell(glm::vec3(2.00001f, 2.0f, 3.0f), rightNormal);
+    CHECK(wallBelow == wallAbove);
 
     // GPU Frustum Culling Sphere Test
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);

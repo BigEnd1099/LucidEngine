@@ -33,7 +33,7 @@ namespace engine::renderer {
             vkCmdPipelineBarrier2(cmd, &dep);
         }
 
-        constexpr uint32_t kRtDiagnosticCounterCount = 56u;
+        constexpr uint32_t kRtDiagnosticCounterCount = 60u;
         constexpr VkAccessFlags2 kStorageRW = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[20]{};
+        VkDescriptorSetLayoutBinding b[22]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -79,8 +79,16 @@ namespace engine::renderer {
             b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         }
+        b[20].binding = 20;
+        b[20].descriptorCount = 1;
+        b[20].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[20].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        b[21].binding = 21;
+        b[21].descriptorCount = 1;
+        b[21].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[21].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 20;
+        li.bindingCount = 22;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
@@ -88,7 +96,7 @@ namespace engine::renderer {
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 40 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pi.maxSets = 2;
@@ -158,6 +166,19 @@ namespace engine::renderer {
         if (!m_diagnosticsMapped)
             throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
         std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
+
+        // Dedicated 25 cm surface-history hash table (48 bytes/cell, 12 MiB).
+        // It is separate from the lower-resolution radiance-probe cache at binding 20.
+        constexpr VkDeviceSize kSurfaceHistoryBytes = VkDeviceSize(48u) * 262144u;
+        VkBufferCreateInfo surfaceInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        surfaceInfo.size = kSurfaceHistoryBytes;
+        surfaceInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        surfaceInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo surfaceAlloc{};
+        surfaceAlloc.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &surfaceInfo, &surfaceAlloc,
+                            &m_surfaceHistoryBuffer, &m_surfaceHistoryAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate surface-history cache");
         if (!m_diagnosticsCoherent)
             vmaFlushAllocation(m_context->getAllocator(), m_diagnosticsAllocation, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
         writeDescriptors(depthView, depthSampler, gNormalRoughnessView, gAlbedoMetallicView, gMotionView);
@@ -203,7 +224,15 @@ namespace engine::renderer {
         VkDevice dev = m_context->getDevice();
         destroyImages();
         if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
+        if (m_surfaceHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_surfaceHistoryBuffer, m_surfaceHistoryAllocation);
         m_diagnosticsBuffer = VK_NULL_HANDLE;
+        m_surfaceHistoryBuffer = VK_NULL_HANDLE;
+        m_surfaceHistoryAllocation = VK_NULL_HANDLE;
+        m_surfaceHistoryNeedsClear = true;
+        m_surfaceHistoryLightingEpoch = 1u;
+        m_surfaceHistoryCacheStateKnown = false;
+        m_surfaceHistoryCacheWasEnabled = true;
+        m_worldCacheBuffer = VK_NULL_HANDLE;
         m_diagnosticsAllocation = VK_NULL_HANDLE;
         m_diagnosticsMapped = nullptr;
         for (auto& p : m_atrousPipelines) { if (p) vkDestroyPipeline(dev, p, nullptr); p = VK_NULL_HANDLE; }
@@ -322,7 +351,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[20]{};
+            VkWriteDescriptorSet writes[22]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -441,8 +470,44 @@ namespace engine::renderer {
             writes[19].descriptorCount = 1;
             writes[19].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[19].pImageInfo = &reflGeomPrevInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 20, writes, 0, nullptr);
+            const VkDescriptorBufferInfo worldCacheInfo{
+                m_worldCacheBuffer != VK_NULL_HANDLE ? m_worldCacheBuffer : m_diagnosticsBuffer,
+                0, VK_WHOLE_SIZE
+            };
+            writes[20] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[20].dstSet = m_sets[p];
+            writes[20].dstBinding = 20;
+            writes[20].descriptorCount = 1;
+            writes[20].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[20].pBufferInfo = &worldCacheInfo;
+            const VkDescriptorBufferInfo surfaceHistoryInfo{ m_surfaceHistoryBuffer, 0, VK_WHOLE_SIZE };
+            writes[21] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[21].dstSet = m_sets[p];
+            writes[21].dstBinding = 21;
+            writes[21].descriptorCount = 1;
+            writes[21].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[21].pBufferInfo = &surfaceHistoryInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 22, writes, 0, nullptr);
         }
+    }
+
+    void RtDenoiser::setWorldRadianceCacheBuffer(VkBuffer buffer) {
+        m_worldCacheBuffer = buffer;
+        if (!m_context || !m_ready || m_diagnosticsBuffer == VK_NULL_HANDLE) return;
+        const VkDescriptorBufferInfo cacheInfo{
+            m_worldCacheBuffer != VK_NULL_HANDLE ? m_worldCacheBuffer : m_diagnosticsBuffer,
+            0, VK_WHOLE_SIZE
+        };
+        VkWriteDescriptorSet writes[2]{};
+        for (uint32_t i = 0; i < 2; ++i) {
+            writes[i] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[i].dstSet = m_sets[i];
+            writes[i].dstBinding = 20;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &cacheInfo;
+        }
+        vkUpdateDescriptorSets(m_context->getDevice(), 2, writes, 0, nullptr);
     }
 
     void RtDenoiser::record(VkCommandBuffer cmd, VkDescriptorSet sceneSet, const Params& params) {
@@ -476,6 +541,25 @@ namespace engine::renderer {
             m_giHistoryValid = false;
         }
 
+        // Initialize the persistent table exactly once. Subsequent lighting changes use
+        // an epoch tag, avoiding a 12 MiB clear and preserving GPU ordering.
+        if (m_surfaceHistoryNeedsClear && m_surfaceHistoryBuffer != VK_NULL_HANDLE) {
+            vkCmdFillBuffer(cmd, m_surfaceHistoryBuffer, 0, VK_WHOLE_SIZE, 0u);
+            VkBufferMemoryBarrier2 initBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            initBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            initBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            initBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            initBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            initBarrier.buffer = m_surfaceHistoryBuffer;
+            initBarrier.offset = 0;
+            initBarrier.size = VK_WHOLE_SIZE;
+            VkDependencyInfo initDep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            initDep.bufferMemoryBarrierCount = 1;
+            initDep.pBufferMemoryBarriers = &initBarrier;
+            vkCmdPipelineBarrier2(cmd, &initDep);
+            m_surfaceHistoryNeedsClear = false;
+        }
+
         // The renderer waits for the previous submission fence before record(); counters are
         // therefore safe to invalidate/read here without stalling the GPU or using queue-idle.
         if (m_diagnosticsMapped) {
@@ -495,7 +579,9 @@ namespace engine::renderer {
                 "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11",
                 "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15",
                 "rtGiSurfaceHits", "rtGiMirrorSurfaceHits", "rtGiCausticLightTests", "rtGiCausticConeHits",
-                "rtGiCausticVisibleHits", "rtGiCausticContributions", "rtGiTraceSamples", "rtGiPathBounces"
+                "rtGiCausticVisibleHits", "rtGiCausticContributions", "rtGiTraceSamples", "rtGiPathBounces",
+                "rtGiWorldRadianceCacheActiveHits", "rtGiSurfaceHistoryCacheActiveHits",
+                "rtGiWorldRadianceCacheQueries", "rtGiSurfaceHistoryCacheQueries"
             };
             auto& diagnosticsProfiler = core::Profiler::get();
             for (uint32_t i = 0; i < kRtDiagnosticCounterCount; ++i) {
@@ -504,10 +590,24 @@ namespace engine::renderer {
             }
         }
 
+        // Toggle transitions invalidate the persistent GI surface table by advancing its epoch.
+        // This avoids a large buffer clear while preventing stale OFF/ON cache reuse.
+        if (!m_surfaceHistoryCacheStateKnown) {
+            m_surfaceHistoryCacheWasEnabled = params.giSurfaceHistoryCacheEnabled;
+            m_surfaceHistoryCacheStateKnown = true;
+        } else if (m_surfaceHistoryCacheWasEnabled != params.giSurfaceHistoryCacheEnabled) {
+            m_surfaceHistoryCacheWasEnabled = params.giSurfaceHistoryCacheEnabled;
+            ++m_surfaceHistoryLightingEpoch;
+            if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
+            m_giHistoryValid = false;
+        }
+
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
             m_reflHistoryValid = false;
             m_giHistoryValid = false;
+            ++m_surfaceHistoryLightingEpoch;
+            if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
         }
         m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
@@ -587,6 +687,8 @@ namespace engine::renderer {
         profiler.recordMetric("rtMaxHistory", params.maxHistory);
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtWorldRadianceCacheEnabled", params.worldRadianceCacheEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiSurfaceHistoryCacheEnabled", params.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiCheckerboard", (params.giCheckerboard && params.giTemporalFilterEnabled) ? 1.0 : 0.0);
         profiler.recordMetric("rtGiTemporalFilterEnabled", params.giTemporalFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiAtrousPass1Enabled", params.giAtrousPassEnabled[0] ? 1.0 : 0.0);
@@ -673,24 +775,38 @@ namespace engine::renderer {
         pd.u[1] = params.frameIndex;
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) |
                   ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
-                  (params.giTraceFireflyClampEnabled ? 8u : 0u);
+                  (params.giTraceFireflyClampEnabled ? 8u : 0u) |
+                  (params.worldRadianceCacheEnabled ? 16u : 0u) |
+                  (params.giSurfaceHistoryCacheEnabled ? 32u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
+        // rt_indirect.comp reads the persistent surface cache's lighting epoch
+        // from f.x as raw uint bits; restore the temporal pass' max-history value
+        // immediately after the trace dispatch.
 
         const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
         if (giOrAoActive) {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
 
+            pd.f.x = std::bit_cast<float>(m_surfaceHistoryLightingEpoch);
             bindGI(m_tracePipelineHandle, pd); // 1. trace
+            pd.f.x = std::max(params.maxHistory, 1.0f);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
             sync();
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
 
-            pd.u[0] = params.giTemporalFilterEnabled ? 0u : 1u; // bypass accumulation when disabled
+            pd.u[0] = (params.giTemporalFilterEnabled ? 0u : 1u) |
+                      (params.giSurfaceHistoryCacheEnabled ? 2u : 0u) |
+                      (params.worldRadianceCacheEnabled ? 4u : 0u); // bit 0 bypass, bit 1 surface cache, bit 2 world cache
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
-                      (params.giTemporalFireflyFilterEnabled ? 2u : 0u);
+                      (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
+                      (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
+                      (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u) |
+                      (!params.giAtrousPassEnabled[3] ? 16u : 0u); // bit 4: temporal cache write when final Atrous is bypassed
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 3);
@@ -702,6 +818,9 @@ namespace engine::renderer {
             pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.f.y = std::max(params.maxHistory, 1.0f);
             pd.u[0] = 0u;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[0], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
@@ -711,6 +830,9 @@ namespace engine::renderer {
 
             // Pass 4: Atrous step 2 (A -> S, step 2)
             pd.f.x = params.giAtrousPassEnabled[1] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[1], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 7);
@@ -720,6 +842,9 @@ namespace engine::renderer {
 
             // Pass 5: Atrous step 3 (S -> A, step 4)
             pd.f.x = params.giAtrousPassEnabled[2] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[2], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 9);
@@ -730,6 +855,9 @@ namespace engine::renderer {
             // Pass 6: Atrous step 4 (A -> S, step 8, final output with debugMode)
             pd.f.x = params.giAtrousPassEnabled[3] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.u[0] = static_cast<uint32_t>(params.debugMode);
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[3], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 11);

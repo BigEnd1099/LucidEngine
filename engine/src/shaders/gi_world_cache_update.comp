@@ -11,7 +11,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "gi_world_cache_common.glsl"
 
-layout(std430, set = 1, binding = 0) buffer WorldRadianceGridBuffer {
+layout(std430, set = 1, binding = 0) coherent buffer WorldRadianceGridBuffer {
     WorldRadianceCell cells[];
 } worldCache;
 
@@ -26,61 +26,105 @@ void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
     if (threadIdx >= pc.frameAndSlice.z) return;
 
-    rngInit(uvec2(threadIdx + pc.frameAndSlice.y, pc.frameAndSlice.x), pc.frameAndSlice.x);
+    uint probeLinearIdx = (gl_GlobalInvocationID.x + pc.frameAndSlice.y) & 32767u;
+    rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
-    // Compute probe coordinate in camera-relative volume [-16..16]
-    uint gridDim = 32u;
-    uint idx = threadIdx % (gridDim * gridDim * gridDim);
-    int gz = int(idx / (gridDim * gridDim)) - 16;
-    uint rem = idx % (gridDim * gridDim);
-    int gy = int(rem / gridDim) - 16;
-    int gx = int(rem % gridDim) - 16;
+    float cellSize = pc.cameraPosAndCellSize.w > 0.0 ? pc.cameraPosAndCellSize.w : DEFAULT_CELL_SIZE;
+    vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
 
-    float cellSize = pc.cameraPosAndCellSize.w > 0.0 ? pc.cameraPosAndCellSize.w : WORLD_CACHE_CELL_SIZE;
-    vec3 probePos = pc.cameraPosAndCellSize.xyz + vec3(float(gx), float(gy), float(gz)) * cellSize;
+    // Uniform full-sphere ray direction shared by both probe populations.
+    float dirY = 1.0 - 2.0 * rand1();
+    float dirPhi = 6.28318530718 * rand1();
+    float dirRadius = sqrt(max(0.0, 1.0 - dirY * dirY));
+    vec3 sampleDir = vec3(dirRadius * cos(dirPhi), dirY,
+                          dirRadius * sin(dirPhi));
 
-    // Pick a hemisphere normal based on random direction
-    vec3 sampleDir = normalize(vec3(rand1() * 2.0 - 1.0, rand1() * 2.0 - 1.0, rand1() * 2.0 - 1.0));
-    if (length(sampleDir) < 0.1) sampleDir = vec3(0.0, 1.0, 0.0);
-
-    // Ray query to test scene surface and illumination
-    rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, sceneTLAS, gl_RayFlagsOpaqueEXT, 0xFF, probePos, 0.01, sampleDir, 40.0);
-    while (rayQueryProceedEXT(rq)) {}
-
-    vec3 hitRad = vec3(0.0);
-    vec3 normal = sampleDir;
-
-    if (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-        float hitDist = rayQueryGetIntersectionTEXT(rq, true);
-        vec3 hitPos = probePos + sampleDir * hitDist;
-
-        // Sunlight visibility check from hit point
-        vec3 sunDir = normalize(pc.sunDirAndIntensity.xyz);
-        rayQueryEXT shadowQuery;
-        rayQueryInitializeEXT(shadowQuery, sceneTLAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                              0xFF, hitPos + sunDir * 0.02, 0.01, sunDir, 100.0);
-        while (rayQueryProceedEXT(shadowQuery)) {}
-
-        float shadow = (rayQueryGetIntersectionTypeEXT(shadowQuery, true) == gl_RayQueryCommittedIntersectionNoneEXT) ? 1.0 : 0.0;
-        float NdotL = max(dot(normal, sunDir), 0.0);
-        hitRad = pc.sunColor.rgb * (pc.sunDirAndIntensity.w * NdotL * shadow);
+    vec3 probePos;
+    if ((threadIdx & 3u) != 0u) {
+        // 75% of rays originate at the player/camera, with a tiny spherical
+        // jitter to avoid repeatedly starting exactly inside nearby geometry.
+        float offsetY = 1.0 - 2.0 * rand1();
+        float offsetPhi = 6.28318530718 * rand1();
+        float offsetRadius = sqrt(max(0.0, 1.0 - offsetY * offsetY));
+        vec3 offsetDir = vec3(offsetRadius * cos(offsetPhi), offsetY,
+                              offsetRadius * sin(offsetPhi));
+        probePos = cameraPos + offsetDir * (0.35 * rand1());
     } else {
-        hitRad = textureLod(envCubemap, sampleDir, 4.0).rgb * 0.5;
+        // The remaining 25% retain broad spatial coverage, but allocate only
+        // 17 vertical bands to [-2 m, +14 m] instead of wasting half below floor.
+        int gz = int(probeLinearIdx / 1024u) - 16;
+        uint rem = probeLinearIdx % 1024u;
+        int gy = int(round(float(rem / 32u) * (16.0 / 31.0))) - 2;
+        int gx = int(rem % 32u) - 16;
+        probePos = cameraPos + vec3(float(gx), float(gy), float(gz)) * cellSize;
     }
 
-    uint hIndex = hashWorldCell(probePos, normal, cellSize);
-    WorldRadianceCell current = worldCache.cells[hIndex];
+    RtInstanceData hit;
+    vec3 hitPos, hitNormal;
+    vec2 hitUv;
+    vec4 hitTangent;
+    float hitDistance;
+    if (!traceSceneSurface(probePos, sampleDir, 40.0,
+            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance)) {
+        // This cache is queried using visible surface positions and normals.
+        // Sky misses have no matching surface key and only pollute the table.
+        return;
+    }
 
-    // Temporal accumulation with exponential moving average
-    float prevWeight = current.irradiance.a;
-    float blendFactor = clamp(1.0 / (prevWeight + 1.0), 0.05, 0.5);
-    vec3 newIrr = mix(current.irradiance.rgb, hitRad, blendFactor);
-    float newWeight = min(prevWeight + 1.0, 32.0);
+    vec3 cellNormal = normalize(hitNormal);
+    // computeWorldCellKey applies the same normal-directed voxel bias used
+    // by G-buffer lookups, so ray-hit and visible surface keys agree.
+    vec3 hitRad = shadeRtHitEx(hit, hitPos, hitNormal, hitUv, hitTangent,
+                               sampleDir, true, 0.25);
+    uint cellKey = computeWorldCellKey(hitPos, cellNormal, cellSize);
+    uint baseIndex = cellKey % CACHE_CELL_COUNT;
 
-    worldCache.cells[hIndex].irradiance = vec4(newIrr, newWeight);
-    worldCache.cells[hIndex].cellKey = hIndex;
-    worldCache.cells[hIndex].packedNormal = packNormalOctahedral(normal);
-    worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
-    worldCache.cells[hIndex].lockOrFlags = 0u;
+    // Four-slot linear probing prevents a different surface with the same
+    // initial hash from evicting a still-live visible surface.
+    for (uint probe = 0u; probe < 4u; ++probe) {
+        uint hIndex = (baseIndex + probe) % CACHE_CELL_COUNT;
+        bool acquired = false;
+        for (uint spin = 0u; spin < 64u; ++spin) {
+            if (atomicCompSwap(worldCache.cells[hIndex].lockOrFlags, 0u, 1u) == 0u) {
+                acquired = true;
+                break;
+            }
+        }
+        if (!acquired) continue;
+
+        memoryBarrierBuffer();
+        WorldRadianceCell prevCell = worldCache.cells[hIndex];
+        float prevWeight = prevCell.irradiance.a;
+        bool expired = (prevWeight <= 0.0) ||
+            (pc.frameAndSlice.x < prevCell.lastSeenFrame);
+        bool keyMismatch = prevCell.cellKey != cellKey;
+        bool normalMismatch = !expired &&
+            dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;
+
+        if (!expired && (keyMismatch || normalMismatch)) {
+            // Do not evict another live surface. Release and try the next slot.
+            memoryBarrierBuffer();
+            atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
+            continue;
+        }
+
+        float newWeight;
+        vec3 newIrr;
+        if (expired) {
+            newWeight = 1.0;
+            newIrr = hitRad;
+        } else {
+            newWeight = min(prevWeight + 1.0, 32.0);
+            float alpha = max(1.0 / newWeight, 0.05);
+            newIrr = mix(prevCell.irradiance.rgb, hitRad, alpha);
+        }
+
+        worldCache.cells[hIndex].irradiance = vec4(sanitizeHDR(newIrr), newWeight);
+        worldCache.cells[hIndex].cellKey = cellKey;
+        worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
+        worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
+        memoryBarrierBuffer();
+        atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
+        return;
+    }
 }
