@@ -217,14 +217,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
     ivec2 fullMotionPx = min(ivec2(curUV * vec2(fullMotionSize)), fullMotionSize - 1);
     vec2 motion = texelFetch(uMotion, fullMotionPx, 0).xy;
-    float motionPixels = length(motion * size);
 
     vec4 pClip = pc.prevViewProj * vec4(P, 1.0);
+    vec2 cameraPrevUV = (pClip.w > 0.0001) ? ((pClip.xy / pClip.w) * 0.5 + 0.5) : curUV;
+    vec2 effectivePrevUV = (dot(motion, motion) >= 0.000000001) ? (curUV - motion) : cameraPrevUV;
+    float motionPixels = length((curUV - effectivePrevUV) * size);
     if (pc.f.z > 0.5) {
-        vec2 prevUV = curUV - motion;
-        if (dot(motion, motion) < 1e-9 && pClip.w > 1e-4) {
-            prevUV = (pClip.xy / pClip.w) * 0.5 + 0.5;
-        }
+        vec2 prevUV = effectivePrevUV;
 
         vec2 prevPx = prevUV * size - 0.5;
         ivec2 base = ivec2(floor(prevPx));
