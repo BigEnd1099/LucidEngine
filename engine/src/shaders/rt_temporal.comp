@@ -127,6 +127,42 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec4 raw = imageLoad(imgS, px);
 
+    vec3 N = rtOctDecode(geom.xy);
+
+    vec2 curUV = (vec2(px) + 0.5) / size;
+    ivec2 fullDepthSize = textureSize(uDepth, 0).xy;
+    ivec2 fullPx = min(ivec2(curUV * vec2(fullDepthSize)), fullDepthSize - 1);
+    float d = texelFetch(uDepth, fullPx, 0).r;
+    float zC = rtLinearDepth(d);
+
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+
+    // Dedicated cache diagnostics: green = a valid cache entry was loaded,
+    // red = enabled but no valid entry, blue = the corresponding cache is disabled.
+    if ((pc.u.y & 12u) != 0u) {
+        bool cacheEnabled = false;
+        bool cacheHit = false;
+        if ((pc.u.y & 4u) != 0u) {
+            cacheEnabled = (pc.u.x & 4u) != 0u;
+            if (cacheEnabled)
+                cacheHit = sampleWorldRadianceCache(P, N, pc.u.w).a > 0.0;
+        } else {
+            cacheEnabled = (pc.u.x & 2u) != 0u;
+            if (cacheEnabled) {
+                vec4 debugHistory = vec4(0.0);
+                cacheHit = loadSurfaceHistory(P, N, pc.u.z, debugHistory);
+            }
+        }
+        vec3 debugColor = !cacheEnabled ? vec3(0.0, 0.0, 50.0)
+                         : cacheHit ? vec3(0.0, 50.0, 0.0)
+                                    : vec3(50.0, 0.0, 0.0);
+        imageStore(imgHistCur, px, vec4(debugColor, 1.0));
+        imageStore(imgMomentsCur, px, vec4(0.0));
+        geom.w = 1.0;
+        imageStore(imgGeomCur, px, geom);
+        return;
+    }
+
     if ((pc.u.x & 1u) != 0u) { // bit 0 = temporal bypass; bits 1/2 independently gate surface/world caches.
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
@@ -137,16 +173,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         histogramCounted = true;
         return;
     }
-
-    vec3 N = rtOctDecode(geom.xy);
-
-    vec2 curUV = (vec2(px) + 0.5) / size;
-    ivec2 fullDepthSize = textureSize(uDepth, 0).xy;
-    ivec2 fullPx = min(ivec2(curUV * vec2(fullDepthSize)), fullDepthSize - 1);
-    float d = texelFetch(uDepth, fullPx, 0).r;
-    float zC = rtLinearDepth(d);
-
-    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
     float nDotV = clamp(abs(dot(N, toCamNorm)), 0.15, 1.0);
