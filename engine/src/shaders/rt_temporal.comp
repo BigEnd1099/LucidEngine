@@ -122,6 +122,7 @@ layout(push_constant) uniform PC {
 
 
 shared uint rtLocalCounters[48];
+shared uint rtLocalAgeBins[64];
 
 void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     histogramCounted = false;
@@ -492,10 +493,21 @@ void main() {
     bool histogramCounted = false;
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     processPixel(px, ageBin, histogramCounted);
-    if (histogramCounted) atomicAdd(rtLocalCounters[16u + ageBin], 1u);
+    rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
 
     barrier();
-    if (lane < 48u) {
+    if (lane == 0u) {
+        uint histogram[16];
+        for (uint bin = 0u; bin < 16u; ++bin) histogram[bin] = 0u;
+        for (uint i = 0u; i < 64u; ++i) {
+            uint bin = rtLocalAgeBins[i];
+            if (bin < 16u) histogram[bin]++;
+        }
+        for (uint bin = 0u; bin < 16u; ++bin)
+            if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[16u + bin], histogram[bin]);
+    }
+
+    if (lane < 16u) {
         uint count = rtLocalCounters[lane];
         if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
     }
