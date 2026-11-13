@@ -187,7 +187,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         imageStore(imgGeomCur, px, geom);
         if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 &&
             (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
-            storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w);
+            storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w, false);
         }
         ageBin = 0u;
         histogramCounted = true;
@@ -454,7 +454,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     // The cache is updated independently of Atrous settings and debug output.
     if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && newLen >= 1.0 &&
         (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
-        storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w);
+        storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
 
     imageStore(imgHistCur, px, result);
