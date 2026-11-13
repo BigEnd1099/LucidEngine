@@ -1293,9 +1293,9 @@ namespace engine::renderer {
         // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
         // =========================================================================
         bool worldCacheUpdateRecorded = false;
+        const bool tlasReady = m_sceneUboMappedPtr &&
+            static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
         {
-            const bool tlasReady = m_sceneUboMappedPtr &&
-                static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
 
             if (m_worldRadianceCache.isInitialized()) {
                 // Clear once on each toggle transition so OFF/ON never revives stale probes.
@@ -1326,7 +1326,6 @@ namespace engine::renderer {
                     );
                 }
             }
-        }
         if (m_timestampQueryPool && !worldCacheUpdateRecorded) {
             // Keep the query pair valid when the cache is disabled or no update
             // dispatch can be recorded; report zero rather than a stale frame.
