@@ -957,7 +957,9 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 16);
 
             if (params.reflectionSpatialFilterEnabled && params.spatialStrength > 0.001f && m_reflSpatialPipeline) {
-                bindRefl(m_reflSpatialPipeline, reflPd);
+                PushData spatialPd = reflPd;
+                spatialPd.f.x = std::clamp(params.spatialStrength, 0.0f, 1.0f);
+                bindRefl(m_reflSpatialPipeline, spatialPd);
                 if (m_timestampsSupported && m_queryPool)
                     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 17);
                 sync();
