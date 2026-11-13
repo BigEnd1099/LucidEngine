@@ -49,37 +49,38 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
 bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
     vec3 n = normalize(worldNormal);
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
-    vec3 gridPos = biasedPos / SURFACE_HISTORY_CELL_SIZE;
+    vec3 gridPos = biasedPos / SURFACE_HISTORY_CELL_SIZE - 0.5;
     ivec3 baseCell = ivec3(floor(gridPos));
-
-    bool empty = false;
-    if (tryLoadSurfaceHistoryCell(baseCell, n, lightingEpoch, history, empty))
-        return true;
-
-    // Dual-grid neighborhood fallback: test all seven other corners of the
-    // local 2x2x2 cell neighborhood, starting from the closest corner.
     vec3 f = fract(gridPos);
-    ivec3 stepDir = ivec3(
-        f.x >= 0.5 ? 1 : -1,
-        f.y >= 0.5 ? 1 : -1,
-        f.z >= 0.5 ? 1 : -1
-    );
 
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, 0, 0), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, stepDir.y, 0), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, 0, stepDir.z), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, stepDir.y, 0), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, 0, stepDir.z), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, stepDir.y, stepDir.z), n, lightingEpoch, history, empty))
-        return true;
-    if (tryLoadSurfaceHistoryCell(baseCell + stepDir, n, lightingEpoch, history, empty))
-        return true;
+    vec4 accumHistory = vec4(0.0);
+    float weightSum = 0.0;
+    bool empty = false;
 
+    // Trilinear interpolation across the eight neighboring cell centers.
+    // Each lookup uses the bounded hash probe sequence and never takes a lock.
+    for (int dz = 0; dz <= 1; ++dz) {
+        float wz = (dz == 0) ? (1.0 - f.z) : f.z;
+        for (int dy = 0; dy <= 1; ++dy) {
+            float wy = (dy == 0) ? (1.0 - f.y) : f.y;
+            for (int dx = 0; dx <= 1; ++dx) {
+                float wx = (dx == 0) ? (1.0 - f.x) : f.x;
+                float w = wx * wy * wz;
+                if (w <= 0.0001) continue;
+                ivec3 c = baseCell + ivec3(dx, dy, dz);
+                vec4 cellVal = vec4(0.0);
+                if (tryLoadSurfaceHistoryCell(c, n, lightingEpoch, cellVal, empty)) {
+                    accumHistory += w * cellVal;
+                    weightSum += w;
+                }
+            }
+        }
+    }
+
+    if (weightSum > 0.001) {
+        history = accumHistory / weightSum;
+        return true;
+    }
     return false;
 }
 
@@ -90,6 +91,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
     ivec3 cell = ivec3(floor(biasedPos / SURFACE_HISTORY_CELL_SIZE));
     uint packedN = packNormalOctahedral(n);
+    vec3 safeIrradiance = sanitizeHDR(clamp(irradiance, vec3(0.0), vec3(16.0)));
     uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
@@ -101,12 +103,6 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         memoryBarrierBuffer();
         if (observedSeq != atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u))
             return;
-        if (existing.meta.x == lightingEpoch &&
-            all(equal(existing.identity.xyz, cell)) &&
-            dot(unpackNormalOctahedral(uint(existing.identity.w)), n) > 0.50 &&
-            existing.meta.z == frameIndex && !overwriteSameFrame)
-            return;
-
         // One CAS attempt: no spinlock. A contended writer skips this sample;
         // another active pixel can publish the same surface during this dispatch.
         uint seq = observedSeq;
@@ -122,24 +118,12 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
 
         if (sameSurface) {
-            if (entry.meta.z == frameIndex && !overwriteSameFrame) {
-                memoryBarrierBuffer();
-                atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
-                return;
-            }
-
-            if (entry.meta.z == frameIndex && overwriteSameFrame) {
-                // Final Atrous output replaces temporal radiance for this frame.
-                surfaceHistoryCache.cells[index].radianceAge =
-                    vec4(max(irradiance, vec3(0.0)), max(entry.radianceAge.a, historyLength));
-            } else {
-                float oldAge = max(entry.radianceAge.a, 1.0);
-                float nextAge = min(oldAge + 1.0, 64.0);
-                float alpha = max(1.0 / nextAge, 0.025);
-                vec3 nextRadiance = mix(entry.radianceAge.rgb, max(irradiance, vec3(0.0)), alpha);
-                surfaceHistoryCache.cells[index].radianceAge =
-                    vec4(nextRadiance, max(historyLength, nextAge));
-            }
+            float oldAge = max(entry.radianceAge.a, 1.0);
+            float nextAge = min(max(oldAge, historyLength) + 1.0, 64.0);
+            float alpha = clamp(1.0 / nextAge, 0.05, 0.25);
+            vec3 nextRadiance = mix(entry.radianceAge.rgb, safeIrradiance, alpha);
+            surfaceHistoryCache.cells[index].radianceAge =
+                vec4(nextRadiance, max(historyLength, nextAge));
             // Existing key and lighting epoch remain stable for lock-free readers.
             surfaceHistoryCache.cells[index].meta.z = frameIndex;
             memoryBarrierBuffer();
@@ -148,7 +132,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         }
         if (empty || staleEpoch) {
             surfaceHistoryCache.cells[index].radianceAge =
-                vec4(max(irradiance, vec3(0.0)), max(historyLength, 1.0));
+                vec4(safeIrradiance, max(historyLength, 1.0));
             surfaceHistoryCache.cells[index].identity = ivec4(cell, int(packedN));
             surfaceHistoryCache.cells[index].meta.x = lightingEpoch;
             surfaceHistoryCache.cells[index].meta.z = frameIndex;
