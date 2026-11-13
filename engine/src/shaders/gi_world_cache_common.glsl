@@ -15,9 +15,15 @@ const float DEFAULT_CELL_SIZE = 1.0;
 
 uint packNormalOctahedral(vec3 n) {
     n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);
-    vec2 oct = (n.z >= 0.0) ? n.xy : (1.0 - abs(n.yx)) * sign(n.xy);
-    uvec2 u = uvec2(clamp(oct * 0.5 + 0.5, 0.0, 1.0) * 65535.0);
-    return (u.x & 0xFFFFu) | ((u.y & 0xFFFFu) << 16u);
+    if (n.z < 0.0) {
+        vec2 oldXY = n.xy;
+        vec2 signNotZero = vec2(oldXY.x >= 0.0 ? 1.0 : -1.0, oldXY.y >= 0.0 ? 1.0 : -1.0);
+        n.xy = (1.0 - abs(oldXY.yx)) * signNotZero;
+    }
+    vec2 oct = clamp(n.xy * 0.5 + 0.5, 0.0, 1.0);
+    uint ux = uint(oct.x * 65535.0 + 0.5);
+    uint uy = uint(oct.y * 65535.0 + 0.5);
+    return (uy << 16u) | ux;
 }
 
 vec3 unpackNormalOctahedral(uint packedN) {
