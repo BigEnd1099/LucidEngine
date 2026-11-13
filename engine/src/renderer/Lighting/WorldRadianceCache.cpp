@@ -133,6 +133,7 @@ namespace engine::renderer {
     void WorldRadianceCache::clear(VkCommandBuffer cmd) {
         if (!m_cellBuffer) return;
         vkCmdFillBuffer(cmd, m_cellBuffer, 0, sizeof(WorldRadianceCell) * CACHE_CELL_COUNT, 0);
+        m_needsClear = false;
 
         VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
@@ -158,6 +159,10 @@ namespace engine::renderer {
         if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer ||
             m_sceneSetLayout == VK_NULL_HANDLE || m_descriptorSet == VK_NULL_HANDLE ||
             tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
+
+        // Buffer allocations are not zero-initialized. Guarantee a valid empty table
+        // even when the first usable TLAS appears after the renderer's initial frame.
+        if (m_needsClear) clear(cmd);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
@@ -221,6 +226,7 @@ namespace engine::renderer {
             m_cellAlloc = VK_NULL_HANDLE;
         }
         m_initialized = false;
+        m_needsClear = true;
     }
 
     uint32_t WorldRadianceCache::hashWorldCell(const glm::vec3& pos, const glm::vec3& normal, float cellSize) {
