@@ -46,3 +46,14 @@ The headless fence change requires a Vulkan build and runtime validation in both
 The in-editor Performance Profiler now samples all 48 RT diagnostic metrics into the same rolling one-second window as CPU/GPU timings. It displays GI and reflection history acceptance, checkerboard reuse, depth/normal rejection, and two 16-bin history-age histograms. The **Copy 1-second average report** export includes every counter as an average count per rendered frame, the derived history acceptance percentages, and the exact values for all 32 histogram bins. The histogram values are not percentages; compare their distribution and totals against the corresponding pixel counters.
 
 The profiler only reads the metrics already published by RtDenoiser; it does not add GPU work, alter RT settings, or change temporal accumulation. A zero value can mean the corresponding effect is disabled or that no diagnostic events were recorded in the capture window.
+
+## Persistent diffuse surface history cache
+
+The RT denoiser now keeps two distinct world-space caches with different lifetimes:
+
+- **World radiance probes (binding 20):** coarse 1 m probes, updated by the ray-query probe pass and expired after 120 frames. The updater serializes per-slot EMA updates with the cell lock. Lighting edits clear this transient cache before its next update.
+- **Surface history (binding 21):** a dedicated 262,144-entry table with 25 cm quantized world-space coordinates, octahedral normal validation, a 8-slot linear-probe sequence, and an atomic per-entry lock. Each entry stores filtered diffuse irradiance and its valid-frame history length. It is written by the final à-trous pass, not by the temporal pass, so the stored value includes spatial denoising.
+
+Surface history has no frame TTL: static surfaces can retain accumulated irradiance while outside the viewport. A lighting epoch invalidates entries logically when lighting changes, avoiding a full 12 MiB clear. The table is initialized once with a transfer fill and an explicit transfer-to-compute buffer barrier. Specular reflection history is deliberately excluded because it is view-dependent.
+
+The temporal GI pass first attempts an exact quantized surface/normal match after disocclusion. If no persistent surface entry is found, it falls back to the transient world-probe cache, whose frame age is checked against the updater's 120-frame lifetime. All compute stages are ordered with storage read/write barriers; cache entry mutation is protected by bounded atomic lock acquisition.
