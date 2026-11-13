@@ -657,7 +657,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "7: Luminance Variance (SVGF)",
                             "8: Raw Specular Caustics (before filtering)",
                             "9: Caustic Contribution Density",
-                            "10: Temporal GI (before A-Trous)"
+                            "10: Temporal GI (before A-Trous)",
+                            "11: World Radiance Cache Hits (green=hit, red=miss, blue=disabled)",
+                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
