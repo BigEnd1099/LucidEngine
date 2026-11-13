@@ -230,7 +230,9 @@ namespace engine::renderer {
     }
 
     uint32_t WorldRadianceCache::hashWorldCell(const glm::vec3& pos, const glm::vec3& normal, float cellSize) {
-        glm::ivec3 cellCoord = glm::ivec3(glm::floor(pos / cellSize));
+        const glm::vec3 n = glm::normalize(normal);
+        const glm::vec3 biasedPos = pos + n * (cellSize * 0.25f);
+        glm::ivec3 cellCoord = glm::ivec3(glm::floor(biasedPos / cellSize));
         uint32_t normIdx = 0u;
         if (std::abs(normal.x) > std::abs(normal.y) && std::abs(normal.x) > std::abs(normal.z)) {
             normIdx = normal.x > 0.0f ? 0u : 1u;
