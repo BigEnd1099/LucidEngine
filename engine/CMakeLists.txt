@@ -220,13 +220,23 @@ if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
 endif()
 
+# Run on every build: POST_BUILD on engine alone is not sufficient when only a
+# shader changes and the executable itself does not need relinking. TARGET_FILE_DIR
+# resolves to the active configuration directory (e.g. Release/ or Debug/).
+set(SPV_COPY_COMMANDS)
 foreach(SPV_FILE ${SPV_FILES})
-    add_custom_command(TARGET engine POST_BUILD
+    list(APPEND SPV_COPY_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${SPV_FILE}
-        $<TARGET_FILE_DIR:engine>
+        "${SPV_FILE}"
+        "$<TARGET_FILE_DIR:engine>"
     )
 endforeach()
+add_custom_target(CopyCompiledShaders ALL
+    ${SPV_COPY_COMMANDS}
+    DEPENDS ${SPV_FILES}
+    VERBATIM
+)
+add_dependencies(CopyCompiledShaders engine)
 
 add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
