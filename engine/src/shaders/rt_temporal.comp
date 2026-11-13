@@ -431,8 +431,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     // Re-seed young screen-space history continuously from persistent caches.
     // A valid screen reprojection remains primary; cache data gently stabilizes it
     // until temporal accumulation has enough observations to stand on its own.
-    if ((newLen < 16.0 || wSum < 0.5) &&
-        ((isCheckerSkipped && wSum <= 0.05) || (!isCheckerSkipped && wSum < 0.5))) {
+    if (newLen < 16.0 || wSum < 0.5) {
         // Prefer an exact persistent surface match; use the lower-resolution probe
         // cache only as a conservative fallback when the surface table has no hit.
         vec4 surfaceHistory = vec4(0.0);
@@ -444,8 +443,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             newLen = max(newLen, restoredAge);
         } else if ((pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
-            if (cached.a > 0.0)
-                result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
+            if (cached.a > 0.0) {
+                result.rgb = mix(result.rgb, cached.rgb, 0.45 * cached.a);
+                newLen = max(newLen, min(cached.a * 16.0, effectiveMaxHist));
+            }
         }
     }
 
