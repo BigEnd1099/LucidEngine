@@ -87,10 +87,19 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
             dot(unpackNormalOctahedral(uint(existing.identity.w)), normalize(worldNormal)) > 0.75 &&
             existing.meta.z == frameIndex)
             return;
-        uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((seq & 1u) != 0u ||
-            atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
-            continue;
+        uint seq = 0u;
+        bool acquired = false;
+        // Retry this slot while another writer is publishing it. Moving to the
+        // next probe on contention could create duplicate entries for one surface.
+        for (uint spin = 0u; spin < 32u; ++spin) {
+            seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if ((seq & 1u) != 0u) continue;
+            if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) == seq) {
+                acquired = true;
+                break;
+            }
+        }
+        if (!acquired) return;
         memoryBarrierBuffer();
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
