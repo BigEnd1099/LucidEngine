@@ -13,7 +13,8 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec4 fragTangent;
 layout(location = 4) out vec4 fragColor;
-layout(location = 5) noperspective out vec2 fragMotion;
+layout(location = 5) out vec4 currClipPos;
+layout(location = 6) out vec4 prevClipPos;
 
 layout(set = 0, binding = 1) uniform SceneUbo {
     mat4 viewProj;
@@ -52,17 +53,10 @@ void main() {
         fragTangent = vec4(0.0, 0.0, 0.0, 0.0);
     }
 
-    vec4 currClip = ubo.viewProj * curWorldPos;
-    gl_Position = currClip;
+    gl_Position = ubo.viewProj * curWorldPos;
+    currClipPos = gl_Position;
 
     mat4 prevModel = motion.prevModels[gl_InstanceIndex];
     vec4 prevWorldPos = prevModel * vec4(inPosition, 1.0);
-    vec4 prevClip = motion.prevViewProj * prevWorldPos;
-
-    // Motion vectors are screen-space quantities. Interpolate the already
-    // projected velocity linearly across the rasterized triangle; perspective-
-    // correct interpolation of clip-space positions distorts reprojection.
-    vec2 currNdc = currClip.xy / max(abs(currClip.w), 1e-6) * sign(currClip.w);
-    vec2 prevNdc = prevClip.xy / max(abs(prevClip.w), 1e-6) * sign(prevClip.w);
-    fragMotion = (currNdc - prevNdc) * 0.5;
+    prevClipPos = motion.prevViewProj * prevWorldPos;
 }
