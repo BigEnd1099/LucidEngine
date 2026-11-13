@@ -54,7 +54,7 @@ void main() {
         // 16 vertical bands to [-2 m, +13 m] instead of wasting half below floor.
         int gz = int(probeLinearIdx / 1024u) - 16;
         uint rem = probeLinearIdx % 1024u;
-        int gy = int(rem / 32u) / 2 - 2;
+        int gy = int(round(float(rem / 32u) * (16.0 / 31.0))) - 2;
         int gx = int(rem % 32u) - 16;
         probePos = cameraPos + vec3(float(gx), float(gy), float(gz)) * cellSize;
     }
