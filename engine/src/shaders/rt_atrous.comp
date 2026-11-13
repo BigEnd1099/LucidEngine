@@ -47,7 +47,7 @@ void storeDst(ivec2 p, vec4 v) {
 }
 
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
-    if (PASS != 3 || pc.u.z == 0u || geom.w < 2.0 ||
+    if (PASS != 3 || pc.u.y == 0u || pc.u.z == 0u || geom.w < 2.0 ||
         ((px.x & 1) != 0) || ((px.y & 1) != 0)) return;
     vec2 uv = (vec2(px) + 0.5) / size;
     ivec2 depthSize = textureSize(uDepth, 0);
