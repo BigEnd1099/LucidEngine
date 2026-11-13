@@ -259,9 +259,14 @@ namespace engine::renderer {
         oct = oct * 2.0f - 1.0f;
         glm::vec3 n = glm::vec3(oct.x, oct.y, 1.0f - std::abs(oct.x) - std::abs(oct.y));
         if (n.z < 0.0f) {
-            glm::vec2 signNotZero = glm::vec2(n.x >= 0.0f ? 1.0f : -1.0f, n.y >= 0.0f ? 1.0f : -1.0f);
-            n.x = (1.0f - std::abs(n.y)) * signNotZero.x;
-            n.y = (1.0f - std::abs(n.x)) * signNotZero.y;
+            // Both folded components must use the original octahedral coordinates.
+            // Updating n.x before evaluating n.y otherwise introduces a CPU/GPU mismatch.
+            const float oldX = n.x;
+            const float oldY = n.y;
+            const float signX = oldX >= 0.0f ? 1.0f : -1.0f;
+            const float signY = oldY >= 0.0f ? 1.0f : -1.0f;
+            n.x = (1.0f - std::abs(oldY)) * signX;
+            n.y = (1.0f - std::abs(oldX)) * signY;
         }
         return glm::normalize(n);
     }
