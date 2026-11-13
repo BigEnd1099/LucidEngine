@@ -5,7 +5,8 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec4 fragTangent;
 layout(location = 4) in vec4 fragColor;
-layout(location = 5) noperspective in vec2 fragMotion;
+layout(location = 5) in vec4 currClipPos;
+layout(location = 6) in vec4 prevClipPos;
 
 layout(location = 0) out vec4 outNormalRoughness; // xyz: normal, w: roughness
 layout(location = 1) out vec4 outAlbedoMetallic;  // rgb: albedo (linear), a: metallic
@@ -56,7 +57,12 @@ void main() {
     float roughness = clamp(orm.g * pcs.normalCol1.w, 0.0, 1.0);
     float metallic  = clamp(orm.b * pcs.normalCol0.w, 0.0, 1.0);
 
+    vec2 curNDC  = currClipPos.xy / max(currClipPos.w, 1e-5);
+    vec2 prevNDC = prevClipPos.xy / max(prevClipPos.w, 1e-5);
+    // Convert NDC delta to UV space delta
+    vec2 velocity = (curNDC - prevNDC) * 0.5;
+
     outNormalRoughness = vec4(finalNormal, roughness);
     outAlbedoMetallic  = vec4(albedoLinear, metallic);
-    outMotion          = fragMotion;
+    outMotion          = velocity;
 }
