@@ -73,9 +73,9 @@ namespace engine::renderer {
         // The frame fence guarantees the previous timestamp set
         // is available. Never stall here: consume it only when Vulkan reports ready.
         if (m_timestampQueryPool && m_timestampQueryPending) {
-            uint64_t timestamps[11]{};
+            uint64_t timestamps[13]{};
             const VkResult queryResult = vkGetQueryPoolResults(
-                m_context->getDevice(), m_timestampQueryPool, 0, 11,
+                m_context->getDevice(), m_timestampQueryPool, 0, 13,
                 sizeof(timestamps), timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT);
             if (queryResult == VK_SUCCESS) {
@@ -98,6 +98,7 @@ namespace engine::renderer {
                 core::Profiler::get().recordMetric("gpuAoRtMs", elapsedMs(4, 5));
                 core::Profiler::get().recordMetric("gpuScreenSpaceAoGiMs", m_screenSpaceAoGiPassActive ? elapsedMs(4, 9) : 0.0);
                 core::Profiler::get().recordMetric("gpuScreenSpaceBlurMs", m_screenSpaceAoGiPassActive ? elapsedMs(9, 10) : 0.0);
+                core::Profiler::get().recordMetric("gpuWorldRadianceCacheUpdateMs", elapsedMs(11, 12));
                 core::Profiler::get().recordMetric("gpuHdrMs", elapsedMs(5, 6));
                 core::Profiler::get().recordMetric("gpuPostMs", elapsedMs(6, 7));
                 core::Profiler::get().recordMetric("gpuUiMs", elapsedMs(7, 8));
@@ -128,7 +129,7 @@ namespace engine::renderer {
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (m_timestampQueryPool) {
-            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 11);
+            vkCmdResetQueryPool(m_commandBuffer, m_timestampQueryPool, 0, 13);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestampQueryPool, 0);
         }
 
@@ -1291,6 +1292,8 @@ namespace engine::renderer {
         // PASS 2C: RT INDIRECT (diffuse GI + AO): trace -> temporal accumulation -> a-trous
         // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
         // =========================================================================
+        if (m_timestampQueryPool)
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 11);
         {
             const bool tlasReady = m_sceneUboMappedPtr &&
                 static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
@@ -1323,8 +1326,11 @@ namespace engine::renderer {
                     );
                 }
             }
+        }
+        if (m_timestampQueryPool)
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 12);
 
-            const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
+        const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
                 m_rtGraphicsPipeline != VK_NULL_HANDLE &&
                 m_accelerationStructure.getTLAS() != VK_NULL_HANDLE &&
                 tlasReady && m_descriptorSet != VK_NULL_HANDLE &&
