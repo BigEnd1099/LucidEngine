@@ -810,6 +810,8 @@ namespace engine::renderer {
             pd.f.y = std::max(params.maxHistory, 1.0f);
             pd.u[0] = 0u;
             pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[0], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
@@ -819,6 +821,9 @@ namespace engine::renderer {
 
             // Pass 4: Atrous step 2 (A -> S, step 2)
             pd.f.x = params.giAtrousPassEnabled[1] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[1], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 7);
@@ -828,6 +833,9 @@ namespace engine::renderer {
 
             // Pass 5: Atrous step 3 (S -> A, step 4)
             pd.f.x = params.giAtrousPassEnabled[2] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[2], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 9);
@@ -838,6 +846,9 @@ namespace engine::renderer {
             // Pass 6: Atrous step 4 (A -> S, step 8, final output with debugMode)
             pd.f.x = params.giAtrousPassEnabled[3] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.u[0] = static_cast<uint32_t>(params.debugMode);
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[2] = m_surfaceHistoryLightingEpoch;
+            pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[3], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 11);
