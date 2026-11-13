@@ -107,8 +107,8 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
             existing.meta.z == frameIndex && !overwriteSameFrame)
             return;
 
-        // One CAS attempt: no spinlock. A contended writer skips this frame;
-        // the active checkerboard phase retries on the next frame.
+        // One CAS attempt: no spinlock. A contended writer skips this sample;
+        // another active pixel can publish the same surface during this dispatch.
         uint seq = observedSeq;
         if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             return;
