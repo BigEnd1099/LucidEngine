@@ -10,7 +10,7 @@ struct SurfaceHistoryCell {
 const uint SURFACE_HISTORY_CELL_COUNT = 262144u;
 const float SURFACE_HISTORY_CELL_SIZE = 0.25;
 const uint SURFACE_HISTORY_PROBE_COUNT = 8u;
-layout(set = 1, binding = 21, std430) buffer SurfaceHistoryCacheBuf {
+layout(set = 1, binding = 21, std430) coherent buffer SurfaceHistoryCacheBuf {
     SurfaceHistoryCell cells[];
 } surfaceHistoryCache;
 
