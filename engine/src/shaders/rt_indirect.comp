@@ -93,10 +93,11 @@ float smithG1GGXGI(float nDotV, float alpha) {
     return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
-void processPixel(out uint diagValues[12]) {
-for (int i = 0; i < 12; ++i) diagValues[i] = 0u;
+void processPixel(out uint diagValues[12], out bool diagnosticsValid) {
+diagnosticsValid = false;
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
+const bool debugRawGi = (pc.u.z & 64u) != 0u;
 if (any(greaterThanEqual(px, isize))) return;
 vec2 size = vec2(isize);
 
@@ -146,7 +147,7 @@ if (dot(N, toCam) < 0.0) N = -N;
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
+    if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgCaustics, px, vec4(0.0));
     return;
 }
@@ -155,7 +156,6 @@ const int baseSamples = int(clamp(pc.u.x, 1u, 16u));
 const uint frame = pc.u.y;
 const bool doGI = (pc.u.z & 1u) != 0u;
 const bool doAO = (pc.u.z & 2u) != 0u;
-const bool debugRawGi = (pc.u.z & 64u) != 0u;
 const bool clampPathFireflies = (pc.u.z & 8u) != 0u;
 const bool useCheckerboard = (pc.u.z & 4u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
@@ -170,6 +170,8 @@ if (checkerSkip) {
     return;
 }
 
+for (int i = 0; i < 12; ++i) diagValues[i] = 0u;
+diagnosticsValid = true;
 int samples = baseSamples;
 
 rngInit(uvec2(px), frame);
@@ -405,12 +407,15 @@ diagValues[7] = diagPathBounces;
 
 void main() {
     uint diagValues[12];
-    processPixel(diagValues);
+    bool diagnosticsValid = false;
+    processPixel(diagValues, diagnosticsValid);
 
     // Skip the diagnostic reductions entirely for subgroups with no hit/query
     // counters (e.g. sky-only tiles). The ballot result is subgroup-uniform.
     uint diagMask = 0u;
-    for (uint metric = 0u; metric < 12u; ++metric) diagMask |= diagValues[metric];
+    if (diagnosticsValid) {
+        for (uint metric = 0u; metric < 12u; ++metric) diagMask |= diagValues[metric];
+    }
     uvec4 diagBallot = subgroupBallot(diagMask != 0u);
     if (subgroupBallotBitCount(diagBallot) != 0u) {
         for (uint metric = 0u; metric < 12u; ++metric) {
