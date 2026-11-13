@@ -79,6 +79,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     vec3 N = gNR.xyz;
     if (dot(N, N) <= 0.0001) {
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
+        imageStore(imgReflHistCur, px, vec4(0.0));
         rejectedCounted = true;
         return;
     }
@@ -339,7 +340,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     }
 
     // Alpha of the private history image stores effective accumulated sample age.
-    // The public reflection output keeps alpha=1 as its validity mask for PBR.
+    // The spatial resolve pass converts it to the public alpha=1 validity mask for PBR.
     ageBin = min(uint(clamp(historyAge / effectiveMaxHistory, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
