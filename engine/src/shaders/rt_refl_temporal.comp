@@ -82,29 +82,38 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
 
-    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
-    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
-    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
-
     vec4 raw = imageLoad(imgRefl, px);
+    if (raw.a <= 0.0) {
+        // No reflection was traced (e.g. roughness above maxRoughness).
+        // Skip world-position reconstruction and publish invalid reprojection geometry.
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
+        if ((pc.u.w & (1u << 15)) != 0u) {
+            imageStore(imgReflHistCur, px, vec4(raw.rgb, 0.0));
+            imageStore(imgRefl, px, raw);
+        } else {
+            atomicAdd(rtLocalCounters[10], 1u);
+            imageStore(imgReflHistCur, px, vec4(0.0));
+            imageStore(imgRefl, px, vec4(0.0));
+        }
+        ageBin = 0u;
+        histogramCounted = true;
+        return;
+    }
     if ((pc.u.w & (1u << 15)) != 0u) {
-        float valid = raw.a > 0.0 ? 1.0 : 0.0;
-        imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
+        // Bypass mode still publishes valid geometry for traced reflection samples.
+        vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+        float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+        imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
+        imageStore(imgReflHistCur, px, vec4(raw.rgb, 1.0));
         imageStore(imgRefl, px, raw);
         ageBin = 0u;
         histogramCounted = true;
         return;
     }
-    if (raw.a <= 0.0) {
-        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        atomicAdd(rtLocalCounters[10], 1u);
-        ageBin = 0u;
-        histogramCounted = true; // zero-age / no reflection sample
-        // Sky or skipped roughness > maxRoughness
-        imageStore(imgReflHistCur, px, vec4(0.0));
-        imageStore(imgRefl, px, vec4(0.0));
-        return;
-    }
+
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
 
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
@@ -221,6 +230,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 vec3 m1Y = vec3(0.0);
                 vec3 m2Y = vec3(0.0);
                 float count = 0.0;
+                // Cache neighbor luminance during the first 3x3 read; reuse it below.
+                float neighborLums[9];
+                for (int i = 0; i < 9; ++i) neighborLums[i] = -1.0;
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dx = -1; dx <= 1; ++dx) {
                         if (dx == 0 && dy == 0) continue; // Exclude center to avoid firefly self-contamination
@@ -228,6 +240,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                         if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
                         vec4 sVal = imageLoad(imgRefl, sp);
                         if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
+                        int neighborIndex = (dy + 1) * 3 + (dx + 1);
+                        neighborLums[neighborIndex] = dot(sVal.rgb, vec3(0.2126, 0.7152, 0.0722));
                         vec3 sY = rgbToYCoCg(sVal.rgb);
                         m1Y += sY;
                         m2Y += sY * sY;
@@ -256,18 +270,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
                     float maxSupportedLum = clampMaxY.x;
-                    for (int fy = -1; fy <= 1; ++fy) {
-                        for (int fx = -1; fx <= 1; ++fx) {
-                            if (fx == 0 && fy == 0) continue;
-                            ivec2 fp = px + ivec2(fx, fy);
-                            if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
-                            vec4 fVal = imageLoad(imgRefl, fp);
-                            if (fVal.a < 0.5) continue;
-                            float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
-                            if (neighborLum >= supportThreshold) {
-                                brightNeighborCount += 1.0;
-                                maxSupportedLum = max(maxSupportedLum, neighborLum);
-                            }
+                    for (int neighborIndex = 0; neighborIndex < 9; ++neighborIndex) {
+                        float neighborLum = neighborLums[neighborIndex];
+                        if (neighborLum < 0.0) continue;
+                        if (neighborLum >= supportThreshold) {
+                            brightNeighborCount += 1.0;
+                            maxSupportedLum = max(maxSupportedLum, neighborLum);
                         }
                     }
                     bool isolatedFirefly = count >= 4.0 &&
