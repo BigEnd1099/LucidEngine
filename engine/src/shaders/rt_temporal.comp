@@ -499,17 +499,24 @@ void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     processPixel(px, ageBin, histogramCounted, pixelDiag);
 
-    for (uint metric = 0u; metric < 8u; ++metric) {
-        addDiagCounter(metric, pixelDiag[metric]);
+    uint diagMask = 0u;
+    for (uint metric = 0u; metric < 8u; ++metric) diagMask |= pixelDiag[metric];
+    uvec4 diagBallot = subgroupBallot(diagMask != 0u);
+    if (subgroupBallotBitCount(diagBallot) != 0u) {
+        for (uint metric = 0u; metric < 8u; ++metric) {
+            addDiagCounter(metric, pixelDiag[metric]);
+        }
     }
 
-    // Each age-bin count is a subgroup ballot. No per-pixel shared writes,
-    // shared atomics, or workgroup-wide barrier are needed.
-    for (uint bin = 0u; bin < 16u; ++bin) {
-        uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
-        uint binCount = subgroupBallotBitCount(ballot);
-        if (subgroupElect() && binCount != 0u) {
-            atomicAdd(rtDiag.counters[16u + bin], binCount);
+    // Sky/out-of-bounds-only subgroups have no age-bin work to reduce.
+    uvec4 histogramBallot = subgroupBallot(histogramCounted);
+    if (subgroupBallotBitCount(histogramBallot) != 0u) {
+        for (uint bin = 0u; bin < 16u; ++bin) {
+            uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
+            uint binCount = subgroupBallotBitCount(ballot);
+            if (subgroupElect() && binCount != 0u) {
+                atomicAdd(rtDiag.counters[16u + bin], binCount);
+            }
         }
     }
 }

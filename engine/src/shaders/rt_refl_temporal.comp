@@ -320,15 +320,25 @@ void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     processPixel(px, ageBin, histogramCounted, rejectedCounted, pixelDiag);
 
-    for (uint metric = 0u; metric < 16u; ++metric) {
-        addDiagCounter(metric, pixelDiag[metric]);
+    uint diagMask = 0u;
+    for (uint metric = 0u; metric < 16u; ++metric) diagMask |= pixelDiag[metric];
+    uvec4 diagBallot = subgroupBallot(diagMask != 0u);
+    if (subgroupBallotBitCount(diagBallot) != 0u) {
+        for (uint metric = 0u; metric < 16u; ++metric) {
+            addDiagCounter(metric, pixelDiag[metric]);
+        }
     }
 
-    for (uint bin = 0u; bin < 16u; ++bin) {
-        uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
-        uint binCount = subgroupBallotBitCount(ballot);
-        if (subgroupElect() && binCount != 0u) {
-            atomicAdd(rtDiag.counters[32u + bin], binCount);
+    // Most roughness-cutoff / sky subgroups have no valid age samples.
+    // Skip all sixteen bin ballots when the subgroup has no histogram entries.
+    uvec4 histogramBallot = subgroupBallot(histogramCounted);
+    if (subgroupBallotBitCount(histogramBallot) != 0u) {
+        for (uint bin = 0u; bin < 16u; ++bin) {
+            uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
+            uint binCount = subgroupBallotBitCount(ballot);
+            if (subgroupElect() && binCount != 0u) {
+                atomicAdd(rtDiag.counters[32u + bin], binCount);
+            }
         }
     }
 

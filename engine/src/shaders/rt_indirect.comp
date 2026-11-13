@@ -407,10 +407,14 @@ void main() {
     uint diagValues[12];
     processPixel(diagValues);
 
-    // Workgroup size is 64, but reduction is performed independently inside
-    // each hardware subgroup (normally 32 lanes on NVIDIA), with no shared memory
-    // and no workgroup barrier.
-    for (uint metric = 0u; metric < 12u; ++metric) {
-        addDiagCounter(48u + metric, diagValues[metric]);
+    // Skip the diagnostic reductions entirely for subgroups with no hit/query
+    // counters (e.g. sky-only tiles). The ballot result is subgroup-uniform.
+    uint diagMask = 0u;
+    for (uint metric = 0u; metric < 12u; ++metric) diagMask |= diagValues[metric];
+    uvec4 diagBallot = subgroupBallot(diagMask != 0u);
+    if (subgroupBallotBitCount(diagBallot) != 0u) {
+        for (uint metric = 0u; metric < 12u; ++metric) {
+            addDiagCounter(48u + metric, diagValues[metric]);
+        }
     }
 }
