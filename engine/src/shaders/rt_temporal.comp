@@ -121,10 +121,11 @@ layout(push_constant) uniform PC {
 
 
 
-shared uint rtLocalCounters[48];
+shared uint rtPixelDiag[8 * 64];
 shared uint rtLocalAgeBins[64];
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint pixelDiag[8]) {
+    for (int i = 0; i < 8; ++i) pixelDiag[i] = 0u;
     histogramCounted = false;
     ageBin = 0u;
 
@@ -137,11 +138,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
 
 
-    atomicAdd(rtLocalCounters[0], 1u);
+    pixelDiag[0]++;
     vec4 geom = imageLoad(imgGeomCur, px);
 
     if (geom.z < 0.0) { // sky
-        atomicAdd(rtLocalCounters[2], 1u);
+        pixelDiag[2]++;
 
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
@@ -227,14 +228,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[3], 1u); continue; }
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { pixelDiag[3]++; continue; }
 
             vec4 g = imageLoad(imgGeomPrev, tp);
             if (g.z < 0.0) continue;
 
             // Disocclusion tests: slope-adjusted depth + surface normal
-            if (abs(g.z - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[4], 1u); continue; }
-            if (dot(rtOctDecode(g.xy), N) < 0.8) { atomicAdd(rtLocalCounters[5], 1u); continue; }
+            if (abs(g.z - pClip.w) > depthTol) { pixelDiag[4]++; continue; }
+            if (dot(rtOctDecode(g.xy), N) < 0.8) { pixelDiag[5]++; continue; }
 
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist        += w * imageLoad(imgHistPrev, tp);
@@ -260,7 +261,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     bool isCheckerSkipped = (raw.a < -0.5);
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[6], 1u);
+            pixelDiag[6]++;
             // Full temporal reuse from the alternating frame when this pixel was traced
             hist /= wSum;
             histMoments /= wSum;
@@ -269,7 +270,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
-            atomicAdd(rtLocalCounters[7], 1u);
+            pixelDiag[7]++;
             // Disocclusion / invalid history: bilateral reconstruction from the 4 active neighbors in current frame
             vec4 neighborSum = vec4(0.0);
             float weightSum = 0.0;
@@ -304,7 +305,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     } else {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[1], 1u);
+            pixelDiag[1]++;
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
@@ -409,7 +410,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             float variance = (newLen < 4.0) ? mix(spatialVar, temporalVar, clamp((newLen - 1.0) / 3.0, 0.0, 1.0)) : temporalVar;
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
-            atomicAdd(rtLocalCounters[2], 1u);
+            pixelDiag[2]++;
             newLen = 1.0;
             result = raw;
 
@@ -486,13 +487,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
 void main() {
     uint lane = gl_LocalInvocationIndex;
-    if (lane < 48u) rtLocalCounters[lane] = 0u;
-    barrier();
-
     uint ageBin = 0u;
     bool histogramCounted = false;
+    uint pixelDiag[8];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted);
+    processPixel(px, ageBin, histogramCounted, pixelDiag);
+
+    for (uint metric = 0u; metric < 8u; ++metric)
+        rtPixelDiag[metric * 64u + lane] = pixelDiag[metric];
     rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
 
     barrier();
@@ -505,10 +507,14 @@ void main() {
         }
         for (uint bin = 0u; bin < 16u; ++bin)
             if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[16u + bin], histogram[bin]);
-    }
 
-    if (lane < 16u) {
-        uint count = rtLocalCounters[lane];
-        if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
+        // Aggregate per-pixel counters in registers and publish once per
+        // non-empty metric for the whole 8x8 workgroup.
+        for (uint metric = 0u; metric < 8u; ++metric) {
+            uint total = 0u;
+            for (uint i = 0u; i < 64u; ++i)
+                total += rtPixelDiag[metric * 64u + i];
+            if (total != 0u) atomicAdd(rtDiag.counters[metric], total);
+        }
     }
 }
