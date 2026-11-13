@@ -17,7 +17,9 @@ layout(constant_id = 0) const int PASS = 0;
 
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
+#include "gi_surface_history_common.glsl"
 
+layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
 layout(set = 1, binding = 2, rgba16f) uniform image2D imgA;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
@@ -41,6 +43,18 @@ vec4 loadSrc(ivec2 p) {
 void storeDst(ivec2 p, vec4 v) {
     if (PASS == 0 || PASS == 2) imageStore(imgA, p, v);
     else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
+}
+
+void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
+    if (PASS != 3 || pc.u.z == 0u || geom.w < 2.0 ||
+        ((px.x & 1) != 0) || ((px.y & 1) != 0)) return;
+    vec2 uv = (vec2(px) + 0.5) / size;
+    ivec2 depthSize = textureSize(uDepth, 0);
+    ivec2 depthPx = clamp(ivec2(uv * vec2(depthSize)), ivec2(0), depthSize - 1);
+    float depth = texelFetch(uDepth, depthPx, 0).r;
+    vec3 worldPos = rtWorldPos(vec2(px) + 0.5, depth, size);
+    vec3 worldNormal = rtOctDecode(geom.xy);
+    storeSurfaceHistory(worldPos, worldNormal, filteredRadiance, geom.w, pc.u.z, pc.u.w);
 }
 
 void main() {
@@ -116,7 +130,12 @@ void main() {
         }
     }
 
-    if (gC.z < 0.0 || pc.f.x <= 0.001) { storeDst(px, center); return; }
+    if (gC.z < 0.0) { storeDst(px, center); return; }
+    if (pc.f.x <= 0.001) {
+        storeDst(px, center);
+        persistFinalSurfaceHistory(px, size, gC, center.rgb);
+        return;
+    }
 
     vec3 nC = rtOctDecode(gC.xy);
     vec3 nCv = mat3(ubo.view) * nC;
@@ -182,5 +201,7 @@ void main() {
     // Spatial strength directly controls filtering. SVGF edge-stopping functions
     // (depth, normal, and variance-guided luminance weight) naturally preserve true details.
     float s = clamp(pc.f.x, 0.0, 1.0);
-    storeDst(px, mix(center, filtered, s));
+    vec4 finalValue = mix(center, filtered, s);
+    storeDst(px, finalValue);
+    persistFinalSurfaceHistory(px, size, gC, finalValue.rgb);
 }
