@@ -5,7 +5,7 @@
 struct SurfaceHistoryCell {
     vec4 radianceAge;       // RGB = diffuse irradiance, A = valid-frame history length
     ivec4 identity;         // xyz = signed 25 cm cell coordinate, w = packed octahedral normal
-    uvec4 meta;             // x = lighting epoch, y = spin lock, z = last update frame, w = reserved
+    uvec4 meta;             // x = lighting epoch, y = odd/even writer sequence, z = last update frame, w = reserved
 };
 const uint SURFACE_HISTORY_CELL_COUNT = 262144u;
 const float SURFACE_HISTORY_CELL_SIZE = 0.25;
@@ -84,6 +84,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
         if (existing.meta.x == lightingEpoch &&
             all(equal(existing.identity.xyz, cell)) &&
+            dot(unpackNormalOctahedral(uint(existing.identity.w)), normalize(worldNormal)) > 0.75 &&
             existing.meta.z == frameIndex)
             return;
         uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
