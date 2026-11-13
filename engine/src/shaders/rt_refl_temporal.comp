@@ -191,16 +191,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                 checkerCount += 1.0;
             }
             vec3 checkerHistRgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
-            if (checkerCount > 0.0) {
-                vec3 margin = (motionPixels > 0.25)
-                    ? vec3(0.0)
-                    : max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
+            if (checkerCount > 0.0 && motionPixels > 0.75 && checkerMaxY.x > 0.05) {
+                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.0, vec3(0.15));
+                vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
                 vec3 clampedHistRgb = max(vec3(0.0), yCoCgToRgb(
-                    clamp(rgbToYCoCg(checkerHistRgb), checkerMinY - margin, checkerMaxY + margin)));
-                if (motionPixels > 0.25) {
+                    clamp(checkerHistY, checkerMinY - margin, upperBound)));
+                if (motionPixels > 1.5) {
                     vec3 cardinalAvgRgb = cardinalSumRgb / checkerCount;
                     clampedHistRgb = mix(clampedHistRgb, cardinalAvgRgb,
-                        clamp(motionPixels * 0.35, 0.0, 0.85));
+                        clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
                 }
                 checkerHistRgb = clampedHistRgb;
             }
@@ -283,9 +282,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     m1Y /= count;
                     m2Y /= count;
                     vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
-                    float sigmaScale = mix(2.0, 0.85, clamp(motionPixels * 0.2, 0.0, 1.0));
-                    vec3 clampMinY = m1Y - sigmaY * sigmaScale;
-                    vec3 clampMaxY = m1Y + sigmaY * sigmaScale;
+                    vec3 effectiveSigma = max(sigmaY, vec3(0.06, 0.03, 0.03));
+                    float sigmaScale = mix(3.0, 1.5, clamp(motionPixels * 0.15, 0.0, 1.0));
+                    vec3 clampMinY = m1Y - effectiveSigma * sigmaScale;
+                    vec3 clampMaxY = m1Y + effectiveSigma * (sigmaScale + 0.5);
                     clampMinY.x = max(0.0, clampMinY.x);
                     clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
@@ -315,9 +315,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     bool isolatedFirefly = count >= 4.0 &&
                         brightNeighborCount <= floor(count * 0.125);
                     // Expand the upper bound for bright features supported by neighboring samples.
-                    if (!isolatedFirefly && motionPixels <= 0.1)
+                    if (!isolatedFirefly) {
+                        float reflRetention = mix(0.97, 0.85, clamp(motionPixels * 0.15, 0.0, 1.0));
+                        if (hist.a >= 3.0)
+                            clampMaxY = max(clampMaxY, histY * reflRetention);
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
-                    histY = clamp(histY, clampMinY, clampMaxY);
+                    }
+                    if (outlierFilterEnabled)
+                        histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                     if (outlierFilterEnabled && isolatedFirefly &&
                         rawY.x > m1Y.x + fireflyThreshold) {
