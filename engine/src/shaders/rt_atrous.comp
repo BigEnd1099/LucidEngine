@@ -17,6 +17,7 @@ layout(constant_id = 0) const int PASS = 0;
 
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
+#include "gi_world_cache_common.glsl"
 #include "gi_surface_history_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
