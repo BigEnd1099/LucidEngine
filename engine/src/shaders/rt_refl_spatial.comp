@@ -18,7 +18,7 @@ layout(set = 1, binding = 10, rgba16f) uniform readonly image2D imgReflHistCur;
 
 layout(push_constant) uniform PC {
     mat4 prevViewProj;
-    vec4 f;   // x = max history, y = samples, z = history valid, w = max roughness
+    vec4 f;   // x = spatial strength (0 = resolve-only copy), remaining fields are shared push-constant data
     uvec4 u;  // u.w: bit 14 = denoiseMirrors
 } pc;
 
