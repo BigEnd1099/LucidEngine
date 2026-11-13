@@ -29,7 +29,7 @@ void main() {
     uint probeLinearIdx = (gl_GlobalInvocationID.x + pc.frameAndSlice.y) & 32767u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
-    float cellSize = pc.cameraPosAndCellSize.w > 0.0 ? pc.cameraPosAndCellSize.w : DEFAULT_CELL_SIZE;
+    float cellSize = DEFAULT_CELL_SIZE;
     vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
 
     // Uniform full-sphere ray direction shared by both probe populations.
@@ -72,10 +72,43 @@ void main() {
     }
 
     vec3 cellNormal = normalize(hitNormal);
-    // computeWorldCellKey applies the same normal-directed voxel bias used
-    // by G-buffer lookups, so ray-hit and visible surface keys agree.
-    vec3 hitRad = shadeRtHitEx(hit, hitPos, hitNormal, hitUv, hitTangent,
-                               sampleDir, true, 0.25);
+    if (dot(cellNormal, -sampleDir) < 0.0) cellNormal = -cellNormal;
+
+    // Evaluate incoming indirect irradiance arriving at (hitPos, cellNormal) by
+    // tracing a cosine-hemisphere bounce ray. Storing incoming indirect light
+    // (rather than direct light * self-albedo) populates shadowed objects (sphere,
+    // cube, walls) with floor bounce light and prevents self-albedo edge outlines.
+    vec3 bounceDir = sampleCosineHemisphere(cellNormal, vec2(rand1(), rand1()));
+    RtInstanceData bounceHit;
+    vec3 bouncePos, bounceNormal;
+    vec2 bounceUv;
+    vec4 bounceTangent;
+    float bounceDist;
+    vec3 hitRad = vec3(0.0);
+    if (traceSceneSurface(hitPos + cellNormal * 0.02, bounceDir, 30.0,
+            bounceHit, bouncePos, bounceNormal, bounceUv, bounceTangent, bounceDist)) {
+        vec3 bN = normalize(bounceNormal);
+        if (dot(bN, -bounceDir) < 0.0) bN = -bN;
+        hitRad = shadeRtHitEx(bounceHit, bouncePos, bN, bounceUv, bounceTangent,
+                              bounceDir, true, -1.0, -1, 1.0, 1.5);
+        uint bKey = computeWorldCellKey(bouncePos, bN, cellSize);
+        uint bBase = bKey % CACHE_CELL_COUNT;
+        for (uint bp = 0u; bp < 4u; ++bp) {
+            WorldRadianceCell bCell = worldCache.cells[(bBase + bp) % CACHE_CELL_COUNT];
+            if (bCell.cellKey == bKey && bCell.irradiance.a > 0.0 &&
+                dot(unpackNormalOctahedral(bCell.packedNormal), bN) > 0.65) {
+                vec3 bAlbedo = bounceHit.baseColor.rgb *
+                    pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0)), vec3(2.2));
+                float bMetallic = clamp(bounceHit.material.x *
+                    textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b, 0.0, 1.0);
+                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * clamp(bCell.irradiance.a / 6.0, 0.0, 1.0);
+                break;
+            }
+        }
+    } else {
+        hitRad = sampleRtSkyRadiance(bounceDir);
+    }
+
     uint cellKey = computeWorldCellKey(hitPos, cellNormal, cellSize);
     uint baseIndex = cellKey % CACHE_CELL_COUNT;
 
