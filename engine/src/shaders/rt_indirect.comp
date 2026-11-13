@@ -26,13 +26,37 @@ layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
-    uint idx = hashWorldCell(worldPos, worldNormal, 1.0);
+    vec3 n = normalize(worldNormal);
+    vec3 snappedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.05);
+    uint cellKey = computeWorldCellKey(snappedPos, n, DEFAULT_CELL_SIZE);
+    uint idx = cellKey % CACHE_CELL_COUNT;
     WorldRadianceCell cell = worldRadianceCache.cells[idx];
-    if (cell.cellKey != idx || cell.irradiance.a <= 0.0) return vec4(0.0);
-    if (currentFrame < cell.lastSeenFrame || (currentFrame - cell.lastSeenFrame) > 120u) return vec4(0.0);
-    vec3 cachedNormal = unpackNormalOctahedral(cell.packedNormal);
-    if (dot(cachedNormal, normalize(worldNormal)) <= 0.5) return vec4(0.0);
-    return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+    bool valid = cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+        currentFrame >= cell.lastSeenFrame &&
+        (currentFrame - cell.lastSeenFrame) <= 600u &&
+        dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5;
+    if (valid)
+        return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+
+    vec3 gridPos = snappedPos / DEFAULT_CELL_SIZE;
+    ivec3 baseCell = ivec3(floor(gridPos));
+    vec3 fraction = fract(gridPos);
+    vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
+    int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
+               ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
+    if (edgeDistance[axis] > 0.10) return vec4(0.0);
+    ivec3 neighbor = baseCell;
+    neighbor[axis] += (fraction[axis] < 0.5) ? -1 : 1;
+    vec3 neighborCenter = (vec3(neighbor) + vec3(0.5)) * DEFAULT_CELL_SIZE;
+    uint neighborKey = computeWorldCellKey(neighborCenter, n, DEFAULT_CELL_SIZE);
+    uint neighborIndex = neighborKey % CACHE_CELL_COUNT;
+    WorldRadianceCell adjacent = worldRadianceCache.cells[neighborIndex];
+    if (adjacent.cellKey != neighborKey || adjacent.irradiance.a <= 0.0 ||
+        currentFrame < adjacent.lastSeenFrame ||
+        (currentFrame - adjacent.lastSeenFrame) > 600u ||
+        dot(unpackNormalOctahedral(adjacent.packedNormal), n) <= 0.5)
+        return vec4(0.0);
+    return vec4(adjacent.irradiance.rgb, clamp(adjacent.irradiance.a / 8.0, 0.0, 1.0));
 }
 
 layout(push_constant) uniform PC {
