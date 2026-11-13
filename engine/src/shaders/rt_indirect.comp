@@ -21,7 +21,7 @@ layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[58]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
