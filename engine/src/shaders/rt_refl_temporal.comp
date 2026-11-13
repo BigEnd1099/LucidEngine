@@ -95,6 +95,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     // roughness-cutoff pixels. Keep their geometry invalid for reprojection,
     // but do not reconstruct world position or rewrite two already-empty images.
     if (raw.a <= 0.0) {
+        histogramCounted = false; // Not a traced reflection sample; never enter age Bin 00.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
         rejectedCounted = true;
         if (!all(equal(raw, vec4(0.0))))
@@ -320,26 +321,24 @@ void main() {
     rtLocalRejected[lane] = rejectedCounted ? 1u : 0u;
 
     barrier();
-    if (lane == 0u) {
-        uint rejectedTotal = 0u;
-        uint histogram[16];
-        for (uint bin = 0u; bin < 16u; ++bin) histogram[bin] = 0u;
-        for (uint i = 0u; i < 64u; ++i) {
-            rejectedTotal += rtLocalRejected[i];
-            uint bin = rtLocalAgeBins[i];
-            if (bin < 16u) histogram[bin]++;
-        }
-        if (rejectedTotal != 0u) atomicAdd(rtDiag.counters[10], rejectedTotal);
-        for (uint bin = 0u; bin < 16u; ++bin)
-            if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[32u + bin], histogram[bin]);
 
-        // Per-pixel diagnostics are accumulated in registers, then reduced
-        // once per metric by the workgroup leader. No shared atomic contention.
-        for (uint metric = 0u; metric < 16u; ++metric) {
-            uint total = 0u;
-            for (uint i = 0u; i < 64u; ++i)
-                total += rtPixelDiag[metric * 64u + i];
-            if (total != 0u) atomicAdd(rtDiag.counters[metric], total);
-        }
+    // Each lane owns one histogram bin and reduces its 64 lane flags without
+    // shared atomics. Lane 16 separately aggregates rejected-pixel diagnostics.
+    if (lane < 16u) {
+        uint binCount = 0u;
+        for (uint i = 0u; i < 64u; ++i)
+            binCount += (rtLocalAgeBins[i] == lane) ? 1u : 0u;
+        if (binCount != 0u) atomicAdd(rtDiag.counters[32u + lane], binCount);
+    }
+    if (lane == 16u) {
+        uint rejectedTotal = 0u;
+        for (uint i = 0u; i < 64u; ++i) rejectedTotal += rtLocalRejected[i];
+        if (rejectedTotal != 0u) atomicAdd(rtDiag.counters[10], rejectedTotal);
+    }
+    if (lane < 16u) {
+        uint total = 0u;
+        for (uint i = 0u; i < 64u; ++i)
+            total += rtPixelDiag[lane * 64u + i];
+        if (total != 0u) atomicAdd(rtDiag.counters[lane], total);
     }
 }
