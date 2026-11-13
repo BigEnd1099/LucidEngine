@@ -274,25 +274,28 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
-            vec3 checkerHistY = rgbToYCoCg(result.rgb);
-            vec3 checkerMinY = vec3(1e20);
-            vec3 checkerMaxY = vec3(-1e20);
-            float checkerCount = 0.0;
-            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
-            for (int ci = 0; ci < 4; ++ci) {
-                ivec2 cp = px + checkerOffsets[ci];
-                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
-                vec4 cv = imageLoad(imgS, cp);
-                if (cv.a < 0.0) continue;
-                vec3 cy = rgbToYCoCg(cv.rgb);
-                checkerMinY = min(checkerMinY, cy);
-                checkerMaxY = max(checkerMaxY, cy);
-                checkerCount += 1.0;
-            }
-            if (checkerCount > 0.0) {
-                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
-                checkerHistY = clamp(checkerHistY, checkerMinY - margin, checkerMaxY + margin);
-                result.rgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+            if (motionPixels > 1.0) {
+                vec3 checkerHistY = rgbToYCoCg(result.rgb);
+                vec3 checkerMinY = vec3(1e20);
+                vec3 checkerMaxY = vec3(-1e20);
+                float checkerCount = 0.0;
+                const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+                for (int ci = 0; ci < 4; ++ci) {
+                    ivec2 cp = px + checkerOffsets[ci];
+                    if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                    vec4 cv = imageLoad(imgS, cp);
+                    if (cv.a < 0.0) continue;
+                    vec3 cy = rgbToYCoCg(cv.rgb);
+                    checkerMinY = min(checkerMinY, cy);
+                    checkerMaxY = max(checkerMaxY, cy);
+                    checkerCount += 1.0;
+                }
+                if (checkerCount > 0.0 && checkerMaxY.x > 0.05) {
+                    vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.5, vec3(0.25));
+                    vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
+                    checkerHistY = clamp(checkerHistY, checkerMinY - margin, upperBound);
+                    result.rgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+                }
             }
             newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
@@ -370,8 +373,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
                 // Variance floor: prevent zero-clipping of weak indirect light in dark areas
                 vec3 effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
-                vec3 clampMinY = m1Y - effectiveSigma * 2.0;
-                vec3 clampMaxY = m1Y + effectiveSigma * 2.75;
+                float clampGamma = mix(3.25, 2.0, clamp(motionPixels * 0.15, 0.0, 1.0));
+                vec3 clampMinY = m1Y - effectiveSigma * clampGamma;
+                vec3 clampMaxY = m1Y + effectiveSigma * (clampGamma + 0.75);
                 clampMinY.x = max(0.0, clampMinY.x);
                 clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
@@ -404,16 +408,21 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 // A valid reprojection (wSum > 0.2) identifies the same surface
                 // across camera motion. Preserve its accumulated diffuse irradiance;
                 // only an isolated firefly is allowed to force the history downward.
-                if (!isolatedFirefly && wSum > 0.2 && (pc.u.x & 2u) != 0u) {
+                if (!isolatedFirefly && wSum > 0.2) {
+                    float histRetention = mix(0.98, 0.88, clamp(motionPixels * 0.15, 0.0, 1.0));
+                    vec3 safeHistPeak = (histLen >= 4.0)
+                        ? (histY * histRetention)
+                        : min(histY, m1Y + max(effectiveSigma * 6.0, vec3(6.0)));
+                    clampMaxY = max(clampMaxY, safeHistPeak);
                     vec4 cachedSurf = vec4(0.0);
                     float cachedCov = 0.0;
-                    if (loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25) {
+                    if ((pc.u.x & 2u) != 0u && loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25) {
                         vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
-                        clampMaxY.x = max(clampMaxY.x, min(histY.x, cachedY.x * 1.25 + sigmaY.x));
+                        clampMaxY = max(clampMaxY, cachedY * 1.15 + effectiveSigma);
                     }
                 }
                 // Preserve newly visible, spatially supported bright structures.
-                if (!isolatedFirefly && motionPixels <= 0.1)
+                if (!isolatedFirefly)
                     clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
@@ -482,9 +491,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         if (restoredSurface && surfaceHistory.a > newLen) {
             float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
-            newLen = clamp(max(newLen, min(surfaceHistory.a, 4.0)), 1.0, effectiveMaxHist);
+            newLen = clamp(max(newLen, min(surfaceHistory.a, 8.0)), 4.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
+        }
+        if (!isDisoccluded && (pc.u.x & 4u) != 0u && (newLen < 12.0 || motionPixels > 0.25)) {
+            vec4 wrcCell = sampleWorldRadianceCache(P, N, pc.u.w);
+            if (wrcCell.a > 0.0) {
+                float wrcFactor = clamp(max(1.0 - newLen / 12.0, clamp(motionPixels * 0.20, 0.0, 0.65)) * wrcCell.a * 0.65, 0.0, 0.75);
+                result.rgb = mix(result.rgb, wrcCell.rgb, wrcFactor);
+                newLen = max(newLen, mix(3.0, 8.0, wrcCell.a));
+            }
         } else if (isDisoccluded && (pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0) {
