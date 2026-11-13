@@ -4,10 +4,10 @@
 // Std430 SSBO layout matching C++ WorldRadianceCell (32 bytes)
 struct WorldRadianceCell {
     vec4 irradiance;     // RGB = radiance, A = weight/sampleCount (offset 0..15)
-    uint cellKey;        // 32-bit spatial key for atomic operations (offset 16..19)
+    uint cellKey;        // hashed world-cell slot identifier (offset 16..19)
     uint packedNormal;   // Octahedral normal 16-bit + flags 16-bit (offset 20..23)
     uint lastSeenFrame;  // TTL / frame counter (offset 24..27)
-    uint lockOrFlags;    // Alignment padding (offset 28..31)
+    uint lockOrFlags;    // atomic writer lock / flags (offset 28..31)
 };
 
 const uint CACHE_CELL_COUNT = 524288u;
