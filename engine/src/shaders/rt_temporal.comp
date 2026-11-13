@@ -274,6 +274,26 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             histMoments /= wSum;
             histLen /= wSum;
             result = hist;
+            vec3 checkerHistY = rgbToYCoCg(result.rgb);
+            vec3 checkerMinY = vec3(1e20);
+            vec3 checkerMaxY = vec3(-1e20);
+            float checkerCount = 0.0;
+            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+            for (int ci = 0; ci < 4; ++ci) {
+                ivec2 cp = px + checkerOffsets[ci];
+                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                vec4 cv = imageLoad(imgS, cp);
+                if (cv.a < 0.0) continue;
+                vec3 cy = rgbToYCoCg(cv.rgb);
+                checkerMinY = min(checkerMinY, cy);
+                checkerMaxY = max(checkerMaxY, cy);
+                checkerCount += 1.0;
+            }
+            if (checkerCount > 0.0) {
+                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
+                checkerHistY = clamp(checkerHistY, checkerMinY - margin, checkerMaxY + margin);
+                result.rgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+            }
             newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
             outMoments = histMoments;
         } else {
@@ -350,8 +370,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
                 // Variance floor: prevent zero-clipping of weak indirect light in dark areas
                 vec3 effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
-                vec3 clampMinY = m1Y - gamma * effectiveSigma;
-                vec3 clampMaxY = m1Y + gamma * effectiveSigma;
+                vec3 clampMinY = m1Y - sigmaY * 2.0;
+                vec3 clampMaxY = m1Y + sigmaY * 2.75;
                 clampMinY.x = max(0.0, clampMinY.x);
                 clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
@@ -384,14 +404,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 // A valid reprojection (wSum > 0.2) identifies the same surface
                 // across camera motion. Preserve its accumulated diffuse irradiance;
                 // only an isolated firefly is allowed to force the history downward.
-                if (!isolatedFirefly && wSum > 0.2) {
-                    // Do not exponentially decay accumulated history while the camera moves.
-                    // Protect mature history fully; retain a soft ceiling only for very young pixels.
-                    vec3 safeHistPeak = (histLen >= 4.0) ? histY : min(histY, m1Y + max(sigmaY * 6.0, vec3(8.0)));
-                    clampMaxY = max(clampMaxY, safeHistPeak);
+                if (!isolatedFirefly && wSum > 0.2 && (pc.u.x & 2u) != 0u) {
+                    vec4 cachedSurf = vec4(0.0);
+                    float cachedCov = 0.0;
+                    if (loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25) {
+                        vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
+                        clampMaxY.x = max(clampMaxY.x, min(histY.x, cachedY.x * 1.25 + sigmaY.x));
+                    }
                 }
                 // Preserve newly visible, spatially supported bright structures.
-                if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
+                if (!isolatedFirefly && motionPixels <= 0.1)
+                    clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
@@ -455,7 +478,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         if (restoredSurface && surfaceHistory.a > newLen) {
             float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
-            newLen = clamp(max(newLen, surfaceHistory.a), 4.0, effectiveMaxHist);
+            newLen = clamp(max(newLen, min(surfaceHistory.a, 4.0)), 1.0, effectiveMaxHist);
+            float restoredVariance = max(outMoments.z, 0.005);
+            outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
         } else if (isDisoccluded && (pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0) {
