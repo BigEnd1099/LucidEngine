@@ -58,6 +58,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uin
 
     vec4 accumHistory = vec4(0.0);
     float weightSum = 0.0;
+    uint validCorners = 0u;
     bool empty = false;
     coverage = 0.0;
 
@@ -76,6 +77,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uin
                 if (tryLoadSurfaceHistoryCell(c, n, lightingEpoch, currentFrame, cellVal, empty)) {
                     accumHistory += w * cellVal;
                     weightSum += w;
+                    validCorners++;
                 }
             }
         }
@@ -83,7 +85,10 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uin
 
     if (weightSum > 0.001) {
         history = accumHistory / weightSum;
-        coverage = clamp(weightSum, 0.0, 1.0);
+        // A sparse cache should still contribute when one or two neighboring
+        // cells are available; normalized interpolation handles the radiance,
+        // while this count-based confidence avoids suppressing every isolated hit.
+        coverage = clamp(float(validCorners) * 0.5, 0.0, 1.0);
         return true;
     }
     return false;
