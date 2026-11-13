@@ -1314,7 +1314,7 @@ namespace engine::renderer {
                         m_worldRadianceCache.clear(m_commandBuffer);
 
                     const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
-                    m_worldRadianceCache.dispatchUpdate(
+                    worldCacheUpdateRecorded = m_worldRadianceCache.dispatchUpdate(
                         m_commandBuffer,
                         m_descriptorSet,
                         m_accelerationStructure.getTLAS(),
@@ -1324,7 +1324,6 @@ namespace engine::renderer {
                         sceneUbo->sunColor,
                         m_timestampQueryPool
                     );
-                    worldCacheUpdateRecorded = true;
                 }
             }
         }
