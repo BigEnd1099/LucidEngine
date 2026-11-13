@@ -220,15 +220,23 @@ if(Python3_FOUND)
     add_dependencies(engine GenerateBinarySchema)
 endif()
 
-# Run on every build: POST_BUILD on engine alone is not sufficient when only a
-# shader changes and the executable itself does not need relinking. TARGET_FILE_DIR
-# resolves to the active configuration directory (e.g. Release/ or Debug/).
+# Copy every compiled shader both for the executable and for FileIO's
+# legacy relative search paths. The SPIR-V outputs themselves live in
+# CMAKE_CURRENT_BINARY_DIR, so that location is already populated by CompileShaders.
+# This target must be a dependency OF engine: building --target engine must also
+# build the shaders and copy them, even when the executable does not relink.
 set(SPV_COPY_COMMANDS)
 foreach(SPV_FILE ${SPV_FILES})
     list(APPEND SPV_COPY_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${SPV_FILE}"
         "$<TARGET_FILE_DIR:engine>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SPV_FILE}"
+        "${CMAKE_SOURCE_DIR}/engine"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SPV_FILE}"
+        "${CMAKE_SOURCE_DIR}/engine/src/shaders"
     )
 endforeach()
 add_custom_target(CopyCompiledShaders ALL
@@ -236,7 +244,17 @@ add_custom_target(CopyCompiledShaders ALL
     DEPENDS ${SPV_FILES}
     VERBATIM
 )
-add_dependencies(CopyCompiledShaders engine)
+add_dependencies(CopyCompiledShaders CompileShaders)
+add_dependencies(engine CopyCompiledShaders)
+
+# Keep a POST_BUILD copy as a final guarantee for the freshly linked executable.
+# The always-built dependency above also handles shader-only changes without relinking.
+add_custom_command(TARGET engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${SPV_FILES}
+    "$<TARGET_FILE_DIR:engine>"
+    VERBATIM
+)
 
 add_custom_command(TARGET engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

@@ -1,4 +1,7 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 
 #extension GL_EXT_ray_query : require
 
@@ -121,8 +124,12 @@ layout(push_constant) uniform PC {
 
 
 
-shared uint rtPixelDiag[8 * 64];
-shared uint rtLocalAgeBins[64];
+void addDiagCounter(uint counterIdx, uint value) {
+    uint sgSum = subgroupAdd(value);
+    if (subgroupElect() && sgSum != 0u) {
+        atomicAdd(rtDiag.counters[counterIdx], sgSum);
+    }
+}
 
 void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint pixelDiag[8]) {
     for (int i = 0; i < 8; ++i) pixelDiag[i] = 0u;
@@ -486,33 +493,23 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 }
 
 void main() {
-    uint lane = gl_LocalInvocationIndex;
     uint ageBin = 0u;
     bool histogramCounted = false;
     uint pixelDiag[8];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     processPixel(px, ageBin, histogramCounted, pixelDiag);
 
-    for (uint metric = 0u; metric < 8u; ++metric)
-        rtPixelDiag[metric * 64u + lane] = pixelDiag[metric];
-    rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
-
-    barrier();
-
-    // Each lane reduces one temporal age bin; this avoids funneling all
-    // sixteen bins through a single workgroup leader.
-    if (lane < 16u) {
-        uint binCount = 0u;
-        for (uint i = 0u; i < 64u; ++i)
-            binCount += (rtLocalAgeBins[i] == lane) ? 1u : 0u;
-        if (binCount != 0u) atomicAdd(rtDiag.counters[16u + lane], binCount);
+    for (uint metric = 0u; metric < 8u; ++metric) {
+        addDiagCounter(metric, pixelDiag[metric]);
     }
 
-    // Eight lanes independently reduce the per-pixel diagnostic counters.
-    if (lane < 8u) {
-        uint total = 0u;
-        for (uint i = 0u; i < 64u; ++i)
-            total += rtPixelDiag[lane * 64u + i];
-        if (total != 0u) atomicAdd(rtDiag.counters[lane], total);
+    // Each age-bin count is a subgroup ballot. No per-pixel shared writes,
+    // shared atomics, or workgroup-wide barrier are needed.
+    for (uint bin = 0u; bin < 16u; ++bin) {
+        uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
+        uint binCount = subgroupBallotBitCount(ballot);
+        if (subgroupElect() && binCount != 0u) {
+            atomicAdd(rtDiag.counters[16u + bin], binCount);
+        }
     }
 }

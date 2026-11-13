@@ -1,4 +1,7 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_EXT_ray_query : require
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_scalar_block_layout : require
@@ -48,9 +51,12 @@ layout(push_constant) uniform PC {
     uvec4 u;
 } pc;
 
-shared uint rtPixelDiag[16 * 64];
-shared uint rtLocalAgeBins[64];
-shared uint rtLocalRejected[64];
+void addDiagCounter(uint counterIdx, uint value) {
+    uint sgSum = subgroupAdd(value);
+    if (subgroupElect() && sgSum != 0u) {
+        atomicAdd(rtDiag.counters[counterIdx], sgSum);
+    }
+}
 
 void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool rejectedCounted, out uint pixelDiag[16]) {
     for (int i = 0; i < 16; ++i) pixelDiag[i] = 0u;
@@ -307,7 +313,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 }
 
 void main() {
-    uint lane = gl_LocalInvocationIndex;
     uint ageBin = 0u;
     bool histogramCounted = false;
     bool rejectedCounted = false;
@@ -315,30 +320,21 @@ void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     processPixel(px, ageBin, histogramCounted, rejectedCounted, pixelDiag);
 
-    for (uint metric = 0u; metric < 16u; ++metric)
-        rtPixelDiag[metric * 64u + lane] = pixelDiag[metric];
-    rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
-    rtLocalRejected[lane] = rejectedCounted ? 1u : 0u;
-
-    barrier();
-
-    // Each lane owns one histogram bin and reduces its 64 lane flags without
-    // shared atomics. Lane 16 separately aggregates rejected-pixel diagnostics.
-    if (lane < 16u) {
-        uint binCount = 0u;
-        for (uint i = 0u; i < 64u; ++i)
-            binCount += (rtLocalAgeBins[i] == lane) ? 1u : 0u;
-        if (binCount != 0u) atomicAdd(rtDiag.counters[32u + lane], binCount);
+    for (uint metric = 0u; metric < 16u; ++metric) {
+        addDiagCounter(metric, pixelDiag[metric]);
     }
-    if (lane == 16u) {
-        uint rejectedTotal = 0u;
-        for (uint i = 0u; i < 64u; ++i) rejectedTotal += rtLocalRejected[i];
-        if (rejectedTotal != 0u) atomicAdd(rtDiag.counters[10], rejectedTotal);
+
+    for (uint bin = 0u; bin < 16u; ++bin) {
+        uvec4 ballot = subgroupBallot(histogramCounted && ageBin == bin);
+        uint binCount = subgroupBallotBitCount(ballot);
+        if (subgroupElect() && binCount != 0u) {
+            atomicAdd(rtDiag.counters[32u + bin], binCount);
+        }
     }
-    if (lane < 16u) {
-        uint total = 0u;
-        for (uint i = 0u; i < 64u; ++i)
-            total += rtPixelDiag[lane * 64u + i];
-        if (total != 0u) atomicAdd(rtDiag.counters[lane], total);
+
+    uvec4 rejectedBallot = subgroupBallot(rejectedCounted);
+    uint rejectedTotal = subgroupBallotBitCount(rejectedBallot);
+    if (subgroupElect() && rejectedTotal != 0u) {
+        atomicAdd(rtDiag.counters[10], rejectedTotal);
     }
 }
