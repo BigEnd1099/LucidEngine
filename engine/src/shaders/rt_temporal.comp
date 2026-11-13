@@ -82,9 +82,13 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
     // hit-position/G-buffer reconstruction differences at cell boundaries.
     vec3 gridPos = snappedPos / DEFAULT_CELL_SIZE;
     ivec3 baseCell = ivec3(floor(gridPos));
-    vec3 fromCenter = fract(gridPos) - 0.5;
-    ivec3 neighbor = baseCell + ivec3(round(fromCenter));
-    if (all(equal(neighbor, baseCell))) return vec4(0.0);
+    vec3 fraction = fract(gridPos);
+    vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
+    int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
+               ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
+    if (edgeDistance[axis] > 0.10) return vec4(0.0);
+    ivec3 neighbor = baseCell;
+    neighbor[axis] += (fraction[axis] < 0.5) ? -1 : 1;
     vec3 neighborCenter = (vec3(neighbor) + vec3(0.5)) * DEFAULT_CELL_SIZE;
     uint neighborKey = computeWorldCellKey(neighborCenter, n, DEFAULT_CELL_SIZE);
     uint neighborIndex = neighborKey % CACHE_CELL_COUNT;
