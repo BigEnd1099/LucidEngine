@@ -31,11 +31,11 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
     vec3 n = normalize(worldNormal);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        uint seq0 = surfaceHistoryCache.cells[index].meta.y;
+        uint seq0 = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
         if ((seq0 & 1u) != 0u) continue;
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
-        uint seq1 = surfaceHistoryCache.cells[index].meta.y;
+        uint seq1 = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
         if (seq0 != seq1 || (seq1 & 1u) != 0u) continue;
         empty = entry.meta.x == 0u;
         bool match = !empty && entry.meta.x == lightingEpoch &&
