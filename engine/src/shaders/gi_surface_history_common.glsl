@@ -27,7 +27,7 @@ uint surfaceHistoryHash(ivec3 cell) {
 // identity/epoch fields, so readers can keep matching a published key while
 // radianceAge is refreshed by another workgroup.
 bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
-                               out vec4 history, out bool empty) {
+                               uint currentFrame, out vec4 history, out bool empty) {
     uint base = surfaceHistoryHash(cell);
     vec3 n = normalize(worldNormal);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
@@ -35,7 +35,9 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
         empty = entry.meta.x == 0u;
-        bool match = !empty && entry.meta.x == lightingEpoch &&
+        uint frameAge = currentFrame - entry.meta.z;
+        bool match = !empty && frameAge <= 2048u &&
+                     entry.meta.x == lightingEpoch &&
                      all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         if (match) {
@@ -46,7 +48,8 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
     return false;
 }
 
-bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
+bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uint currentFrame,
+                        out vec4 history, out float coverage) {
     vec3 n = normalize(worldNormal);
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
     vec3 gridPos = biasedPos / SURFACE_HISTORY_CELL_SIZE - 0.5;
@@ -56,6 +59,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
     vec4 accumHistory = vec4(0.0);
     float weightSum = 0.0;
     bool empty = false;
+    coverage = 0.0;
 
     // Trilinear interpolation across the eight neighboring cell centers.
     // Each lookup uses the bounded hash probe sequence and never takes a lock.
@@ -69,7 +73,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
                 if (w <= 0.0001) continue;
                 ivec3 c = baseCell + ivec3(dx, dy, dz);
                 vec4 cellVal = vec4(0.0);
-                if (tryLoadSurfaceHistoryCell(c, n, lightingEpoch, cellVal, empty)) {
+                if (tryLoadSurfaceHistoryCell(c, n, lightingEpoch, currentFrame, cellVal, empty)) {
                     accumHistory += w * cellVal;
                     weightSum += w;
                 }
@@ -79,6 +83,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
 
     if (weightSum > 0.001) {
         history = accumHistory / weightSum;
+        coverage = clamp(weightSum, 0.0, 1.0);
         return true;
     }
     return false;
