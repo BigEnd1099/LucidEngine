@@ -40,7 +40,7 @@ namespace engine::renderer {
             bool      reflectionTemporalFilterEnabled{true};
             bool      reflectionOutlierFilterEnabled{true};
             bool      reflectionSpatialFilterEnabled{true};
-            bool      lightChanged{false}; // Resets accumulation when lights or camera change
+            bool      lightChanged{false}; // Resets accumulation when scene lighting changes
             RtDebugMode debugMode{RtDebugMode::None};
 
             bool      reflectionCheckerboard{true};
