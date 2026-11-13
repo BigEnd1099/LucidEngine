@@ -32,7 +32,10 @@ vec3 unpackNormalOctahedral(uint packedN) {
 }
 
 uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
-    ivec3 cellCoord = ivec3(floor(pos / cellSize));
+    // Apply the same deterministic normal bias for ray hits and G-buffer lookups.
+    vec3 n = normalize(normal);
+    vec3 biasedPos = pos + n * (cellSize * 0.25);
+    ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
     uint normIdx = 0u;
     if (abs(normal.x) > abs(normal.y) && abs(normal.x) > abs(normal.z)) {
         normIdx = normal.x > 0.0 ? 0u : 1u;
