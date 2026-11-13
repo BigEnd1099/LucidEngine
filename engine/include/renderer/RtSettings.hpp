@@ -45,6 +45,8 @@ namespace engine::renderer {
         bool giAtrousPass3Enabled{true};
         bool giAtrousPass4Enabled{true};
         bool svgfEnabled{true};
+        bool worldRadianceCacheEnabled{true};
+        bool giSurfaceHistoryCacheEnabled{true};
         bool reflectionTemporalFilterEnabled{true};
         bool reflectionOutlierFilterEnabled{true};
         bool reflectionSpatialFilterEnabled{true};
