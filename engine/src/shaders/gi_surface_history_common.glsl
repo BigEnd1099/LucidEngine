@@ -40,7 +40,7 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
         empty = entry.meta.x == 0u;
         bool match = !empty && entry.meta.x == lightingEpoch &&
                      all(equal(entry.identity.xyz, cell)) &&
-                     dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.75;
+                     dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         if (match) {
             history = entry.radianceAge;
             return true;
@@ -53,29 +53,37 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
 bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
     vec3 n = normalize(worldNormal);
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
-    vec3 candidates[2] = vec3[](
-        biasedPos,
-        worldPos - n * (SURFACE_HISTORY_CELL_SIZE * 0.15)
+    vec3 gridPos = biasedPos / SURFACE_HISTORY_CELL_SIZE;
+    ivec3 baseCell = ivec3(floor(gridPos));
+
+    bool empty = false;
+    if (tryLoadSurfaceHistoryCell(baseCell, n, lightingEpoch, history, empty))
+        return true;
+
+    // Dual-grid neighborhood fallback: test all seven other corners of the
+    // local 2x2x2 cell neighborhood, starting from the closest corner.
+    vec3 f = fract(gridPos);
+    ivec3 stepDir = ivec3(
+        f.x >= 0.5 ? 1 : -1,
+        f.y >= 0.5 ? 1 : -1,
+        f.z >= 0.5 ? 1 : -1
     );
 
-    for (int candidate = 0; candidate < 2; ++candidate) {
-        vec3 gridPos = candidates[candidate] / SURFACE_HISTORY_CELL_SIZE;
-        ivec3 baseCell = ivec3(floor(gridPos));
-        bool empty = false;
-        if (tryLoadSurfaceHistoryCell(baseCell, n, lightingEpoch, history, empty))
-            return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, 0, 0), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, stepDir.y, 0), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, 0, stepDir.z), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, stepDir.y, 0), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(stepDir.x, 0, stepDir.z), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + ivec3(0, stepDir.y, stepDir.z), n, lightingEpoch, history, empty))
+        return true;
+    if (tryLoadSurfaceHistoryCell(baseCell + stepDir, n, lightingEpoch, history, empty))
+        return true;
 
-        // Also probe the closest adjacent cell. This covers residual position
-        // reconstruction error on sloped surfaces and near cell boundaries.
-        vec3 fraction = fract(gridPos);
-        vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
-        int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
-                   ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
-        ivec3 neighborOffset = ivec3(0);
-        neighborOffset[axis] = (fraction[axis] < 0.5) ? -1 : 1;
-        if (tryLoadSurfaceHistoryCell(baseCell + neighborOffset, n, lightingEpoch, history, empty))
-            return true;
-    }
     return false;
 }
 
@@ -99,7 +107,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
             return;
         if (existing.meta.x == lightingEpoch &&
             all(equal(existing.identity.xyz, cell)) &&
-            dot(unpackNormalOctahedral(uint(existing.identity.w)), n) > 0.75 &&
+            dot(unpackNormalOctahedral(uint(existing.identity.w)), n) > 0.50 &&
             existing.meta.z == frameIndex && !overwriteSameFrame)
             return;
 
@@ -114,7 +122,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         bool empty = entry.meta.x == 0u;
         bool sameSurface = !empty && entry.meta.x == lightingEpoch &&
                            all(equal(entry.identity.xyz, cell)) &&
-                           dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.75;
+                           dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
 
         if (sameSurface && entry.meta.z == frameIndex) {
