@@ -1296,6 +1296,11 @@ namespace engine::renderer {
                 static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
 
             if (tlasReady && m_worldRadianceCache.isInitialized() && m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
+                // Probe radiance is light-dependent; invalidate it on actual lighting edits.
+                // Camera motion alone does not set rtLightOrCameraMoved.
+                if (rtLightOrCameraMoved)
+                    m_worldRadianceCache.clear(m_commandBuffer);
+
                 const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
                 m_worldRadianceCache.dispatchUpdate(
                     m_commandBuffer,
