@@ -438,26 +438,20 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     // reprojection history while it converges to the current per-pixel estimate.
     bool isDisoccluded = (isCheckerSkipped && wSum <= 0.05) ||
                          (!isCheckerSkipped && wSum <= 0.05);
-    if (isDisoccluded || newLen < 12.0) {
+    if (isDisoccluded || newLen < 4.0) {
         vec4 surfaceHistory = vec4(0.0);
         float surfaceCoverage = 0.0;
         bool restoredSurface = (pc.u.x & 2u) != 0u &&
                                loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
         if (restoredSurface && surfaceHistory.a > newLen) {
-            // Restore most of the frozen object-space illumination on first visibility.
-            // Fade support as per-pixel history matures to avoid visible 25 cm cache cells.
-            float disocclusionWeight = isDisoccluded
-                ? (0.85 * surfaceCoverage)
-                : (0.25 * surfaceCoverage * clamp((12.0 - newLen) / 12.0, 0.0, 1.0));
-            result.rgb = mix(result.rgb, surfaceHistory.rgb, disocclusionWeight);
-            if (isDisoccluded) {
-                newLen = clamp(surfaceHistory.a, 2.0, 12.0);
-            }
+            float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
+            newLen = clamp(max(newLen, surfaceHistory.a), 4.0, effectiveMaxHist);
         } else if (isDisoccluded && (pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0) {
-                result.rgb = mix(result.rgb, cached.rgb, 0.75 * cached.a);
-                newLen = max(newLen, 6.0 * cached.a);
+                result.rgb = mix(result.rgb, cached.rgb, 0.80 * cached.a);
+                newLen = max(newLen, 8.0 * cached.a);
             }
         }
     }

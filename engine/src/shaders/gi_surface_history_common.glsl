@@ -128,7 +128,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
 
         if (sameSurface) {
             float oldAge = max(entry.radianceAge.a, 1.0);
-            float nextAge = min(max(oldAge, historyLength) + 1.0, 64.0);
+            float nextAge = min(max(oldAge, historyLength) + 1.0, 256.0);
             float alpha = (historyLength > oldAge) ? 0.35 : clamp(1.0 / nextAge, 0.05, 0.20);
             vec3 nextRadiance = mix(entry.radianceAge.rgb, safeIrradiance, alpha);
             surfaceHistoryCache.cells[index].radianceAge =

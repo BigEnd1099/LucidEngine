@@ -25,63 +25,20 @@ layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
-bool trySampleWorldRadianceCache(uint cellKey, vec3 n, uint currentFrame, out vec4 result) {
-    uint baseIndex = cellKey % CACHE_CELL_COUNT;
-    for (uint probe = 0u; probe < 4u; ++probe) {
-        uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
-        WorldRadianceCell cell = worldRadianceCache.cells[idx];
-        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
-            continue;
-        if (currentFrame < cell.lastSeenFrame)
-            continue;
-        if (dot(unpackNormalOctahedral(cell.packedNormal), n) <= 0.5)
-            continue;
-        result = vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
-        return true;
-    }
-    return false;
-}
+shared uint rtWorldCacheDiag[2];
 
-vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
+vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
     vec3 n = normalize(worldNormal);
-    // Interpolate the eight neighboring voxel centers. Probe rays are sparse,
-    // so an exact-key lookup plus a single boundary retry misses most useful
-    // cached radiance even when a nearby cell on the same surface is populated.
-    vec3 biasedGrid = (worldPos + n * (DEFAULT_CELL_SIZE * 0.25)) /
-                      DEFAULT_CELL_SIZE - 0.5;
-    ivec3 baseCell = ivec3(floor(biasedGrid));
-    vec3 f = fract(biasedGrid);
-    vec3 radianceSum = vec3(0.0);
-    float weightSum = 0.0;
-    float confidenceSum = 0.0;
-
-    for (int z = 0; z <= 1; ++z) {
-        float wz = (z == 0) ? (1.0 - f.z) : f.z;
-        for (int y = 0; y <= 1; ++y) {
-            float wy = (y == 0) ? (1.0 - f.y) : f.y;
-            for (int x = 0; x <= 1; ++x) {
-                float wx = (x == 0) ? (1.0 - f.x) : f.x;
-                float w = wx * wy * wz;
-                if (w <= 0.0001) continue;
-                ivec3 cell = baseCell + ivec3(x, y, z);
-                vec3 center = (vec3(cell) + vec3(0.5)) * DEFAULT_CELL_SIZE;
-                // Cancel the normal bias inside computeWorldCellKey so this
-                // center resolves to the intended integer voxel coordinate.
-                uint key = computeWorldCellKey(center - n * (DEFAULT_CELL_SIZE * 0.25),
-                                               n, DEFAULT_CELL_SIZE);
-                vec4 cached = vec4(0.0);
-                if (trySampleWorldRadianceCache(key, n, currentFrame, cached)) {
-                    radianceSum += cached.rgb * w;
-                    confidenceSum += cached.a * w;
-                    weightSum += w;
-                }
-            }
+    uint cellKey = computeWorldCellKey(worldPos, n, DEFAULT_CELL_SIZE);
+    uint baseIndex = cellKey % CACHE_CELL_COUNT;
+    for (uint probe = 0u; probe < 2u; ++probe) {
+        WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
+        if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
+            dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.5) {
+            return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
         }
     }
-    if (weightSum <= 0.001) return vec4(0.0);
-    float spatialCoverage = clamp(weightSum * 2.0, 0.0, 1.0);
-    return vec4(radianceSum / weightSum,
-                clamp(confidenceSum / weightSum, 0.0, 1.0) * spatialCoverage);
+    return vec4(0.0);
 }
 
 
@@ -128,7 +85,7 @@ float smithG1GGXGI(float nDotV, float alpha) {
     return (2.0 * nDotV) / max(nDotV + sqrt(a2 + (1.0 - a2) * n2), 1e-6);
 }
 
-void main() {
+void processPixel() {
 ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 ivec2 isize = imageSize(imgS);
 if (any(greaterThanEqual(px, isize))) return;
@@ -283,11 +240,11 @@ for (int s = 0; s < samples; ++s) {
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
         if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.5) {
-            atomicAdd(rtDiag.counters[58], 1u);
-            vec4 cachedRadiance = sampleWorldRadianceCache(hitPosition, hitNormal, pc.u.y);
+            atomicAdd(rtWorldCacheDiag[1], 1u);
+            vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
             if (cachedRadiance.a > 0.0) {
                 pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.50 * cachedRadiance.a);
-                atomicAdd(rtDiag.counters[56], 1u);
+                atomicAdd(rtWorldCacheDiag[0], 1u);
             }
         }
 
@@ -432,4 +389,18 @@ if (diagVisibleHits > 0u) atomicAdd(rtDiag.counters[52], diagVisibleHits);
 if (diagCausticContributions > 0u) atomicAdd(rtDiag.counters[53], diagCausticContributions);
 atomicAdd(rtDiag.counters[54], uint(samples));
 if (diagPathBounces > 0u) atomicAdd(rtDiag.counters[55], diagPathBounces);
+}
+
+void main() {
+    uint lane = gl_LocalInvocationIndex;
+    if (lane < 2u) rtWorldCacheDiag[lane] = 0u;
+    barrier();
+    processPixel();
+    barrier();
+    if (lane == 0u) {
+        uint cacheHits = rtWorldCacheDiag[0];
+        uint cacheQueries = rtWorldCacheDiag[1];
+        if (cacheHits != 0u) atomicAdd(rtDiag.counters[56], cacheHits);
+        if (cacheQueries != 0u) atomicAdd(rtDiag.counters[58], cacheQueries);
+    }
 }

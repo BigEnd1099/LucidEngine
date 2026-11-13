@@ -128,22 +128,24 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         // Slope-aware depth tolerance for reflections
         float depthTol = (0.03 * pClip.w + 0.01) / nDotV;
 
+        uint rejectedBounds = 0u;
+        uint rejectedDepth = 0u;
+        uint rejectedNormal = 0u;
         for (int i = 0; i < 4; ++i) {
             ivec2 o = ivec2(i & 1, i >> 1);
             ivec2 tp = base + o;
-            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { atomicAdd(rtLocalCounters[11], 1u); continue; }
-            // Validate against the actual previous-frame primary surface, not the current
-            // G-buffer sampled at the reprojected coordinate. The latter is unrelated
-            // after camera/object motion and silently discards useful reflection history.
+            if (any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, isize))) { rejectedBounds++; continue; }
             vec4 prevGeom = imageLoad(imgReflGeomPrev, tp);
             if (prevGeom.w < 0.0) continue;
-            if (abs(prevGeom.w - pClip.w) > depthTol) { atomicAdd(rtLocalCounters[12], 1u); continue; }
-            if (dot(normalize(prevGeom.xyz), N) < 0.85) { atomicAdd(rtLocalCounters[13], 1u); continue; }
-
+            if (abs(prevGeom.w - pClip.w) > depthTol) { rejectedDepth++; continue; }
+            if (dot(normalize(prevGeom.xyz), N) < 0.85) { rejectedNormal++; continue; }
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist += w * imageLoad(imgReflHistPrev, tp);
             wSum += w;
         }
+        if (rejectedBounds != 0u) atomicAdd(rtLocalCounters[11], rejectedBounds);
+        if (rejectedDepth != 0u) atomicAdd(rtLocalCounters[12], rejectedDepth);
+        if (rejectedNormal != 0u) atomicAdd(rtLocalCounters[13], rejectedNormal);
 
 
     }
