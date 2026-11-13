@@ -127,7 +127,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     vec4 raw = imageLoad(imgS, px);
 
-    if ((pc.u.x & 1u) != 0u) { // C++ explicitly overwrites u.x with the temporal bypass flag before this dispatch.
+    if ((pc.u.x & 1u) != 0u) { // bit 0 = temporal bypass; bits 1/2 independently gate surface/world caches.
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
@@ -387,11 +387,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         // Prefer an exact persistent surface match; use the lower-resolution probe
         // cache only as a conservative fallback when the surface table has no hit.
         vec4 surfaceHistory = vec4(0.0);
-        if (loadSurfaceHistory(P, N, pc.u.z, surfaceHistory)) {
+        bool restoredSurface = (pc.u.x & 2u) != 0u &&
+                              loadSurfaceHistory(P, N, pc.u.z, surfaceHistory);
+        if (restoredSurface) {
             float restoredAge = clamp(surfaceHistory.a, 1.0, effectiveMaxHist);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.70);
             newLen = max(newLen, restoredAge);
-        } else {
+        } else if ((pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
             if (cached.a > 0.0)
                 result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
