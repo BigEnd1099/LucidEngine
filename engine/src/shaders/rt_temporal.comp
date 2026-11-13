@@ -185,8 +185,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
         geom.w = 1.0;
         imageStore(imgGeomCur, px, geom);
-        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 &&
-            (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
+        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 && d < 1.0) {
             storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w, false);
         }
         ageBin = 0u;
@@ -450,10 +449,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
-    // Persist every second active pixel from the first valid observation.
-    // The cache is updated independently of Atrous settings and debug output.
-    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && newLen >= 1.0 &&
-        (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
+    // Persist every active pixel with valid geometry. Same-frame duplicate
+    // samples are rejected by the cache's surface/frame fast path.
+    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 && newLen >= 1.0) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
 
