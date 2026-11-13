@@ -64,6 +64,87 @@ layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: re
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
+// Persistent diffuse surface history. Unlike the probe cache, this stores the
+// exact quantized world-space surface identity and temporal history length.
+struct SurfaceHistoryCell {
+    vec4 radianceAge;       // RGB = diffuse irradiance, A = valid-frame history length
+    ivec4 identity;         // xyz = signed 25 cm cell coordinate, w = packed octahedral normal
+    uvec4 meta;             // x = lighting epoch, y = spin lock, z = last update frame, w = reserved
+};
+const uint SURFACE_HISTORY_CELL_COUNT = 262144u;
+const float SURFACE_HISTORY_CELL_SIZE = 0.25;
+const uint SURFACE_HISTORY_PROBE_COUNT = 8u;
+layout(set = 1, binding = 21, std430) buffer SurfaceHistoryCacheBuf {
+    SurfaceHistoryCell cells[];
+} surfaceHistoryCache;
+
+uint surfaceHistoryHash(ivec3 cell, uint packedNormal) {
+    uint h = uint(cell.x) * 73856093u ^ uint(cell.y) * 19349663u ^
+             uint(cell.z) * 83492791u ^ packedNormal * 2654435761u;
+    return (h ^ (h >> 16u)) & (SURFACE_HISTORY_CELL_COUNT - 1u);
+}
+
+bool lockSurfaceHistory(uint index) {
+    for (uint spin = 0u; spin < 32u; ++spin) {
+        if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, 0u, 1u) == 0u)
+            return true;
+    }
+    return false;
+}
+
+bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out vec4 history) {
+    ivec3 cell = ivec3(floor(worldPos / SURFACE_HISTORY_CELL_SIZE));
+    uint packedN = packNormalOctahedral(normalize(worldNormal));
+    uint base = surfaceHistoryHash(cell, packedN);
+    for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
+        uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
+        if (!lockSurfaceHistory(index)) continue;
+        SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
+        bool empty = entry.meta.x == 0u;
+        bool match = !empty && entry.meta.x == lightingEpoch &&
+                     all(equal(entry.identity.xyz, cell)) &&
+                     dot(unpackNormalOctahedral(uint(entry.identity.w)), normalize(worldNormal)) > 0.92;
+        if (match) history = entry.radianceAge;
+        atomicExchange(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if (match) return true;
+        if (empty) return false;
+    }
+    return false;
+}
+
+void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
+                         float historyLength, uint lightingEpoch, uint frameIndex) {
+    ivec3 cell = ivec3(floor(worldPos / SURFACE_HISTORY_CELL_SIZE));
+    uint packedN = packNormalOctahedral(normalize(worldNormal));
+    uint base = surfaceHistoryHash(cell, packedN);
+    for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
+        uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
+        if (!lockSurfaceHistory(index)) continue;
+        SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
+        bool empty = entry.meta.x == 0u;
+        bool sameSurface = !empty && entry.meta.x == lightingEpoch &&
+                           all(equal(entry.identity.xyz, cell)) &&
+                           dot(unpackNormalOctahedral(uint(entry.identity.w)), normalize(worldNormal)) > 0.92;
+        bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
+        if (empty || sameSurface || staleEpoch) {
+            float oldAge = sameSurface ? max(entry.radianceAge.a, 1.0) : 0.0;
+            float nextAge = min(oldAge + 1.0, 64.0);
+            float alpha = sameSurface ? max(1.0 / nextAge, 0.025) : 1.0;
+            vec3 nextRadiance = sameSurface
+                ? mix(entry.radianceAge.rgb, max(irradiance, vec3(0.0)), alpha)
+                : max(irradiance, vec3(0.0));
+            surfaceHistoryCache.cells[index].radianceAge = vec4(nextRadiance, max(historyLength, nextAge));
+            surfaceHistoryCache.cells[index].identity = ivec4(cell, int(packedN));
+            surfaceHistoryCache.cells[index].meta.x = lightingEpoch;
+            surfaceHistoryCache.cells[index].meta.z = frameIndex;
+            memoryBarrierBuffer();
+            atomicExchange(surfaceHistoryCache.cells[index].meta.y, 0u);
+            return;
+        }
+        atomicExchange(surfaceHistoryCache.cells[index].meta.y, 0u);
+    }
+}
+
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
     uint idx = hashWorldCell(worldPos, worldNormal, 1.0);
     WorldRadianceCell cell = worldRadianceCache.cells[idx];
@@ -382,10 +463,25 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     // Recover the first frame after disocclusion from the world-space radiance cache.
     if ((isCheckerSkipped && wSum <= 0.05) || (!isCheckerSkipped && wSum <= 0.01)) {
-        vec4 cached = sampleWorldRadianceCache(P, N, 0xFFFFFFFFu);
-        if (cached.a > 0.0)
-            result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
+        // Prefer an exact persistent surface match; use the lower-resolution probe
+        // cache only as a conservative fallback when the surface table has no hit.
+        vec4 surfaceHistory = vec4(0.0);
+        if (loadSurfaceHistory(P, N, pc.u.z, surfaceHistory)) {
+            float restoredAge = clamp(surfaceHistory.a, 1.0, effectiveMaxHist);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.70);
+            newLen = max(newLen, restoredAge);
+        } else {
+            vec4 cached = sampleWorldRadianceCache(P, N, 0xFFFFFFFFu);
+            if (cached.a > 0.0)
+                result.rgb = mix(isCheckerSkipped ? result.rgb : raw.rgb, cached.rgb, 0.45 * cached.a);
+        }
     }
+
+    // Persist diffuse irradiance and its temporal age for objects that leave the
+    // viewport. This is intentionally GI-only; specular reflection history remains
+    // view-dependent and is never written to this cache.
+    if (!isCheckerSkipped && geom.z >= 0.0 && pc.u.z != 0u)
+        storeSurfaceHistory(P, N, result.rgb, max(newLen, 1.0), pc.u.z, pc.u.w);
 
     imageStore(imgHistCur, px, result);
 
