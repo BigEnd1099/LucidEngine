@@ -404,7 +404,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
 
     imageStore(imgMomentsCur, px, outMoments);
 
+    // The final à-trous pass consumes imgGeomCur and persists filtered surface
+    // history only when geom.w >= 2. Without writing the updated history length
+    // here, the trace pass's initial value (normally 1) survives every frame and
+    // Persistent GI Surface History silently rejects every store.
     geom.w = newLen;
+    imageStore(imgGeomCur, px, geom);
     ageBin = min(uint(clamp(newLen / effectiveMaxHist, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
 
