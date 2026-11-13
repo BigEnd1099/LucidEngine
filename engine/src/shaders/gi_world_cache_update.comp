@@ -11,7 +11,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "gi_world_cache_common.glsl"
 
-layout(std430, set = 1, binding = 0) buffer WorldRadianceGridBuffer {
+layout(std430, set = 1, binding = 0) coherent buffer WorldRadianceGridBuffer {
     WorldRadianceCell cells[];
 } worldCache;
 
