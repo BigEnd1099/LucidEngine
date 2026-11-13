@@ -437,7 +437,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             // to prevent variance starvation, edge-stopping collapse, and noisy boiling on disocclusions.
             vec2 accumulatedMoments = mix(histMoments.xy, curSampleMoments, alpha);
             float temporalVar = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
-            float variance = (newLen < 4.0) ? mix(spatialVar, temporalVar, clamp((newLen - 1.0) / 3.0, 0.0, 1.0)) : temporalVar;
+            // Keep a spatial variance floor while the temporal history is still young.
+            // Surface-cache restoration must not starve SVGF of the variance signal
+            // needed by the a-trous edge-stopping weights.
+            float variance = (newLen < 8.0) ? max(spatialVar, temporalVar) : temporalVar;
+            variance = max(variance, 0.005);
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
             pixelDiag[2]++;
