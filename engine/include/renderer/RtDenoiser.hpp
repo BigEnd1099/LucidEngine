@@ -150,6 +150,10 @@ namespace engine::renderer {
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
         VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
+        VkBuffer m_surfaceHistoryBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
+        bool m_surfaceHistoryNeedsClear{true};
+        uint32_t m_surfaceHistoryLightingEpoch{1u};
         VmaAllocation m_diagnosticsAllocation{VK_NULL_HANDLE};
         uint32_t* m_diagnosticsMapped{nullptr};
         bool m_diagnosticsCoherent{false};
