@@ -23,8 +23,8 @@ uint surfaceHistoryHash(ivec3 cell) {
     return (h ^ (h >> 16u)) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 }
 
-// Writers use an odd/even sequence in meta.y. Readers never spin or acquire
-// the writer lock: they accept a snapshot only when the sequence is unchanged.
+// Writers use an odd/even sequence in meta.y. Readers never acquire the
+// writer lock or issue atomics: they accept a snapshot only if the sequence is unchanged.
 bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
                                out vec4 history, out bool empty) {
     uint base = surfaceHistoryHash(cell);
@@ -84,6 +84,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         if ((seq & 1u) != 0u ||
             atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             continue;
+        memoryBarrierBuffer();
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
         bool sameSurface = !empty && entry.meta.x == lightingEpoch &&
