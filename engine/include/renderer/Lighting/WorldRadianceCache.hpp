@@ -70,6 +70,7 @@ namespace engine::renderer {
         VkPipelineLayout m_pipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_updatePipeline{VK_NULL_HANDLE};
         bool m_initialized{false};
+        bool m_needsClear{true};
     };
 
 } // namespace engine::renderer
