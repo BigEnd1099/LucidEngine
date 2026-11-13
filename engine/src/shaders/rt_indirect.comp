@@ -21,7 +21,7 @@ layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[56]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[58]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
@@ -272,6 +272,7 @@ for (int s = 0; s < samples; ++s) {
             if (cachedRadiance.a > 0.0) {
                 float cacheBlend = 0.35 * clamp(cachedRadiance.a, 0.0, 1.0);
                 hitRadiance = mix(hitRadiance, cachedRadiance.rgb, cacheBlend);
+                atomicAdd(rtDiag.counters[56], 1u);
             }
         }
         pathRadiance += throughput * hitRadiance;
@@ -416,6 +417,8 @@ if (doGI && (pc.u.z & 32u) != 0u) {
         float historyConfidence = clamp(surfaceHistory.a / 16.0, 0.0, 1.0);
         float surfaceBlend = 0.25 * historyConfidence * surfaceCoverage;
         gi = sanitizeHDR(mix(gi, surfaceHistory.rgb, surfaceBlend));
+        if (surfaceBlend > 0.001)
+            atomicAdd(rtDiag.counters[57], 1u);
     }
 }
 float vis = 1.0 - occ * invSamples;
