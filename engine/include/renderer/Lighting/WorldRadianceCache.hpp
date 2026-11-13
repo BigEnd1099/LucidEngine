@@ -12,10 +12,10 @@ namespace engine::renderer {
     // Exactly 32 bytes aligned to 16 bytes for std430 SSBO layout
     struct alignas(16) WorldRadianceCell {
         glm::vec4 irradiance{0.0f}; // Offset 0..15 (RGB = radiance, A = sampleCount / weight)
-        uint32_t cellKey{0};        // Offset 16..19 (32-bit spatial key for atomicCompSwap in GLSL)
+        uint32_t cellKey{0};        // Offset 16..19 (hashed world-cell slot identifier)
         uint32_t packedNormal{0};   // Offset 20..23 (Octahedral 16-bit + 16-bit flags)
         uint32_t lastSeenFrame{0};  // Offset 24..27 (TTL / frame index)
-        uint32_t lockOrFlags{0};    // Offset 28..31 (Std430 alignment to 32 bytes)
+        uint32_t lockOrFlags{0};    // Offset 28..31 (atomic writer lock / flags)
     };
     static_assert(sizeof(WorldRadianceCell) == 32, "Std430 alignment mismatch!");
     static_assert(offsetof(WorldRadianceCell, irradiance) == 0, "WorldRadianceCell irradiance offset mismatch!");
