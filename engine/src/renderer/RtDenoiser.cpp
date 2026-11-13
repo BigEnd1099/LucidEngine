@@ -230,6 +230,8 @@ namespace engine::renderer {
         m_surfaceHistoryAllocation = VK_NULL_HANDLE;
         m_surfaceHistoryNeedsClear = true;
         m_surfaceHistoryLightingEpoch = 1u;
+        m_surfaceHistoryCacheStateKnown = false;
+        m_surfaceHistoryCacheWasEnabled = true;
         m_worldCacheBuffer = VK_NULL_HANDLE;
         m_diagnosticsAllocation = VK_NULL_HANDLE;
         m_diagnosticsMapped = nullptr;
@@ -586,6 +588,18 @@ namespace engine::renderer {
             }
         }
 
+        // Toggle transitions invalidate the persistent GI surface table by advancing its epoch.
+        // This avoids a large buffer clear while preventing stale OFF/ON cache reuse.
+        if (!m_surfaceHistoryCacheStateKnown) {
+            m_surfaceHistoryCacheWasEnabled = params.giSurfaceHistoryCacheEnabled;
+            m_surfaceHistoryCacheStateKnown = true;
+        } else if (m_surfaceHistoryCacheWasEnabled != params.giSurfaceHistoryCacheEnabled) {
+            m_surfaceHistoryCacheWasEnabled = params.giSurfaceHistoryCacheEnabled;
+            ++m_surfaceHistoryLightingEpoch;
+            if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
+            m_giHistoryValid = false;
+        }
+
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
             m_reflHistoryValid = false;
@@ -671,6 +685,8 @@ namespace engine::renderer {
         profiler.recordMetric("rtMaxHistory", params.maxHistory);
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtWorldRadianceCacheEnabled", params.worldRadianceCacheEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiSurfaceHistoryCacheEnabled", params.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiCheckerboard", (params.giCheckerboard && params.giTemporalFilterEnabled) ? 1.0 : 0.0);
         profiler.recordMetric("rtGiTemporalFilterEnabled", params.giTemporalFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiAtrousPass1Enabled", params.giAtrousPassEnabled[0] ? 1.0 : 0.0);
@@ -772,7 +788,9 @@ namespace engine::renderer {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
 
-            pd.u[0] = params.giTemporalFilterEnabled ? 0u : 1u; // bypass accumulation when disabled
+            pd.u[0] = (params.giTemporalFilterEnabled ? 0u : 1u) |
+                      (params.giSurfaceHistoryCacheEnabled ? 2u : 0u) |
+                      (params.worldRadianceCacheEnabled ? 4u : 0u); // bit 0 bypass, bit 1 surface cache, bit 2 world cache
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
@@ -788,6 +806,7 @@ namespace engine::renderer {
             pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.f.y = std::max(params.maxHistory, 1.0f);
             pd.u[0] = 0u;
+            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
             bindGI(m_atrousPipelines[0], pd);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 5);
