@@ -1293,11 +1293,10 @@ namespace engine::renderer {
         // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
         // =========================================================================
         bool worldCacheUpdateRecorded = false;
-        {
-            const bool tlasReady = m_sceneUboMappedPtr &&
-                static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
+        const bool tlasReady = m_sceneUboMappedPtr &&
+            static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
 
-            if (m_worldRadianceCache.isInitialized()) {
+        if (m_worldRadianceCache.isInitialized()) {
                 // Clear once on each toggle transition so OFF/ON never revives stale probes.
                 bool worldCacheClearedThisFrame = false;
                 if (m_worldRadianceCacheWasEnabled != m_rtSettings.worldRadianceCacheEnabled) {
@@ -1326,7 +1325,6 @@ namespace engine::renderer {
                     );
                 }
             }
-        }
         if (m_timestampQueryPool && !worldCacheUpdateRecorded) {
             // Keep the query pair valid when the cache is disabled or no update
             // dispatch can be recorded; report zero rather than a stale frame.
@@ -1459,7 +1457,6 @@ namespace engine::renderer {
                 rtProfiler.recordMetric("rtReflectionHalfRes", m_rtSettings.reflectionHalfRes ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtDebugMode", static_cast<uint32_t>(m_rtSettings.debugMode));
             }
-        }
 
         if (m_timestampQueryPool)
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestampQueryPool, 5);

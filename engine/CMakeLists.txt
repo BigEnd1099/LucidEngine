@@ -233,15 +233,6 @@ foreach(SPV_FILE ${SPV_FILES})
         "$<TARGET_FILE_DIR:engine>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${SPV_FILE}"
-        "${CMAKE_SOURCE_DIR}/engine"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SPV_FILE}"
-        "${CMAKE_SOURCE_DIR}/engine/src/shaders"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SPV_FILE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SPV_FILE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders"
     )
 endforeach()
