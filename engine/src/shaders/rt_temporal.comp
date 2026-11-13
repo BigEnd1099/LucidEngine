@@ -316,6 +316,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             float aoMin = raw.a;
             float aoMax = raw.a;
 
+            // Cache neighbor luminance during the first 3x3 read; reuse it below.
+            float neighborLums[9];
+            for (int i = 0; i < 9; ++i) neighborLums[i] = -1.0;
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dx = -1; dx <= 1; ++dx) {
                     if (dx == 0 && dy == 0) continue; // Exclude center pixel to prevent outlier self-contamination
@@ -323,6 +326,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                     if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
                     vec4 sVal = imageLoad(imgS, sp);
                     if (sVal.a < 0.0) continue; // Skip checkerboard-skipped neighbors
+                    int neighborIndex = (dy + 1) * 3 + (dx + 1);
+                    neighborLums[neighborIndex] = dot(sVal.rgb, vec3(0.2126, 0.7152, 0.0722));
                     vec3 sY = rgbToYCoCg(sVal.rgb);
                     m1Y += sY;
                     m2Y += sY * sY;
@@ -356,18 +361,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;
-                for (int fy = -1; fy <= 1; ++fy) {
-                    for (int fx = -1; fx <= 1; ++fx) {
-                        if (fx == 0 && fy == 0) continue;
-                        ivec2 fp = px + ivec2(fx, fy);
-                        if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
-                        vec4 fVal = imageLoad(imgS, fp);
-                        if (fVal.a < 0.0) continue;
-                        float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
-                        if (neighborLum >= supportThreshold) {
-                            brightNeighborCount += 1.0;
-                            maxSupportedLum = max(maxSupportedLum, neighborLum);
-                        }
+                for (int neighborIndex = 0; neighborIndex < 9; ++neighborIndex) {
+                    float neighborLum = neighborLums[neighborIndex];
+                    if (neighborLum < 0.0) continue;
+                    if (neighborLum >= supportThreshold) {
+                        brightNeighborCount += 1.0;
+                        maxSupportedLum = max(maxSupportedLum, neighborLum);
                     }
                 }
                 bool isolatedFirefly = count >= 4.0 &&
