@@ -185,9 +185,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
         geom.w = 1.0;
         imageStore(imgGeomCur, px, geom);
-        if ((pc.u.x & 2u) != 0u && (pc.u.y & 16u) != 0u && raw.a >= -0.5 &&
-            all(equal(uvec2(px) & 3u, uvec2(pc.u.w & 3u, (pc.u.w >> 2u) & 3u)))) {
-            storeSurfaceHistory(P, N, raw.rgb, 2.0, pc.u.z, pc.u.w);
+        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 &&
+            (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
+            storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w);
         }
         ageBin = 0u;
         histogramCounted = true;
@@ -450,35 +450,29 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         }
     }
 
-    // Persist temporal irradiance independently of à-trous settings and debug mode.
-    // One in sixteen pixels per frame writes, distributing updates spatially.
-    if ((pc.u.x & 2u) != 0u && (cacheDebugMode || (pc.u.y & 16u) != 0u) &&
-        !isCheckerSkipped && newLen >= 2.0 &&
-        all(equal(uvec2(px) & 3u, uvec2(pc.u.w & 3u, (pc.u.w >> 2u) & 3u)))) {
+    // Persist every second active pixel from the first valid observation.
+    // The cache is updated independently of Atrous settings and debug output.
+    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && newLen >= 1.0 &&
+        (((px.x ^ px.y) & 1) == int(pc.u.w & 1u))) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w);
     }
 
-    if (cacheDebugMode) {
-        vec3 debugColor = !cacheDebugEnabled ? vec3(0.05, 0.15, 0.85)
-                         : cacheDebugHit ? vec3(0.0, 0.85, 0.05)
-                                         : vec3(0.85, 0.02, 0.02);
-        result = vec4(debugColor, 1.0);
-        outMoments = vec4(0.0);
-    }
     imageStore(imgHistCur, px, result);
-
     imageStore(imgMomentsCur, px, outMoments);
 
-    // The final à-trous pass consumes imgGeomCur and persists filtered surface
-    // history only when geom.w >= 2. Without writing the updated history length
-    // here, the trace pass's initial value (normally 1) survives every frame and
-    // Persistent GI Surface History silently rejects every store.
+    // Publish temporal history length before replacing the display output with
+    // cache diagnostics. The diagnostic view must not poison temporal history.
     geom.w = newLen;
     imageStore(imgGeomCur, px, geom);
     ageBin = min(uint(clamp(newLen / effectiveMaxHist, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
 
-    imageStore(imgGeomCur, px, geom);
+    if (cacheDebugMode) {
+        vec3 debugColor = !cacheDebugEnabled ? vec3(0.05, 0.15, 0.85)
+                         : cacheDebugHit ? vec3(0.0, 0.85, 0.05)
+                                         : vec3(0.85, 0.02, 0.02);
+        imageStore(imgHistCur, px, vec4(debugColor, 1.0));
+    }
 
 }
 
