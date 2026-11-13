@@ -55,7 +55,7 @@ void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRad
     float depth = texelFetch(uDepth, depthPx, 0).r;
     vec3 worldPos = rtWorldPos(vec2(px) + 0.5, depth, size);
     vec3 worldNormal = rtOctDecode(geom.xy);
-    storeSurfaceHistory(worldPos, worldNormal, filteredRadiance, geom.w, pc.u.z, pc.u.w);
+    storeSurfaceHistory(worldPos, worldNormal, filteredRadiance, geom.w, pc.u.z, pc.u.w, true);
 }
 
 void main() {
