@@ -192,11 +192,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
         geom.w = 1.0;
         imageStore(imgGeomCur, px, geom);
-        if ((pc.u.x & 2u) != 0u && raw.a >= -0.5 && d < 1.0 &&
-            ((px.x & 3) == 2) && ((px.y & 3) == 2) &&
-            ((pc.u.y & 12u) != 0u)) {
-            storeSurfaceHistory(P, N, raw.rgb, 1.0, pc.u.z, pc.u.w, false);
-        }
         ageBin = 0u;
         histogramCounted = true;
         return;
