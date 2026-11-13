@@ -295,7 +295,7 @@ namespace engine::renderer {
             }
         }
 
-        bool rtLightOrCameraMoved = false;
+        bool rtLightingChanged = false;
 
         // Zapis SceneUboData przed wszystkimi przebiegami (uzywane przez Depth Prepass, PBR i Skybox)
         if (m_sceneUboMappedPtr) {
@@ -389,23 +389,23 @@ namespace engine::renderer {
             static bool s_hasPrevState{false};
 
             if (!s_hasPrevState) {
-                rtLightOrCameraMoved = true;
+                rtLightingChanged = true;
                 s_hasPrevState = true;
             } else {
                 if (s_prevNumLights != ubo.numLights) {
-                    rtLightOrCameraMoved = true;
+                    rtLightingChanged = true;
                 }
                 if (glm::distance(glm::vec3(s_prevSunDir), glm::vec3(ubo.sunDirection)) > 0.001f ||
                     std::abs(s_prevSunDir.w - ubo.sunDirection.w) > 0.01f ||
                     glm::distance(glm::vec3(s_prevSunCol), glm::vec3(ubo.sunColor)) > 0.01f) {
-                    rtLightOrCameraMoved = true;
+                    rtLightingChanged = true;
                 }
                 for (int i = 0; i < ubo.numLights; ++i) {
                     if (glm::distance(glm::vec3(s_prevLightsPos[i]), glm::vec3(ubo.lightsPos[i])) > 0.005f ||
                         glm::distance(glm::vec3(s_prevLightsCol[i]), glm::vec3(ubo.lightsCol[i])) > 0.005f ||
                         std::abs(s_prevLightsCol[i].w - ubo.lightsCol[i].w) > 0.01f ||
                         glm::distance(glm::vec3(s_prevLightsDir[i]), glm::vec3(ubo.lightsDir[i])) > 0.005f) {
-                        rtLightOrCameraMoved = true;
+                        rtLightingChanged = true;
                         break;
                     }
                 }
@@ -1297,8 +1297,8 @@ namespace engine::renderer {
 
             if (tlasReady && m_worldRadianceCache.isInitialized() && m_accelerationStructure.getTLAS() != VK_NULL_HANDLE) {
                 // Probe radiance is light-dependent; invalidate it on actual lighting edits.
-                // Camera motion alone does not set rtLightOrCameraMoved.
-                if (rtLightOrCameraMoved)
+                // Camera motion alone does not set rtLightingChanged.
+                if (rtLightingChanged)
                     m_worldRadianceCache.clear(m_commandBuffer);
 
                 const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
@@ -1382,7 +1382,7 @@ namespace engine::renderer {
                 rtp.reflectionTemporalFilterEnabled = m_rtSettings.reflectionTemporalFilterEnabled;
                 rtp.reflectionOutlierFilterEnabled = m_rtSettings.reflectionOutlierFilterEnabled;
                 rtp.reflectionSpatialFilterEnabled = m_rtSettings.reflectionSpatialFilterEnabled;
-                rtp.lightChanged = rtLightOrCameraMoved;
+                rtp.lightChanged = rtLightingChanged;
                 rtp.debugMode = m_rtSettings.debugMode;
                 core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");
                 m_rtDenoiser.record(m_commandBuffer, m_descriptorSet, rtp);
