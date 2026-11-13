@@ -13,6 +13,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
+#include "gi_surface_history_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
@@ -71,7 +72,7 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
 layout(push_constant) uniform PC {
 mat4 unused;
 vec4 f;
-uvec4 u; // x=samples, y=frame, z=flags (bit0 GI, bit1 AO), w=max bounces
+uvec4 u; // x=samples, y=frame, z=GI/AO/cache flags, w=max bounces; f.x carries surface-cache epoch bits
 } pc;
 
 const float AO_DISTANCE = 1.75;
@@ -254,18 +255,27 @@ for (int s = 0; s < samples; ++s) {
             singleWeight = float(numActiveLights);
         }
 
-        pathRadiance += throughput * shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent, dir, true, -1.0, singleLight, singleWeight, bounceLod);
-
         vec3 hitAlbedo = hit.baseColor.rgb *
             pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, bounceLod).rgb, vec3(0.0)), vec3(2.2));
         vec3 hitOrm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, bounceLod).rgb;
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
         vec3 hitDiffuseAlbedo = hitAlbedo * (1.0 - hitMetallic);
-        if (b == bounces - 1 && hitDistance > 1.5) {
-            vec4 cached = sampleWorldRadianceCache(hitPosition, hitNormal, pc.u.y);
-            if (cached.a > 0.0)
-                pathRadiance += throughput * hitDiffuseAlbedo * cached.rgb * (0.35 * cached.a);
+
+        // The world cache is a radiance estimate for this exact secondary surface.
+        // Blend it into the live hit radiance at every diffuse bounce; do not add it
+        // as a second light on top of shadeRtHitEx (which would double-count direct light).
+        vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
+                                        dir, true, -1.0, singleLight, singleWeight, bounceLod);
+        if ((pc.u.z & 16u) != 0u &&
+            max(max(hitDiffuseAlbedo.r, hitDiffuseAlbedo.g), hitDiffuseAlbedo.b) > 0.01) {
+            vec4 cachedRadiance = sampleWorldRadianceCache(hitPosition, hitNormal, pc.u.y);
+            if (cachedRadiance.a > 0.0) {
+                float cacheBlend = 0.35 * clamp(cachedRadiance.a, 0.0, 1.0);
+                hitRadiance = mix(hitRadiance, cachedRadiance.rgb, cacheBlend);
+            }
         }
+        pathRadiance += throughput * hitRadiance;
+
         float hitRoughness = clamp(hit.material.y * hitOrm.g, 0.0, 1.0);
         bool hitReflects = (hit.material.w > 0.5);
 
@@ -394,6 +404,20 @@ for (int s = 0; s < samples; ++s) {
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
+
+// Persistent surface history is a continuous spatial prior for the current GI
+// estimate, not a disocclusion-only fallback and not a replacement for pixel history.
+// Trilinear coverage suppresses isolated-cell/block-edge influence.
+if (doGI && (pc.u.z & 32u) != 0u) {
+    vec4 surfaceHistory = vec4(0.0);
+    float surfaceCoverage = 0.0;
+    uint lightingEpoch = floatBitsToUint(pc.f.x);
+    if (loadSurfaceHistory(P, N, lightingEpoch, frame, surfaceHistory, surfaceCoverage)) {
+        float historyConfidence = clamp(surfaceHistory.a / 16.0, 0.0, 1.0);
+        float surfaceBlend = 0.25 * historyConfidence * surfaceCoverage;
+        gi = sanitizeHDR(mix(gi, surfaceHistory.rgb, surfaceBlend));
+    }
+}
 float vis = 1.0 - occ * invSamples;
 imageStore(imgS, px, vec4(gi, vis));
 imageStore(imgRawGi, px, vec4(gi, vis));
