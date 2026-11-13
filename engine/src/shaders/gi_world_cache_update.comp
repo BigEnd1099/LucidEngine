@@ -51,7 +51,7 @@ void main() {
         probePos = cameraPos + offsetDir * (0.35 * rand1());
     } else {
         // The remaining 25% retain broad spatial coverage, but allocate only
-        // 16 vertical bands to [-2 m, +13 m] instead of wasting half below floor.
+        // 17 vertical bands to [-2 m, +14 m] instead of wasting half below floor.
         int gz = int(probeLinearIdx / 1024u) - 16;
         uint rem = probeLinearIdx % 1024u;
         int gy = int(round(float(rem / 32u) * (16.0 / 31.0))) - 2;
