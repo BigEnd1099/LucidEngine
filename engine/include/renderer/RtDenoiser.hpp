@@ -40,6 +40,8 @@ namespace engine::renderer {
             bool      reflectionTemporalFilterEnabled{true};
             bool      reflectionOutlierFilterEnabled{true};
             bool      reflectionSpatialFilterEnabled{true};
+            bool      worldRadianceCacheEnabled{true};
+            bool      giSurfaceHistoryCacheEnabled{true};
             bool      lightChanged{false}; // Resets accumulation when scene lighting changes
             RtDebugMode debugMode{RtDebugMode::None};
 
@@ -154,6 +156,8 @@ namespace engine::renderer {
         VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
         bool m_surfaceHistoryNeedsClear{true};
         uint32_t m_surfaceHistoryLightingEpoch{1u};
+        bool m_surfaceHistoryCacheStateKnown{false};
+        bool m_surfaceHistoryCacheWasEnabled{true};
         VmaAllocation m_diagnosticsAllocation{VK_NULL_HANDLE};
         uint32_t* m_diagnosticsMapped{nullptr};
         bool m_diagnosticsCoherent{false};
