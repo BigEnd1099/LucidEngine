@@ -250,10 +250,18 @@ namespace engine::renderer {
 
     uint32_t WorldRadianceCache::packNormalOctahedral(const glm::vec3& n) {
         glm::vec3 norm = n / (std::abs(n.x) + std::abs(n.y) + std::abs(n.z) + 1e-6f);
-        glm::vec2 oct = (norm.z >= 0.0f) ? glm::vec2(norm.x, norm.y)
-                                         : (1.0f - glm::abs(glm::vec2(norm.y, norm.x))) * glm::sign(glm::vec2(norm.x, norm.y));
-        glm::uvec2 u = glm::uvec2(glm::clamp(oct * 0.5f + 0.5f, 0.0f, 1.0f) * 65535.0f);
-        return (u.x & 0xFFFFu) | ((u.y & 0xFFFFu) << 16u);
+        glm::vec2 oct(norm.x, norm.y);
+        if (norm.z < 0.0f) {
+            const glm::vec2 oldXY = oct;
+            const glm::vec2 signNotZero(
+                oldXY.x >= 0.0f ? 1.0f : -1.0f,
+                oldXY.y >= 0.0f ? 1.0f : -1.0f);
+            oct = (1.0f - glm::abs(glm::vec2(oldXY.y, oldXY.x))) * signNotZero;
+        }
+        oct = glm::clamp(oct * 0.5f + 0.5f, 0.0f, 1.0f);
+        const uint32_t ux = static_cast<uint32_t>(oct.x * 65535.0f + 0.5f);
+        const uint32_t uy = static_cast<uint32_t>(oct.y * 65535.0f + 0.5f);
+        return (uy << 16u) | ux;
     }
 
     glm::vec3 WorldRadianceCache::unpackNormalOctahedral(uint32_t packedN) {
