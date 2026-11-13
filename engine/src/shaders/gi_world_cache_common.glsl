@@ -25,8 +25,10 @@ vec3 unpackNormalOctahedral(uint packedN) {
     oct = oct * 2.0 - 1.0;
     vec3 n = vec3(oct.x, oct.y, 1.0 - abs(oct.x) - abs(oct.y));
     if (n.z < 0.0) {
-        vec2 signNotZero = vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
-        n.xy = (1.0 - abs(n.yx)) * signNotZero;
+        vec2 oldXY = n.xy;
+        vec2 signNotZero = vec2(oldXY.x >= 0.0 ? 1.0 : -1.0, oldXY.y >= 0.0 ? 1.0 : -1.0);
+        n.x = (1.0 - abs(oldXY.y)) * signNotZero.x;
+        n.y = (1.0 - abs(oldXY.x)) * signNotZero.y;
     }
     return normalize(n);
 }
