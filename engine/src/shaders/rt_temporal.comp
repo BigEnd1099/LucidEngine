@@ -195,8 +195,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     }
 
     float maxHist = max(pc.f.x, 1.0);
-    float motionPixels = length(motion * vec2(isize));
-    float effectiveMaxHist = mix(maxHist, max(4.0, maxHist * 0.25), clamp(motionPixels * 0.08, 0.0, 1.0));
+    // Screen-space motion includes camera movement. It is not evidence that
+    // diffuse surface irradiance changed, so never shorten GI history from it.
+    float effectiveMaxHist = maxHist;
     vec4 result;
     float newLen;
 
@@ -295,10 +296,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
                 vec3 histY = rgbToYCoCg(hist.rgb);
-                // When motion is minimal, relax upper clamp for diffuse GI to allow temporal accumulation
-                if (dot(motion, motion) < 1e-5) {
-                    clampMaxY = max(clampMaxY, histY);
-                }
                 hist.a = clamp(hist.a, aoMin, aoMax);
 
                 // A bright sample is not automatically a firefly: preserve it when
@@ -324,7 +321,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 }
                 bool isolatedFirefly = count >= 4.0 &&
                     brightNeighborCount <= floor(count * 0.125);
-                // Preserve supported bright structures while still clamping unsupported history.
+                // A valid reprojection (wSum > 0.2) identifies the same surface
+                // across camera motion. Preserve its accumulated diffuse irradiance;
+                // only an isolated firefly is allowed to force the history downward.
+                if (!isolatedFirefly && wSum > 0.2) {
+                    clampMaxY = max(clampMaxY, histY);
+                }
+                // Preserve newly visible, spatially supported bright structures.
                 if (!isolatedFirefly) clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
