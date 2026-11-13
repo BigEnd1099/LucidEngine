@@ -80,6 +80,12 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     uint base = surfaceHistoryHash(cell);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
+        // Avoid contending on cells already updated by another pixel this frame.
+        SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
+        if (existing.meta.x == lightingEpoch &&
+            all(equal(existing.identity.xyz, cell)) &&
+            existing.meta.z == frameIndex)
+            return;
         uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
         if ((seq & 1u) != 0u ||
             atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
