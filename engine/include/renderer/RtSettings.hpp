@@ -14,7 +14,9 @@ namespace engine::renderer {
         Variance = 7,
         RawSpecularCaustics = 8,
         CausticHitDensity = 9,
-        TemporalIndirect = 10
+        TemporalIndirect = 10,
+        WorldRadianceCacheHits = 11,
+        SurfaceHistoryCacheHits = 12
     };
 
     struct RtSettings {
