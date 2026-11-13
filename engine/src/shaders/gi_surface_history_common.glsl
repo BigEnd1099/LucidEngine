@@ -80,7 +80,8 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
 }
 
 void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
-                         float historyLength, uint lightingEpoch, uint frameIndex) {
+                         float historyLength, uint lightingEpoch, uint frameIndex,
+                         bool overwriteSameFrame) {
     vec3 n = normalize(worldNormal);
     vec3 biasedPos = worldPos + n * (SURFACE_HISTORY_CELL_SIZE * 0.25);
     ivec3 cell = ivec3(floor(biasedPos / SURFACE_HISTORY_CELL_SIZE));
@@ -117,6 +118,12 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
 
         if (sameSurface && entry.meta.z == frameIndex) {
+            if (overwriteSameFrame) {
+                // The final Atrous pass is later in the same command stream;
+                // let its filtered radiance replace the temporal pre-denoise value.
+                surfaceHistoryCache.cells[index].radianceAge =
+                    vec4(max(irradiance, vec3(0.0)), max(entry.radianceAge.a, historyLength));
+            }
             memoryBarrierBuffer();
             atomicExchange(surfaceHistoryCache.cells[index].meta.y, seq + 2u);
             return;
