@@ -794,7 +794,8 @@ namespace engine::renderer {
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
                       (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
-                      (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u);
+                      (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u) |
+                      (!params.giAtrousPassEnabled[3] ? 16u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
