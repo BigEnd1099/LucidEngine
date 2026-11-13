@@ -1292,8 +1292,7 @@ namespace engine::renderer {
         // PASS 2C: RT INDIRECT (diffuse GI + AO): trace -> temporal accumulation -> a-trous
         // Depth is still in DEPTH_STENCIL_READ_ONLY here. Result is sampled by pbr_rt.frag.
         // =========================================================================
-        if (m_timestampQueryPool)
-            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 11);
+        bool worldCacheUpdateRecorded = false;
         {
             const bool tlasReady = m_sceneUboMappedPtr &&
                 static_cast<SceneUboData*>(m_sceneUboMappedPtr)->rtParams.x > 0.5f;
@@ -1322,13 +1321,19 @@ namespace engine::renderer {
                         m_frameCounter,
                         glm::vec3(sceneUbo->cameraPos),
                         glm::vec3(sceneUbo->sunDirection),
-                        sceneUbo->sunColor
+                        sceneUbo->sunColor,
+                        m_timestampQueryPool
                     );
+                    worldCacheUpdateRecorded = true;
                 }
             }
         }
-        if (m_timestampQueryPool)
+        if (m_timestampQueryPool && !worldCacheUpdateRecorded) {
+            // Keep the query pair valid when the cache is disabled or no update
+            // dispatch can be recorded; report zero rather than a stale frame.
+            vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 11);
             vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_timestampQueryPool, 12);
+        }
 
         const bool rtIndirectActive = m_rtDenoiser.isReady() && isRayTracingEnabled() &&
                 m_rtGraphicsPipeline != VK_NULL_HANDLE &&

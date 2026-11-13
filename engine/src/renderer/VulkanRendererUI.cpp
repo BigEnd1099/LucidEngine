@@ -383,7 +383,7 @@ namespace engine::renderer {
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
                     "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
                     "RT reflections temporal dispatch", "RT reflections temporal dependency gap",
-                    "World radiance cache update dispatch"
+                    "World radiance cache compute dispatch"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i)
                     report << effectStageLabels[i] << ": " << avgEffectStages[i] << " ms\n";
@@ -592,7 +592,7 @@ namespace engine::renderer {
                     "RT GI a-trous 0 dispatch", "RT GI a-trous 0 dependency gap",
                     "RT GI-to-reflections dependency gap", "RT reflections trace dispatch", "RT reflections trace dependency gap",
                     "RT reflections temporal dispatch", "RT reflections temporal dependency gap",
-                    "World radiance cache update dispatch"
+                    "World radiance cache compute dispatch"
                 };
                 for (size_t i = 0; i < avgEffectStages.size(); ++i) {
                     ImGui::TableNextRow();

@@ -149,16 +149,17 @@ namespace engine::renderer {
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-    void WorldRadianceCache::dispatchUpdate(VkCommandBuffer cmd,
-                                           VkDescriptorSet sceneSet,
-                                           VkAccelerationStructureKHR tlas,
-                                           uint32_t frameCounter,
-                                           const glm::vec3& cameraPos,
-                                           const glm::vec3& sunDirection,
-                                           const glm::vec4& sunColor) {
+    bool WorldRadianceCache::dispatchUpdate(VkCommandBuffer cmd,
+                                            VkDescriptorSet sceneSet,
+                                            VkAccelerationStructureKHR tlas,
+                                            uint32_t frameCounter,
+                                            const glm::vec3& cameraPos,
+                                            const glm::vec3& sunDirection,
+                                            const glm::vec4& sunColor,
+                                            VkQueryPool timingQueryPool) {
         if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer ||
             m_sceneSetLayout == VK_NULL_HANDLE || m_descriptorSet == VK_NULL_HANDLE ||
-            tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return;
+            tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return false;
 
         // Buffer allocations are not zero-initialized. Guarantee a valid empty table
         // even when the first usable TLAS appears after the renderer's initial frame.
@@ -187,7 +188,13 @@ namespace engine::renderer {
         const VkDescriptorSet sets[2] = { sceneSet, m_descriptorSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
 
+        // Timestamp only the compute dispatch itself. Cache clears and the
+        // post-dispatch visibility barrier are deliberately outside this interval.
+        if (timingQueryPool != VK_NULL_HANDLE)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timingQueryPool, 11);
         vkCmdDispatch(cmd, SLICE_SIZE / 64, 1, 1);
+        if (timingQueryPool != VK_NULL_HANDLE)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timingQueryPool, 12);
 
         // Buffer memory barrier to synchronize compute write with downstream compute reads
         VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
@@ -203,6 +210,7 @@ namespace engine::renderer {
         depInfo.bufferMemoryBarrierCount = 1;
         depInfo.pBufferMemoryBarriers = &barrier;
         vkCmdPipelineBarrier2(cmd, &depInfo);
+        return true;
     }
 
     void WorldRadianceCache::cleanup() {
