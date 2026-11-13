@@ -101,7 +101,8 @@ void main() {
                     pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0)), vec3(2.2));
                 float bMetallic = clamp(bounceHit.material.x *
                     textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b, 0.0, 1.0);
-                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * clamp(bCell.irradiance.a / 6.0, 0.0, 1.0);
+                float bConf = smoothstep(1.0, 16.0, bCell.irradiance.a);
+                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * bConf;
                 break;
             }
         }
@@ -141,14 +142,21 @@ void main() {
             continue;
         }
 
+        // 1. Ogranicz maksymalną jasność pojedynczego promienia (usuwa jasne kulki/plamy):
+        float hitLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
+        if (hitLum > 1.5) {
+            hitRad *= (1.5 / hitLum);
+        }
         float newWeight;
         vec3 newIrr;
         if (expired) {
+            // 2. Cold-start damping: pojedyncza próbka nie może od razu świecić z pełną mocą,
+            // dopóki kolejne promienie nie potwierdzą tej jasności:
             newWeight = 1.0;
-            newIrr = hitRad;
+            newIrr = hitRad * 0.25;
         } else {
-            newWeight = min(prevWeight + 1.0, 32.0);
-            float alpha = max(1.0 / newWeight, 0.05);
+            newWeight = min(prevWeight + 1.0, 64.0);
+            float alpha = clamp(1.0 / newWeight, 0.03, 0.15);
             newIrr = mix(prevCell.irradiance.rgb, hitRad, alpha);
         }
 

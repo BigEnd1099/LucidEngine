@@ -59,7 +59,8 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
             WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
             if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
                 dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.65) {
-                return vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 6.0, 0.0, 1.0));
+                float confidence = smoothstep(1.0, 16.0, cell.irradiance.a);
+                return vec4(cell.irradiance.rgb, confidence);
             }
         }
     }

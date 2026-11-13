@@ -11,7 +11,7 @@ struct WorldRadianceCell {
 };
 
 const uint CACHE_CELL_COUNT = 524288u;
-const float DEFAULT_CELL_SIZE = 0.35;
+const float DEFAULT_CELL_SIZE = 0.65;
 
 uint packNormalOctahedral(vec3 n) {
     n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6);

@@ -79,7 +79,8 @@ bool trySampleWorldRadianceCache(uint cellKey, vec3 n, uint currentFrame, out ve
             continue;
         if (dot(unpackNormalOctahedral(cell.packedNormal), n) <= 0.65)
             continue;
-        result = vec4(cell.irradiance.rgb, clamp(cell.irradiance.a / 8.0, 0.0, 1.0));
+        float confidence = smoothstep(1.0, 16.0, cell.irradiance.a);
+        result = vec4(cell.irradiance.rgb, confidence);
         return true;
     }
     return false;
@@ -113,11 +114,8 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
             }
         }
     }
-    if (weightSum > 0.001) {
-        float cov = clamp(weightSum * 1.5, 0.0, 1.0);
-        return vec4(radSum / weightSum, clamp(confSum / weightSum, 0.0, 1.0) * cov);
-    }
-    return vec4(0.0);
+    if (weightSum <= 0.0001) return vec4(0.0);
+    return vec4(radSum / weightSum, clamp(confSum / weightSum, 0.0, 1.0));
 }
 
 
