@@ -158,8 +158,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                                     : vec3(50.0, 0.0, 0.0);
         imageStore(imgHistCur, px, vec4(debugColor, 1.0));
         imageStore(imgMomentsCur, px, vec4(0.0));
-        geom.w = 1.0;
-        imageStore(imgGeomCur, px, geom);
         return;
     }
 
