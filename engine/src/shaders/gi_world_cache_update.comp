@@ -59,12 +59,11 @@ void main() {
     }
 
     vec3 cellNormal = normalize(hitNormal);
-    // Keep ray-hit and visible G-buffer positions on the same side of the
-    // quantization boundary before generating the spatial key.
-    vec3 snappedPos = hitPos + cellNormal * (cellSize * 0.05);
+    // computeWorldCellKey applies the same normal-directed voxel bias used
+    // by G-buffer lookups, so ray-hit and visible surface keys agree.
     vec3 hitRad = shadeRtHitEx(hit, hitPos, hitNormal, hitUv, hitTangent,
                                sampleDir, true, 0.25);
-    uint cellKey = computeWorldCellKey(snappedPos, cellNormal, cellSize);
+    uint cellKey = computeWorldCellKey(hitPos, cellNormal, cellSize);
     uint hIndex = cellKey % CACHE_CELL_COUNT;
     // Multiple probe rays can map to the same spatial hash cell in one dispatch.
     // Serialize the read/modify/write so the EMA and normal/key metadata cannot tear.
@@ -82,7 +81,7 @@ void main() {
     vec3 prevNormal = unpackNormalOctahedral(prevCell.packedNormal);
     bool expired = (prevWeight <= 0.0) ||
         (pc.frameAndSlice.x < prevCell.lastSeenFrame) ||
-        ((pc.frameAndSlice.x - prevCell.lastSeenFrame) > 600u);
+        ((pc.frameAndSlice.x - prevCell.lastSeenFrame) > 2048u);
     bool keyMismatch = prevCell.cellKey != cellKey;
     bool normalMismatch = dot(prevNormal, cellNormal) < 0.5;
 
