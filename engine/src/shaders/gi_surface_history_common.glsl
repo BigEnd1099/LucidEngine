@@ -89,11 +89,22 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
-        // A single non-spinning slot claim prevents torn identity/radiance writes.
-        // If another invocation owns this slot, skip this update; the next frame
-        // retries it. Never redirect a contended write into a duplicate hash slot.
-        uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((seq & 1u) != 0u) return;
+        // Fast atomic snapshot avoids contending on cells already published this frame.
+        uint observedSeq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if ((observedSeq & 1u) != 0u) return;
+        SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
+        memoryBarrierBuffer();
+        if (observedSeq != atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u))
+            return;
+        if (existing.meta.x == lightingEpoch &&
+            all(equal(existing.identity.xyz, cell)) &&
+            dot(unpackNormalOctahedral(uint(existing.identity.w)), n) > 0.75 &&
+            existing.meta.z == frameIndex)
+            return;
+
+        // One CAS attempt: no spinlock. A contended writer skips this frame;
+        // the active checkerboard phase retries on the next frame.
+        uint seq = observedSeq;
         if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             return;
 
