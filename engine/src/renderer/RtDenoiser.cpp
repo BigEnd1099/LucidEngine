@@ -773,15 +773,22 @@ namespace engine::renderer {
         pd.u[1] = params.frameIndex;
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) |
                   ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
-                  (params.giTraceFireflyClampEnabled ? 8u : 0u);
+                  (params.giTraceFireflyClampEnabled ? 8u : 0u) |
+                  (params.worldRadianceCacheEnabled ? 16u : 0u) |
+                  (params.giSurfaceHistoryCacheEnabled ? 32u : 0u);
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
+        // rt_indirect.comp reads the persistent surface cache's lighting epoch
+        // from f.x as raw uint bits; restore the temporal pass' max-history value
+        // immediately after the trace dispatch.
 
         const bool giOrAoActive = params.giEnabled || params.aoEnabled || params.debugMode != RtDebugMode::None;
         if (giOrAoActive) {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
 
+            pd.f.x = std::bit_cast<float>(m_surfaceHistoryLightingEpoch);
             bindGI(m_tracePipelineHandle, pd); // 1. trace
+            pd.f.x = std::max(params.maxHistory, 1.0f);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
             sync();
