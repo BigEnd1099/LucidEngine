@@ -181,7 +181,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
             cacheDebugEnabled = (pc.u.x & 2u) != 0u;
             if (cacheDebugEnabled) {
                 vec4 debugHistory = vec4(0.0);
-                cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, debugHistory);
+                float debugCoverage = 0.0;
+                cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, debugHistory, debugCoverage);
             }
         }
     }
@@ -438,10 +439,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                             (!isCheckerSkipped && wSum <= 0.02);
     if (needsCacheReseed) {
         vec4 surfaceHistory = vec4(0.0);
+        float surfaceCoverage = 0.0;
         bool restoredSurface = (pc.u.x & 2u) != 0u &&
-                               loadSurfaceHistory(P, N, pc.u.z, surfaceHistory);
+                               loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
         if (restoredSurface) {
-            result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.55);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, 0.55 * surfaceCoverage);
             newLen = clamp(surfaceHistory.a, 1.0, 4.0);
         } else if ((pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCache(P, N, pc.u.w);
