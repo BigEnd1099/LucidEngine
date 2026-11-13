@@ -48,11 +48,12 @@ layout(push_constant) uniform PC {
     uvec4 u;
 } pc;
 
-shared uint rtLocalCounters[48];
+shared uint rtPixelDiag[16 * 64];
 shared uint rtLocalAgeBins[64];
 shared uint rtLocalRejected[64];
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool rejectedCounted) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool rejectedCounted, out uint pixelDiag[16]) {
+    for (int i = 0; i < 16; ++i) pixelDiag[i] = 0u;
     histogramCounted = false;
     rejectedCounted = false;
     ageBin = 0u;
@@ -142,9 +143,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
             hist += w * imageLoad(imgReflHistPrev, tp);
             wSum += w;
         }
-        if (rejectedBounds != 0u) atomicAdd(rtLocalCounters[11], rejectedBounds);
-        if (rejectedDepth != 0u) atomicAdd(rtLocalCounters[12], rejectedDepth);
-        if (rejectedNormal != 0u) atomicAdd(rtLocalCounters[13], rejectedNormal);
+        if (rejectedBounds != 0u) pixelDiag[11] += rejectedBounds;
+        if (rejectedDepth != 0u) pixelDiag[12] += rejectedDepth;
+        if (rejectedNormal != 0u) pixelDiag[13] += rejectedNormal;
 
 
     }
@@ -161,12 +162,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[14], 1u);
+            pixelDiag[14] += 1u;
             // Re-use full history from previous frame when this pixel was active
             result = vec4((hist / wSum).rgb, 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
         } else {
-            atomicAdd(rtLocalCounters[15], 1u);
+            pixelDiag[15] += 1u;
             // Disocclusion / history invalid: Bilateral reconstruction from 4 active neighbors with linear depth
             vec3 neighborSum = vec3(0.0);
             float weightSum = 0.0;
@@ -199,7 +200,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         }
     } else {
         if (wSum > 0.05) {
-            atomicAdd(rtLocalCounters[9], 1u);
+            pixelDiag[9] += 1u;
             hist /= wSum;
 
             bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
@@ -306,14 +307,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 
 void main() {
     uint lane = gl_LocalInvocationIndex;
-    if (lane < 48u) rtLocalCounters[lane] = 0u;
-    barrier();
-
     uint ageBin = 0u;
     bool histogramCounted = false;
     bool rejectedCounted = false;
+    uint pixelDiag[16];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted, rejectedCounted);
+    processPixel(px, ageBin, histogramCounted, rejectedCounted, pixelDiag);
+
+    for (uint metric = 0u; metric < 16u; ++metric)
+        rtPixelDiag[metric * 64u + lane] = pixelDiag[metric];
     rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
     rtLocalRejected[lane] = rejectedCounted ? 1u : 0u;
 
@@ -330,10 +332,14 @@ void main() {
         if (rejectedTotal != 0u) atomicAdd(rtDiag.counters[10], rejectedTotal);
         for (uint bin = 0u; bin < 16u; ++bin)
             if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[32u + bin], histogram[bin]);
-    }
 
-    if (lane < 48u) {
-        uint count = rtLocalCounters[lane];
-        if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
+        // Per-pixel diagnostics are accumulated in registers, then reduced
+        // once per metric by the workgroup leader. No shared atomic contention.
+        for (uint metric = 0u; metric < 16u; ++metric) {
+            uint total = 0u;
+            for (uint i = 0u; i < 64u; ++i)
+                total += rtPixelDiag[metric * 64u + i];
+            if (total != 0u) atomicAdd(rtDiag.counters[metric], total);
+        }
     }
 }
