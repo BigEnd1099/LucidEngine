@@ -31,7 +31,7 @@ vec3 unpackNormalOctahedral(uint packedN) {
     return normalize(n);
 }
 
-uint hashWorldCell(vec3 pos, vec3 normal, float cellSize) {
+uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
     ivec3 cellCoord = ivec3(floor(pos / cellSize));
     uint normIdx = 0u;
     if (abs(normal.x) > abs(normal.y) && abs(normal.x) > abs(normal.z)) {
@@ -42,7 +42,11 @@ uint hashWorldCell(vec3 pos, vec3 normal, float cellSize) {
         normIdx = normal.z > 0.0 ? 4u : 5u;
     }
     uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u;
-    return (h ^ (h >> 16u)) % CACHE_CELL_COUNT;
+    return h ^ (h >> 16u);
+}
+
+uint hashWorldCell(vec3 pos, vec3 normal, float cellSize) {
+    return computeWorldCellKey(pos, normal, cellSize) % CACHE_CELL_COUNT;
 }
 
 #endif // GI_WORLD_CACHE_COMMON_GLSL
