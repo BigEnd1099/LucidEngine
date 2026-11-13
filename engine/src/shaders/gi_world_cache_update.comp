@@ -29,22 +29,35 @@ void main() {
     uint probeLinearIdx = (gl_GlobalInvocationID.x + pc.frameAndSlice.y) & 32767u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
-    // Camera-relative 32^3 probe volume. The slice offset now selects a distinct
-    // contiguous segment of the volume instead of repeatedly updating its origin.
-    int gz = int(probeLinearIdx / 1024u) - 16;
-    uint rem = probeLinearIdx % 1024u;
-    int gy = int(rem / 32u) - 16;
-    int gx = int(rem % 32u) - 16;
-
     float cellSize = pc.cameraPosAndCellSize.w > 0.0 ? pc.cameraPosAndCellSize.w : DEFAULT_CELL_SIZE;
-    vec3 probePos = pc.cameraPosAndCellSize.xyz + vec3(float(gx), float(gy), float(gz)) * cellSize;
-    // Probe the full sphere. The old +Y cosine hemisphere systematically
-    // missed floors and many side-facing surfaces in ordinary indoor scenes.
+    vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
+
+    // Uniform full-sphere ray direction shared by both probe populations.
     float dirY = 1.0 - 2.0 * rand1();
     float dirPhi = 6.28318530718 * rand1();
     float dirRadius = sqrt(max(0.0, 1.0 - dirY * dirY));
     vec3 sampleDir = vec3(dirRadius * cos(dirPhi), dirY,
                           dirRadius * sin(dirPhi));
+
+    vec3 probePos;
+    if ((threadIdx & 3u) != 0u) {
+        // 75% of rays originate at the player/camera, with a tiny spherical
+        // jitter to avoid repeatedly starting exactly inside nearby geometry.
+        float offsetY = 1.0 - 2.0 * rand1();
+        float offsetPhi = 6.28318530718 * rand1();
+        float offsetRadius = sqrt(max(0.0, 1.0 - offsetY * offsetY));
+        vec3 offsetDir = vec3(offsetRadius * cos(offsetPhi), offsetY,
+                              offsetRadius * sin(offsetPhi));
+        probePos = cameraPos + offsetDir * (0.35 * rand1());
+    } else {
+        // The remaining 25% retain broad spatial coverage, but allocate only
+        // 16 vertical bands to [-2 m, +13 m] instead of wasting half below floor.
+        int gz = int(probeLinearIdx / 1024u) - 16;
+        uint rem = probeLinearIdx % 1024u;
+        int gy = int(rem / 32u) / 2 - 2;
+        int gx = int(rem % 32u) - 16;
+        probePos = cameraPos + vec3(float(gx), float(gy), float(gz)) * cellSize;
+    }
 
     RtInstanceData hit;
     vec3 hitPos, hitNormal;
