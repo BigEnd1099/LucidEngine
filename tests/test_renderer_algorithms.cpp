@@ -173,6 +173,14 @@ int main() {
     glm::vec3 unpackedNorm = WorldRadianceCache::unpackNormalOctahedral(packedNorm);
     CHECK(glm::dot(testNorm, unpackedNorm) > 0.999f);
 
+    // Exact negative-Z axis is the octahedral lower-hemisphere singular case:
+    // it must encode to the upper-right octahedral corner and decode unchanged.
+    const glm::vec3 negativeZ(0.0f, 0.0f, -1.0f);
+    const uint32_t packedNegativeZ = WorldRadianceCache::packNormalOctahedral(negativeZ);
+    CHECK(packedNegativeZ == 0xFFFFFFFFu);
+    const glm::vec3 unpackedNegativeZ = WorldRadianceCache::unpackNormalOctahedral(packedNegativeZ);
+    CHECK(glm::dot(negativeZ, unpackedNegativeZ) > 0.999f);
+
     // Lower-hemisphere folds must use both original octahedral components.
     const glm::vec3 lowerHemisphereNormals[] = {
         glm::normalize(glm::vec3(0.31f, -0.72f, -0.62f)),
