@@ -315,12 +315,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     bool isolatedFirefly = count >= 4.0 &&
                         brightNeighborCount <= floor(count * 0.125);
                     // Expand the upper bound for bright features supported by neighboring samples.
-                    if (!isolatedFirefly) {
-                        float reflRetention = mix(0.97, 0.85, clamp(motionPixels * 0.15, 0.0, 1.0));
-                        if (hist.a >= 3.0)
-                            clampMaxY = max(clampMaxY, histY * reflRetention);
+                    bool realHistFirefly = isolatedFirefly && hist.a < 3.0 &&
+                        histY.x > m1Y.x + fireflyThreshold;
+                    bool realRawFirefly = isolatedFirefly &&
+                        rawY.x > m1Y.x + fireflyThreshold;
+                    if (!realHistFirefly && hist.a >= 2.0)
+                        clampMaxY = max(clampMaxY, histY);
+                    if (!realRawFirefly)
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
-                    }
                     if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
