@@ -214,6 +214,7 @@ namespace engine::renderer {
         RtSettings m_rtSettings{};
         RtDenoiser m_rtDenoiser;
         WorldRadianceCache m_worldRadianceCache;
+        bool m_worldRadianceCacheWasEnabled{true};
         GpuCulling m_gpuCulling;
         bool m_hiZCullingEnabled{true};
         VkPipeline m_rtGraphicsPipeline{VK_NULL_HANDLE};
