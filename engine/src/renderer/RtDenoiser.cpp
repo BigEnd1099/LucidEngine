@@ -792,7 +792,9 @@ namespace engine::renderer {
                       (params.giSurfaceHistoryCacheEnabled ? 2u : 0u) |
                       (params.worldRadianceCacheEnabled ? 4u : 0u); // bit 0 bypass, bit 1 surface cache, bit 2 world cache
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
-                      (params.giTemporalFireflyFilterEnabled ? 2u : 0u);
+                      (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
+                      (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
+                      (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_temporalPipeline, pd); // 2. temporal accumulation
