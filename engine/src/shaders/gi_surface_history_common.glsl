@@ -34,7 +34,7 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
     uint base = surfaceHistoryHash(cell, packedN);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        if (!lockSurfaceHistory(index)) continue;
+        if (!lockSurfaceHistory(index)) return false;
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
         bool match = !empty && entry.meta.x == lightingEpoch &&
@@ -55,7 +55,7 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     uint base = surfaceHistoryHash(cell, packedN);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        if (!lockSurfaceHistory(index)) continue;
+        if (!lockSurfaceHistory(index)) return;
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
         bool sameSurface = !empty && entry.meta.x == lightingEpoch &&
