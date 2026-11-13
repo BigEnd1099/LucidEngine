@@ -62,6 +62,11 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
                            all(equal(entry.identity.xyz, cell)) &&
                            dot(unpackNormalOctahedral(uint(entry.identity.w)), normalize(worldNormal)) > 0.92;
         bool staleEpoch = !empty && entry.meta.x != lightingEpoch;
+        // One representative pixel per quantized surface cell is enough per frame.
+        if (sameSurface && entry.meta.z == frameIndex) {
+            atomicExchange(surfaceHistoryCache.cells[index].meta.y, 0u);
+            return;
+        }
         if (empty || sameSurface || staleEpoch) {
             float oldAge = sameSurface ? max(entry.radianceAge.a, 1.0) : 0.0;
             float nextAge = min(oldAge + 1.0, 64.0);
