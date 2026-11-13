@@ -49,22 +49,21 @@ layout(push_constant) uniform PC {
 } pc;
 
 shared uint rtLocalCounters[48];
+shared uint rtLocalAgeBins[64];
+shared uint rtLocalRejected[64];
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool rejectedCounted) {
     histogramCounted = false;
+    rejectedCounted = false;
     ageBin = 0u;
     ivec2 isize = imageSize(imgRefl);
     if (any(greaterThanEqual(px, isize))) return;
     vec2 size = vec2(isize);
 
     float d = texelFetch(uDepth, px, 0).r;
-    if (d >= 1.0) { // sky
+    if (d >= 1.0) { // Sky is not a reflection sample.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        atomicAdd(rtLocalCounters[10], 1u);
-        ageBin = 0u;
-        histogramCounted = true; // zero-age / sky
-        imageStore(imgReflHistCur, px, vec4(0.0));
-        imageStore(imgRefl, px, vec4(0.0));
+        rejectedCounted = true;
         return;
     }
 
@@ -72,22 +71,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
     vec3 N = gNR.xyz;
     if (dot(N, N) <= 1e-4) {
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        atomicAdd(rtLocalCounters[10], 1u);
-        ageBin = 0u;
-        histogramCounted = true;
-        imageStore(imgReflHistCur, px, vec4(0.0));
-        imageStore(imgRefl, px, vec4(0.0));
+        rejectedCounted = true;
         return;
     }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
-
-    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
-    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
-    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
-
     vec4 raw = imageLoad(imgRefl, px);
+
     if ((pc.u.w & (1u << 15)) != 0u) {
+        vec3 bypassP = rtWorldPos(vec2(px) + 0.5, d, size);
+        float bypassViewDepth = -(ubo.view * vec4(bypassP, 1.0)).z;
+        imageStore(imgReflGeomCur, px, vec4(N, bypassViewDepth));
         float valid = raw.a > 0.0 ? 1.0 : 0.0;
         imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
         imageStore(imgRefl, px, raw);
@@ -95,16 +89,21 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
         histogramCounted = true;
         return;
     }
+
+    // The trace pass already writes exact zero for sky, invalid normals and
+    // roughness-cutoff pixels. Keep their geometry invalid for reprojection,
+    // but do not reconstruct world position or rewrite two already-empty images.
     if (raw.a <= 0.0) {
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        atomicAdd(rtLocalCounters[10], 1u);
-        ageBin = 0u;
-        histogramCounted = true; // zero-age / no reflection sample
-        // Sky or skipped roughness > maxRoughness
-        imageStore(imgReflHistCur, px, vec4(0.0));
-        imageStore(imgRefl, px, vec4(0.0));
+        rejectedCounted = true;
+        if (!all(equal(raw, vec4(0.0))))
+            imageStore(imgRefl, px, raw);
         return;
     }
+
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    float currentViewDepth = -(ubo.view * vec4(P, 1.0)).z;
+    imageStore(imgReflGeomCur, px, vec4(N, currentViewDepth));
 
     vec3 toCam = ubo.cameraPos.xyz - P;
     vec3 toCamNorm = (dot(toCam, toCam) > 1e-6) ? normalize(toCam) : vec3(0.0, 1.0, 0.0);
@@ -291,7 +290,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted) {
                 result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
             }
         } else {
-            atomicAdd(rtLocalCounters[10], 1u);
+            rejectedCounted = true;
             result = raw;
             historyAge = 1.0;
         }
@@ -312,11 +311,27 @@ void main() {
 
     uint ageBin = 0u;
     bool histogramCounted = false;
+    bool rejectedCounted = false;
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted);
-    if (histogramCounted) atomicAdd(rtLocalCounters[32u + ageBin], 1u);
+    processPixel(px, ageBin, histogramCounted, rejectedCounted);
+    rtLocalAgeBins[lane] = histogramCounted ? ageBin : 0xFFFFFFFFu;
+    rtLocalRejected[lane] = rejectedCounted ? 1u : 0u;
 
     barrier();
+    if (lane == 0u) {
+        uint rejectedTotal = 0u;
+        uint histogram[16];
+        for (uint bin = 0u; bin < 16u; ++bin) histogram[bin] = 0u;
+        for (uint i = 0u; i < 64u; ++i) {
+            rejectedTotal += rtLocalRejected[i];
+            uint bin = rtLocalAgeBins[i];
+            if (bin < 16u) histogram[bin]++;
+        }
+        if (rejectedTotal != 0u) atomicAdd(rtDiag.counters[10], rejectedTotal);
+        for (uint bin = 0u; bin < 16u; ++bin)
+            if (histogram[bin] != 0u) atomicAdd(rtDiag.counters[32u + bin], histogram[bin]);
+    }
+
     if (lane < 48u) {
         uint count = rtLocalCounters[lane];
         if (count != 0u) atomicAdd(rtDiag.counters[lane], count);
