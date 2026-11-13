@@ -18,8 +18,8 @@ layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 3, rgba32f) uniform image2D imgGeomCur;
 layout(set = 1, binding = 4, rgba32f) uniform image2D imgGeomPrev;
 layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
-layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
-layout(set = 1, binding = 10, rgba16f) uniform image2D imgReflHistCur;
+layout(set = 1, binding = 9, rgba16f) uniform readonly image2D imgRefl;
+layout(set = 1, binding = 10, rgba16f) uniform writeonly image2D imgReflHistCur;
 layout(set = 1, binding = 11, rgba16f) uniform image2D imgReflHistPrev;
 layout(set = 1, binding = 12) uniform sampler2D uMotion;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
@@ -70,6 +70,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0) { // Sky is not a reflection sample.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
+        imageStore(imgReflHistCur, px, vec4(0.0));
         rejectedCounted = true;
         return;
     }
@@ -91,7 +92,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         imageStore(imgReflGeomCur, px, vec4(N, bypassViewDepth));
         float valid = raw.a > 0.0 ? 1.0 : 0.0;
         imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
-        imageStore(imgRefl, px, raw);
         ageBin = 0u;
         histogramCounted = true;
         return;
@@ -104,8 +104,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         histogramCounted = false; // Not a traced reflection sample; never enter age Bin 00.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
         rejectedCounted = true;
-        if (!all(equal(raw, vec4(0.0))))
-            imageStore(imgRefl, px, raw);
+        imageStore(imgReflHistCur, px, vec4(0.0));
         return;
     }
 
@@ -125,11 +124,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     vec2 curUV = (vec2(px) + 0.5) / size;
     vec2 motion = texelFetch(uMotion, px, 0).xy;
     vec4 pClip = pc.prevViewProj * vec4(P, 1.0);
+    vec2 cameraPrevUV = (pClip.w > 0.0001) ? ((pClip.xy / pClip.w) * 0.5 + 0.5) : curUV;
+    vec2 effectivePrevUV = (dot(motion, motion) >= 0.000000001) ? (curUV - motion) : cameraPrevUV;
     if (pc.f.z > 0.5) {
-        vec2 prevUV = curUV - motion;
-        if (dot(motion, motion) < 0.000000001 && pClip.w > 0.0001) {
-            prevUV = (pClip.xy / pClip.w) * 0.5 + 0.5;
-        }
+        vec2 prevUV = effectivePrevUV;
         vec2 prevPx = prevUV * size - 0.5;
         ivec2 base = ivec2(floor(prevPx));
         vec2 fr = prevPx - vec2(base);
@@ -165,7 +163,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         float maxHistory = max(pc.f.x, 1.0);
     bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
     bool mirrorTemporalOnly = roughness < 0.08 && !denoiseMirrors;
-    float motionPixels = length(motion * size);
+    float motionPixels = length((curUV - effectivePrevUV) * size);
     float effectiveMaxHistory = mirrorTemporalOnly
         ? mix(8.0, 1.0, clamp(motionPixels * 0.5, 0.0, 1.0))
         : mix(maxHistory, 2.0, clamp(motionPixels * 0.25, 0.0, 1.0));
@@ -178,6 +176,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
             vec3 checkerMinY = vec3(1e20);
             vec3 checkerMaxY = vec3(-1e20);
             float checkerCount = 0.0;
+            vec3 cardinalSumRgb = vec3(0.0);
             const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
             for (int ci = 0; ci < 4; ++ci) {
                 ivec2 cp = px + checkerOffsets[ci];
@@ -187,13 +186,24 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                 vec3 cy = rgbToYCoCg(cv.rgb);
                 checkerMinY = min(checkerMinY, cy);
                 checkerMaxY = max(checkerMaxY, cy);
+                cardinalSumRgb += cv.rgb;
                 checkerCount += 1.0;
             }
+            vec3 checkerHistRgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
             if (checkerCount > 0.0) {
-                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
-                checkerHistY = clamp(checkerHistY, checkerMinY - margin, checkerMaxY + margin);
+                vec3 margin = (motionPixels > 0.25)
+                    ? vec3(0.0)
+                    : max(abs(checkerMaxY - checkerMinY) * 0.25, vec3(0.01));
+                vec3 clampedHistRgb = max(vec3(0.0), yCoCgToRgb(
+                    clamp(rgbToYCoCg(checkerHistRgb), checkerMinY - margin, checkerMaxY + margin)));
+                if (motionPixels > 0.25) {
+                    vec3 cardinalAvgRgb = cardinalSumRgb / checkerCount;
+                    clampedHistRgb = mix(clampedHistRgb, cardinalAvgRgb,
+                        clamp(motionPixels * 0.35, 0.0, 0.85));
+                }
+                checkerHistRgb = clampedHistRgb;
             }
-            result = vec4(max(vec3(0.0), yCoCgToRgb(checkerHistY)), 1.0);
+            result = vec4(checkerHistRgb, 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
         } else {
             pixelDiag[15] += 1u;
@@ -252,18 +262,23 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                 float count = 0.0;
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dx = -1; dx <= 1; ++dx) {
-                        if (dx == 0 && dy == 0) continue; // Exclude center to avoid firefly self-contamination
-                        ivec2 sp = px + ivec2(dx, dy);
-                        if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
-                        vec4 sVal = imageLoad(imgRefl, sp);
-                        if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
-                        vec3 sY = rgbToYCoCg(sVal.rgb);
+                        vec3 sampleRgb;
+                        if (dx == 0 && dy == 0) {
+                            sampleRgb = raw.rgb;
+                        } else {
+                            ivec2 sp = px + ivec2(dx, dy);
+                            if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
+                            vec4 sVal = imageLoad(imgRefl, sp);
+                            if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
+                            sampleRgb = sVal.rgb;
+                        }
+                        vec3 sY = rgbToYCoCg(sampleRgb);
                         m1Y += sY;
                         m2Y += sY * sY;
                         count += 1.0;
                     }
                 }
-                if (count >= 2.0) {
+                if (count >= 1.0) {
                     m1Y /= count;
                     m2Y /= count;
                     vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
@@ -301,8 +316,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     // Expand the upper bound for bright features supported by neighboring samples.
                     if (!isolatedFirefly && motionPixels <= 0.1)
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
-                    if (outlierFilterEnabled)
-                        histY = clamp(histY, clampMinY, clampMaxY);
+                    histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                     if (outlierFilterEnabled && isolatedFirefly &&
                         rawY.x > m1Y.x + fireflyThreshold) {
@@ -329,7 +343,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     ageBin = min(uint(clamp(historyAge / effectiveMaxHistory, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
     imageStore(imgReflHistCur, px, vec4(result.rgb, historyAge));
-    imageStore(imgRefl, px, vec4(result.rgb, 1.0));
 }
 
 void main() {
