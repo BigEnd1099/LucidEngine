@@ -59,9 +59,13 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, out
 
     // A tiny position/normal quantization difference can put the same surface
     // on opposite sides of a 25 cm cell boundary. Probe the nearest adjacent cell.
-    vec3 fractionFromCenter = fract(gridPos) - 0.5;
-    ivec3 neighborOffset = ivec3(round(fractionFromCenter));
-    if (any(notEqual(neighborOffset, ivec3(0)))) {
+    vec3 fraction = fract(gridPos);
+    vec3 edgeDistance = min(fraction, vec3(1.0) - fraction);
+    int axis = (edgeDistance.x <= edgeDistance.y && edgeDistance.x <= edgeDistance.z) ? 0 :
+               ((edgeDistance.y <= edgeDistance.z) ? 1 : 2);
+    ivec3 neighborOffset = ivec3(0);
+    neighborOffset[axis] = (fraction[axis] < 0.5) ? -1 : 1;
+    if (edgeDistance[axis] <= 0.10) {
         if (tryLoadSurfaceHistoryCell(primaryCell + neighborOffset, worldNormal,
                                        lightingEpoch, history, empty))
             return true;
