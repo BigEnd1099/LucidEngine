@@ -72,8 +72,7 @@ bool trySampleWorldRadianceCache(uint cellKey, vec3 n, uint currentFrame, out ve
         WorldRadianceCell cell = worldRadianceCache.cells[idx];
         if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
             continue;
-        if (currentFrame < cell.lastSeenFrame ||
-            (currentFrame - cell.lastSeenFrame) > 2048u)
+        if (currentFrame < cell.lastSeenFrame)
             continue;
         if (dot(unpackNormalOctahedral(cell.packedNormal), n) <= 0.5)
             continue;
