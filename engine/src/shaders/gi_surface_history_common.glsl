@@ -24,7 +24,7 @@ uint surfaceHistoryHash(ivec3 cell) {
 }
 
 // Writers use an odd/even sequence in meta.y. Readers never acquire the
-// writer lock or issue atomics: they accept a snapshot only if the sequence is unchanged.
+// writer lock; atomic sequence snapshots reject a slot while it is being updated.
 bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
                                out vec4 history, out bool empty) {
     uint base = surfaceHistoryHash(cell);
