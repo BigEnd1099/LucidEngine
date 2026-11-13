@@ -29,7 +29,7 @@ namespace engine::renderer {
             bool      reflectionInfiniteBounces{false}; // adaptive path, capped at 16 hits
             float     reflectionMaxRoughness{0.60f};
             float     reflectionMinThroughput{0.06f};
-            float     maxHistory{32.0f};   // effective samples kept in the temporal history
+            float     maxHistory{32.0f};   // valid temporal frames kept in history
             float     spatialStrength{1.0f}; // 0 = no spatial filter, 1 = full
             bool      svgfEnabled{true};   // Spatiotemporal Variance-Guided Filtering
             bool      giTemporalFilterEnabled{true};
