@@ -293,7 +293,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 
                     // Preserve bright features that have spatial support. A single high
                     // sample is rejected only when it is a rare outlier in a populated patch.
-                    float fireflyThreshold = max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
+                    float floorThreshold = (roughness < 0.08) ? 64.0 : 12.0;
+                    float fireflyThreshold = max(6.0 * effectiveSigma.x, max(m1Y.x * 5.0, floorThreshold));
                     float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
                     float maxSupportedLum = clampMaxY.x;
@@ -311,27 +312,26 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                             }
                         }
                     }
-                    bool isolatedFirefly = count >= 4.0 &&
-                        brightNeighborCount <= floor(count * 0.125) &&
-                        rawY.x > m1Y.x + fireflyThreshold;
-                    // Expand the upper bound for bright features supported by neighboring samples.
-                    bool realHistFirefly = isolatedFirefly && hist.a < 3.0 &&
-                        histY.x > m1Y.x + fireflyThreshold;
-                    bool realRawFirefly = isolatedFirefly &&
-                        rawY.x > m1Y.x + fireflyThreshold;
+                    // Evaluate neighborhood support independently from current and historical luminance.
+                    bool unsupportedNeighborhood = count >= 3.0 &&
+                        brightNeighborCount <= floor(count * 0.125);
+                    float fireflyLimit = m1Y.x + fireflyThreshold;
+                    bool realHistFirefly = unsupportedNeighborhood && hist.a < 4.0 &&
+                        histY.x > fireflyLimit;
+                    bool realRawFirefly = unsupportedNeighborhood &&
+                        rawY.x > fireflyLimit;
+                    // A young unsupported history sample must not expand its own clamp.
                     if (!realHistFirefly && hist.a >= 2.0)
                         clampMaxY = max(clampMaxY, histY);
+                    if (realHistFirefly)
+                        clampMaxY.x = min(clampMaxY.x, fireflyLimit);
                     if (!realRawFirefly)
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                     if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
-                    if (outlierFilterEnabled && isolatedFirefly &&
-                        rawY.x > m1Y.x + fireflyThreshold) {
-                        float softenedLumY = m1Y.x + fireflyThreshold +
-                            (rawY.x - (m1Y.x + fireflyThreshold)) * 0.25;
-                        raw.rgb *= softenedLumY / max(rawY.x, 1e-4);
-                    }
+                    if (outlierFilterEnabled && realRawFirefly)
+                        raw.rgb *= fireflyLimit / max(rawY.x, 1e-4);
                 }
 
                 raw.rgb = max(raw.rgb, vec3(0.0)); // Do not impose a fixed ceiling on legitimate specular energy.
