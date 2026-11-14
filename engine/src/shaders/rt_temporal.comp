@@ -198,6 +198,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
 
     vec4 raw = imageLoad(imgS, px);
+    float rawFirstHitDist = geom.w;
+    float curHitDistFactor = (rawFirstHitDist > 0.001)
+        ? clamp(rawFirstHitDist / 1.75, 0.15, 1.0) : 0.85;
 
     vec3 N = rtOctDecode(geom.xy);
 
@@ -233,7 +236,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
-        geom.w = 1.0;
+        geom.w = packGiGeomW(1.0, curHitDistFactor);
         imageStore(imgGeomCur, px, geom);
         ageBin = 0u;
         histogramCounted = true;
@@ -246,6 +249,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     vec4  hist = vec4(0.0);
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
+    float histHitDist = 0.0;
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -281,7 +285,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist        += w * imageLoad(imgHistPrev, tp);
             histMoments += w * imageLoad(imgMomentsPrev, tp);
-            histLen     += w * g.w;
+            histLen     += w * unpackGiHistoryLen(g.w);
+            histHitDist += w * unpackGiHitDistFactor(g.w);
             wSum        += w;
         }
 
@@ -294,6 +299,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     float effectiveMaxHist = maxHist;
     vec4 result;
     float newLen;
+    float finalHitDistFactor = curHitDistFactor;
 
     float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
     vec2 curSampleMoments = vec2(rawLum, rawLum * rawLum);
@@ -307,6 +313,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
+            histHitDist /= wSum;
+            finalHitDistFactor = histHitDist;
             result = hist;
             if (motionPixels > 1.0) {
                 vec3 checkerHistY = rgbToYCoCg(result.rgb);
@@ -373,6 +381,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
+            histHitDist /= wSum;
+            float prevHitDistFactor = histHitDist;
 
             // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
             vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
@@ -475,6 +485,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             // not change the temporal response speed or make 1 SPP freeze the image.
             newLen = min(histLen + 1.0, effectiveMaxHist);
             float alpha = 1.0 / newLen;
+            finalHitDistFactor = mix(prevHitDistFactor, curHitDistFactor, max(alpha, 0.25));
             result = mix(hist, raw, alpha);
 
             // SVGF moments accumulation: blend spatial and temporal variance when history is short (< 4 frames)
@@ -490,6 +501,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         } else {
             pixelDiag[2]++;
             newLen = 1.0;
+            finalHitDistFactor = curHitDistFactor;
             result = raw;
 
             // Disocclusion / rejected history: compute spatial variance over local 3x3 footprint
@@ -574,7 +586,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             ivec2 qFullPx = min(ivec2(qUV * vec2(fullDepthSize)), fullDepthSize - 1);
             float qD = texelFetch(uDepth, qFullPx, 0).r;
             vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
-            float virtualDist = max(0.35 * zC, 0.25);
+            float virtualDist = max(finalHitDistFactor * 1.75, 0.15);
             vec3 virtualHit = qP + qN * virtualDist;
             vec3 toVirtualHit = virtualHit - P;
             float distSq = max(dot(toVirtualHit, toVirtualHit), 1e-3);
@@ -603,7 +615,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
     // Publish temporal history length before replacing the display output with
     // cache diagnostics. The diagnostic view must not poison temporal history.
-    geom.w = newLen;
+    geom.w = packGiGeomW(newLen, finalHitDistFactor);
     imageStore(imgGeomCur, px, geom);
     ageBin = min(uint(clamp(newLen / effectiveMaxHist, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
