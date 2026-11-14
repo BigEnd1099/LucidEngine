@@ -689,6 +689,8 @@ namespace engine::renderer {
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtWorldRadianceCacheEnabled", params.worldRadianceCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiSurfaceHistoryCacheEnabled", params.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtWrcClipmapsEnabled", params.wrcClipmapEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtWrcSpatialFilterEnabled", params.wrcSpatialFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiCheckerboard", (params.giCheckerboard && params.giTemporalFilterEnabled) ? 1.0 : 0.0);
         profiler.recordMetric("rtGiTemporalFilterEnabled", params.giTemporalFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiAtrousPass1Enabled", params.giAtrousPassEnabled[0] ? 1.0 : 0.0);
