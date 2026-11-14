@@ -474,8 +474,7 @@ vec3 P = rtWorldPos(vec2(fullPx) + 0.5, d, vec2(fullDepthSize));
                 // A bright sample is not automatically a firefly: preserve it when
                 // nearby pixels show the same bright feature. Reject only a high sample
                 // that is statistically rare in a sufficiently populated neighborhood.
-                float floorThreshold = (curHitDistFactor < 0.20) ? 1.50 : 0.80;
-                float fireflyThreshold = max(4.0 * effectiveSigma.x, max(m1Y.x * 2.0, floorThreshold));
+                float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, 24.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;
@@ -500,7 +499,7 @@ vec3 P = rtWorldPos(vec2(fullPx) + 0.5, d, vec2(fullDepthSize));
                 // across camera motion. Preserve its accumulated diffuse irradiance;
                 // only an isolated firefly is allowed to force the history downward.
                 bool realHistFirefly = isolatedFirefly && histLen < 3.0 &&
-                    histY.x > m1Y.x + fireflyThreshold;
+                    histY.x > m1Y.x + max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
                 if (!realHistFirefly && wSum > 0.2) {
                     clampMaxY = max(clampMaxY, histY);
                     clampMinY.x = min(clampMinY.x, histY.x * 0.5);
@@ -513,7 +512,7 @@ vec3 P = rtWorldPos(vec2(fullPx) + 0.5, d, vec2(fullDepthSize));
                 }
                 // Preserve newly visible, spatially supported bright structures.
                 bool realRawFirefly = isolatedFirefly &&
-                    rawYCoCg.x > m1Y.x + fireflyThreshold;
+                    dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722)) > m1Y.x + max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
                 if (!realRawFirefly)
                     clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
