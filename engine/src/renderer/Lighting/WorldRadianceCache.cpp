@@ -240,7 +240,7 @@ namespace engine::renderer {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
-        // System #1: 1 warp (32 lanes) = 1 cell. Default 512 cells/frame.
+        // System #1: 1 warp (32 lanes) = 1 cell. Default 128 cells/frame.
         const uint32_t batchCount = std::clamp(cellBatchCount, 32u, 4096u);
         const uint32_t sliceOffset = (frameCounter * batchCount) % 32768u;
 
@@ -254,7 +254,7 @@ namespace engine::renderer {
         pc.cameraPosAndCellSize = glm::vec4(cameraPos, std::clamp(baseCellSize, 0.10f, 2.0f));
         pc.sunDirAndIntensity = glm::vec4(sunDirection, 2.5f);
         pc.sunColor = glm::vec4(glm::vec3(sunColor), std::clamp(bounceIntensity, 0.0f, 4.0f));
-        pc.frameAndSlice = glm::uvec4(frameCounter, sliceOffset, CELL_BATCH_SIZE, 0u);
+        pc.frameAndSlice = glm::uvec4(frameCounter, sliceOffset, batchCount, featureFlags);
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
