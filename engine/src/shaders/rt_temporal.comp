@@ -245,18 +245,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         if ((pc.u.y & 4u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 4u) != 0u;
             if (cacheDebugEnabled) {
-                pixelCacheDiag[2]++;
+                // Diagnostic-only reads are intentionally excluded from runtime hit-rate counters.
                 cacheDebugValue = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
                 cacheDebugHit = cacheDebugValue.a > 0.0;
-                if (cacheDebugHit) pixelCacheDiag[0]++;
             }
         } else if ((pc.u.y & 8u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 2u) != 0u;
             if (cacheDebugEnabled) {
                 float debugCoverage = 0.0;
-                pixelCacheDiag[3]++;
+                // Diagnostic-only reads are intentionally excluded from runtime hit-rate counters.
                 cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cacheDebugValue, debugCoverage);
-                if (cacheDebugHit) pixelCacheDiag[1]++;
             }
         }
     }
