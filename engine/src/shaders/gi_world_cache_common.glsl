@@ -53,6 +53,18 @@ float getCascadeCellSize(uint cascade) {
     return 0.20 * exp2(float(cascade)); // 0.20m, 0.40m, 0.80m, 1.60m
 }
 
+uint getCascadeIndexCfg(vec3 worldPos, vec3 cameraPos, float dither, bool clipmapEnabled) {
+    if (!clipmapEnabled) return 0u;
+    return getCascadeIndex(worldPos, cameraPos, dither);
+}
+
+float getCascadeCellSizeCfg(uint cascade, float baseCellSize, bool clipmapEnabled) {
+    float base = (baseCellSize > 0.05) ? baseCellSize : DEFAULT_CELL_SIZE;
+    if (!clipmapEnabled) return base;
+    float c0 = base * 0.60;
+    return c0 * exp2(float(cascade));
+}
+
 uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal, uint cascade) {
     vec3 n = normalize(normal);
     uint normIdx = 0u;

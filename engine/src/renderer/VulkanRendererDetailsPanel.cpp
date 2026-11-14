@@ -627,6 +627,32 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::Checkbox("World Radiance Probe Cache", &m_rtSettings.worldRadianceCacheEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Controls probe-cache updates and temporal GI fallback sampling. Toggling clears cached probes to prevent stale re-use.");
+                        if (m_rtSettings.worldRadianceCacheEnabled) {
+                            ImGui::Indent();
+                            ImGui::Checkbox("WRC LOD Clipmaps (Cascades 0..3)", &m_rtSettings.wrcClipmapEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Scales cell size with distance from camera (1x, 2x, 4x, 8x base cell size).");
+                            ImGui::Checkbox("WRC Tangent-Plane Blue-Noise Jitter", &m_rtSettings.wrcTangentJitterEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Stochastically jitters cache lookups along the surface tangent plane to eliminate grid seams.");
+                            ImGui::Checkbox("WRC World-Space Spatial Filter Pass", &m_rtSettings.wrcSpatialFilterEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Runs a coplanar 3x3 Gaussian filter across neighboring cache cells before GI sampling.");
+                            ImGui::Checkbox("WRC Subgroup 8x4 Stratified Tracing", &m_rtSettings.wrcSubgroupStratifiedEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Uses 32-lane stratified hemispherical ray bundles per cell instead of unstratified cosine sampling.");
+                            ImGui::Checkbox("WRC Plane-Distance Edge Weighting", &m_rtSettings.wrcPlaneDistanceWeightEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip(" suppresses light bleeding across corners using projected voxel box radius and plane-distance falloff.");
+                            ImGui::Checkbox("WRC First-Bounce GI Boost (b == 0)", &m_rtSettings.wrcFirstBounceEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Injects cached multi-bounce irradiance already at the first GI bounce to stabilize low-SPP lighting.");
+                            ImGui::SliderFloat("WRC Base Cell Size (m)", &m_rtSettings.wrcBaseCellSize, 0.10f, 1.50f, "%.2f");
+                            ImGui::SliderFloat("WRC Bounce Intensity", &m_rtSettings.wrcBounceIntensity, 0.0f, 4.0f, "%.2f");
+                            ImGui::SliderFloat("WRC Temporal Stabilization", &m_rtSettings.wrcTemporalBlend, 0.0f, 1.0f, "%.2f");
+                            ImGui::SliderInt("WRC Cell Batches / Frame", &m_rtSettings.wrcBatchesPerFrame, 64, 2048, "%d");
+                            ImGui::Unindent();
+                        }
                         ImGui::Checkbox("Persistent GI Surface History Cache", &m_rtSettings.giSurfaceHistoryCacheEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Controls world-space diffuse history restore and final à-trous writeback. Toggling invalidates the cache epoch.");
