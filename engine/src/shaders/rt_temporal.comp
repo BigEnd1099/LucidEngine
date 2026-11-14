@@ -546,7 +546,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 // Preserve supported bright structures; reject unsupported history and raw outliers.
                 if (realHistFirefly)
                     clampMaxY.x = min(clampMaxY.x, fireflyLimit);
-                if (!realRawFirefly)
+                if (!realRawFirefly && !realHistFirefly)
                     clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
