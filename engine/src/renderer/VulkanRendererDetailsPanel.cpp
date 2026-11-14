@@ -685,7 +685,11 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "9: Caustic Contribution Density",
                             "10: Temporal GI (before A-Trous)",
                             "11: World Radiance Cache Hits (green=hit, red=miss, blue=disabled)",
-                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)"
+                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)",
+                            "13: WRC Cached Radiance (log HDR RGB)",
+                            "14: WRC Confidence (sample weight + plane weight)",
+                            "15: Surface History Radiance (log HDR RGB)",
+                            "16: Surface History Age (history length)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
