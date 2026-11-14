@@ -151,8 +151,9 @@ if (d >= 1.0) {
 }
 
 float zC = rtLinearDepth(d);
-// Reconstruct at the exact centre of the full-resolution depth/normal texel.
-vec3 P = rtWorldPos(vec2(fullPx) + 0.5, d, vec2(fullDepthSize));
+// Reconstruct at the GI output pixel centre; fullPx only selects the
+// nearest full-resolution depth/normal sample for this GI pixel.
+vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 vec3 toCam = ubo.cameraPos.xyz - P;
 
 vec4 gNR = texelFetch(uGNormalRoughness, fullPx, 0);
