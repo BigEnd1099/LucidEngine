@@ -325,7 +325,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                         clampMaxY = max(clampMaxY, histY);
                     if (realHistFirefly)
                         clampMaxY.x = min(clampMaxY.x, fireflyLimit);
-                    if (!realRawFirefly)
+                    if (!realRawFirefly && !realHistFirefly)
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                     if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
