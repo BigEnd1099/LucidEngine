@@ -88,7 +88,7 @@ void main() {
     if (dot(cellNormal, -sampleDir) < 0.0) cellNormal = -cellNormal;
 
     // System #1: 32 threads in the workgroup correspond to 1 active cell.
-    // Each lane gl_SubgroupInvocationID (0..31) calculates a stratified direction in the hemisphere:
+    // Each local invocation lane (0..31) calculates a stratified direction in the hemisphere:
     // 8x4 stratified octahedral grid (8 azimuth columns, 4 elevation rings).
     uint lane = gl_LocalInvocationIndex & 31u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x + lane * 1013904223u), pc.frameAndSlice.x);
