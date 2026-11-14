@@ -85,10 +85,12 @@ void main() {
     // System #1: 32 threads in the workgroup correspond to 1 active cell.
     // Each lane gl_SubgroupInvocationID (0..31) calculates a stratified direction in the hemisphere:
     // 8x4 stratified octahedral grid (8 azimuth columns, 4 elevation rings).
-    uint lane = gl_SubgroupInvocationID;
+    uint lane = gl_LocalInvocationIndex & 31u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x + lane * 1013904223u), pc.frameAndSlice.x);
     vec2 laneJitter = vec2(rand1(), rand1());
-    vec3 bounceDir = getStratifiedHemisphereDirection(cellNormal, lane, laneJitter);
+    vec3 bounceDir = stratifiedEnabled
+        ? getStratifiedHemisphereDirection(cellNormal, lane, laneJitter)
+        : sampleCosineHemisphere(cellNormal, laneJitter);
 
     RtInstanceData bounceHit;
     vec3 bouncePos, bounceNormal;
