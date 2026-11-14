@@ -657,9 +657,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Surface History wins when it actually restored a contribution; WRC is fallback only.
         if (isDisoccluded && !surfaceHistoryApplied && (pc.u.x & 4u) != 0u) {
             pixelCacheDiag[2]++;
-            float cachedSampleWeight = 0.0;
-            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w,
-                                                                 ubo.cameraPos.xyz, cachedSampleWeight);
+            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w);
             if (cached.a > 0.0) {
                 pixelCacheDiag[0]++;
                 // WRC is a fallback seed, not authoritative surface history. Keep its
