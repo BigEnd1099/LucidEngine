@@ -111,7 +111,7 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
             bestResult = candidateResult;
             bestWeight = candidateWeight;
         }
-        if (candidateWeight >= 16.0)
+        if (i == 0 && candidateWeight >= 16.0)
             return candidateResult;
     }
     return bestWeight >= 0.0 ? bestResult : vec4(0.0);
