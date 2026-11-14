@@ -176,10 +176,17 @@ void main() {
         hitRad = sampleRtSkyRadiance(bounceDir);
     }
 
-    // Compress before subgroup reduction to suppress fireflies without a fixed HDR ceiling.
-    vec3 compressedHit = karisCompress(hitRad);
-    vec3 avgCompressed = subgroupAdd(compressedHit) / 32.0;
-    vec3 avgRad = karisExpand(avgCompressed);
+    // Keep Monte Carlo energy linear. Only attenuate a tiny number of extreme,
+    // unsupported subgroup outliers; preserve multi-lane bright features.
+    float sampleLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
+    float subgroupMeanLum = subgroupAdd(sampleLum) / 32.0;
+    float fireflyThreshold = max(subgroupMeanLum * 7.0, 24.0);
+    float extremeSampleCount = subgroupAdd(sampleLum > fireflyThreshold ? 1.0 : 0.0);
+    if (sampleLum > fireflyThreshold && extremeSampleCount <= 2.0) {
+        float softenedLum = fireflyThreshold + (sampleLum - fireflyThreshold) * 0.25;
+        hitRad *= softenedLum / max(sampleLum, 1e-4);
+    }
+    vec3 avgRad = subgroupAdd(hitRad) / 32.0;
 
     // Master lane writes the 32-sample averaged irradiance into the cell
     if (subgroupElect()) {
