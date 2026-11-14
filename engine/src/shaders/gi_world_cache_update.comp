@@ -167,7 +167,6 @@ void main() {
 
     // A workgroup is exactly one 32-sample probe update. Use workgroup shared
     // memory rather than subgroup reductions: subgroup width is device-dependent.
-    uint lane = gl_LocalInvocationIndex;
     float sampleLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
     wrcSampleLuminance[lane] = sampleLum;
     barrier();
