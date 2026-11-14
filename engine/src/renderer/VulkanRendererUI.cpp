@@ -165,18 +165,20 @@ namespace engine::renderer {
             double rtInstances{0.0};
             std::array<double, 8> gpuStages{};
             std::array<double, 21> effectStages{};
-            std::array<double, 48> rtDiagnostics{};
+            std::array<double, 60> rtDiagnostics{};
             std::unordered_map<std::string, double> cpuScopes;
         };
         static std::deque<ProfilerWindowSample> oneSecondSamples;
         static uint64_t lastWindowFrame = UINT64_MAX;
-        static constexpr const char* rtDiagnosticMetricNames[48] = {
+        static constexpr const char* rtDiagnosticMetricNames[60] = {
             "rtGiPixels", "rtGiHistoryAccepted", "rtGiHistoryRejected", "rtGiOutOfBounds", "rtGiDepthRejected", "rtGiNormalRejected", "rtGiCheckerboardReuse", "rtGiSpatialFallback",
             "rtReflectionPixels", "rtReflectionHistoryAccepted", "rtReflectionHistoryRejected", "rtReflectionOutOfBounds", "rtReflectionDepthRejected", "rtReflectionNormalRejected", "rtReflectionCheckerboardReuse", "rtReflectionSpatialFallback",
             "rtGiHistoryAgeBin00", "rtGiHistoryAgeBin01", "rtGiHistoryAgeBin02", "rtGiHistoryAgeBin03", "rtGiHistoryAgeBin04", "rtGiHistoryAgeBin05", "rtGiHistoryAgeBin06", "rtGiHistoryAgeBin07",
             "rtGiHistoryAgeBin08", "rtGiHistoryAgeBin09", "rtGiHistoryAgeBin10", "rtGiHistoryAgeBin11", "rtGiHistoryAgeBin12", "rtGiHistoryAgeBin13", "rtGiHistoryAgeBin14", "rtGiHistoryAgeBin15",
             "rtReflectionHistoryAgeBin00", "rtReflectionHistoryAgeBin01", "rtReflectionHistoryAgeBin02", "rtReflectionHistoryAgeBin03", "rtReflectionHistoryAgeBin04", "rtReflectionHistoryAgeBin05", "rtReflectionHistoryAgeBin06", "rtReflectionHistoryAgeBin07",
-            "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11", "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15"
+            "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11", "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15",
+            "rtGiWorldRadianceCacheActiveHits", "rtGiSurfaceHistoryCacheActiveHits",
+            "rtGiWorldRadianceCacheQueries", "rtGiSurfaceHistoryCacheQueries"
         };
 
         const uint64_t frameCounter = stats.value("frameCounter", uint64_t{0});
@@ -279,7 +281,7 @@ namespace engine::renderer {
         for (size_t i = 0; i < avgEffectStages.size(); ++i) {
             avgEffectStages[i] = average([i](const ProfilerWindowSample& s) { return s.effectStages[i]; });
         }
-        std::array<double, 48> avgRtDiagnostics{};
+        std::array<double, 60> avgRtDiagnostics{};
         for (size_t i = 0; i < avgRtDiagnostics.size(); ++i) {
             avgRtDiagnostics[i] = average([i](const ProfilerWindowSample& s) { return s.rtDiagnostics[i]; });
         }
@@ -469,6 +471,10 @@ namespace engine::renderer {
                 report << "Reflection history age histogram (normalized bins 0-15; counts/frame):\n";
                 for (size_t i = 0; i < 16; ++i)
                     report << "  Bin " << std::setw(2) << std::setfill('0') << i << ": " << avgRtDiagnostics[32 + i] << "\n";
+                report << "WRC cache hits / queries: " << avgRtDiagnostics[56] << " / " << avgRtDiagnostics[58] << "\n";
+                report << "Surface History hits / queries: " << avgRtDiagnostics[57] << " / " << avgRtDiagnostics[59] << "\n";
+                report << "WRC hit rate: " << (avgRtDiagnostics[58] > 0.0 ? 100.0 * avgRtDiagnostics[56] / avgRtDiagnostics[58] : 0.0) << "%\n";
+                report << "Surface History hit rate: " << (avgRtDiagnostics[59] > 0.0 ? 100.0 * avgRtDiagnostics[57] / avgRtDiagnostics[59] : 0.0) << "%\n";
                 report << std::setfill(' ');
                 report << "Loop frame time includes engine frame pacing/sleep; editor FPS uses ImGui frame delta.\n";
                 ImGui::SetClipboardText(report.str().c_str());
@@ -688,7 +694,27 @@ namespace engine::renderer {
             ImGui::PlotHistogram("##GiHistoryAgeHistogram", giHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, giHistoryPlotMax, ImVec2(-1.0f, 58.0f));
             ImGui::TextUnformatted("Reflections");
             ImGui::PlotHistogram("##ReflectionHistoryAgeHistogram", reflectionHistoryAgeBins.data(), 16, 0, nullptr, 0.0f, reflectionHistoryPlotMax, ImVec2(-1.0f, 58.0f));
-            ImGui::TextDisabled("All 48 counters and exact histogram bin values are included in the copied report.");
+            ImGui::Spacing();
+            ImGui::SeparatorText("GI RADIANCE CACHE ACTIVITY (1s AVERAGE)");
+            auto cacheHitRate = [&](size_t hitsIndex, size_t queriesIndex) -> double {
+                const double queries = avgRtDiagnostics[queriesIndex];
+                return queries > 0.0 ? 100.0 * avgRtDiagnostics[hitsIndex] / queries : 0.0;
+            };
+            if (ImGui::BeginTable("##GiRadianceCacheDiagnostics", 4,
+                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableNextRow();
+                metric("WRC hits", avgRtDiagnostics[56], "samples/frame");
+                metric("WRC queries", avgRtDiagnostics[58], "samples/frame");
+                metric("WRC hit rate", cacheHitRate(56, 58), "%", avgRtDiagnostics[58] > 0.0);
+                metric("WRC update", avgEffectStages[20], "ms");
+                ImGui::TableNextRow();
+                metric("Surface History hits", avgRtDiagnostics[57], "samples/frame");
+                metric("Surface History queries", avgRtDiagnostics[59], "samples/frame");
+                metric("Surface History hit rate", cacheHitRate(57, 59), "%", avgRtDiagnostics[59] > 0.0);
+                metric("Surface History", metrics.value("rtGiSurfaceHistoryCacheEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                ImGui::EndTable();
+            }
+            ImGui::TextDisabled("All 60 counters and exact histogram bin values are included in the copied report.");
 
             ImGui::Spacing();
             ImGui::SeparatorText(editorText("ui.profiler_scene_timer_status", "SCENE / TIMER STATUS"));
