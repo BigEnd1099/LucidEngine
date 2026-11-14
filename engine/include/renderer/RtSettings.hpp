@@ -57,7 +57,7 @@ namespace engine::renderer {
         bool wrcFirstBounceEnabled{true};
         float wrcBaseCellSize{0.35f};
         float wrcBounceIntensity{1.0f};
-        float wrcTemporalBlend{0.55f};
+        float giSpatialReuseStrength{0.55f};
         int wrcBatchesPerFrame{128};
         bool reflectionTemporalFilterEnabled{true};
         bool reflectionOutlierFilterEnabled{true};

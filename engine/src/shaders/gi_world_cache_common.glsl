@@ -65,6 +65,20 @@ float getCascadeCellSizeCfg(uint cascade, float baseCellSize, bool clipmapEnable
     return c0 * exp2(float(cascade));
 }
 
+#ifndef KARIS_TONEMAP_DEFINED
+#define KARIS_TONEMAP_DEFINED
+vec3 karisCompress(vec3 hdr) {
+    vec3 s = max(hdr, vec3(0.0));
+    float lum = dot(s, vec3(0.2126, 0.7152, 0.0722));
+    return s / (1.0 + lum * 0.25);
+}
+vec3 karisExpand(vec3 compressed) {
+    vec3 c = max(compressed, vec3(0.0));
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return c / max(1.0 - lum * 0.25, 0.02);
+}
+#endif
+
 uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal, uint cascade) {
     vec3 n = normalize(normal);
     uint normIdx = 0u;

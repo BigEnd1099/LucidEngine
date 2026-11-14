@@ -649,7 +649,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                                 ImGui::SetTooltip("Injects cached multi-bounce irradiance already at the first GI bounce to stabilize low-SPP lighting.");
                             ImGui::SliderFloat("WRC Base Cell Size (m)", &m_rtSettings.wrcBaseCellSize, 0.10f, 1.50f, "%.2f");
                             ImGui::SliderFloat("WRC Bounce Intensity", &m_rtSettings.wrcBounceIntensity, 0.0f, 4.0f, "%.2f");
-                            ImGui::SliderFloat("WRC Temporal Stabilization", &m_rtSettings.wrcTemporalBlend, 0.0f, 1.0f, "%.2f");
+                            ImGui::SliderFloat("GI Screen-Space Spatial Reuse Strength", &m_rtSettings.giSpatialReuseStrength, 0.0f, 1.0f, "%.2f");
                             ImGui::SliderInt("WRC Cell Batches / Frame", &m_rtSettings.wrcBatchesPerFrame, 64, 2048, "%d");
                             ImGui::Unindent();
                         }

@@ -802,12 +802,12 @@ namespace engine::renderer {
             pd.f.x = std::bit_cast<float>(m_surfaceHistoryLightingEpoch);
             pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
             pd.f.z = std::clamp(params.wrcBounceIntensity, 0.0f, 4.0f);
-            pd.f.w = std::clamp(params.wrcTemporalBlend, 0.0f, 1.0f);
+            pd.f.w = std::clamp(params.giSpatialReuseStrength, 0.0f, 1.0f);
             bindGI(m_tracePipelineHandle, pd); // 1. trace
             pd.f.x = std::max(params.maxHistory, 1.0f);
             pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
             pd.f.z = m_giHistoryValid ? 1.0f : 0.0f;
-            pd.f.w = std::clamp(params.wrcTemporalBlend, 0.0f, 1.0f);
+            pd.f.w = std::clamp(params.giSpatialReuseStrength, 0.0f, 1.0f);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
             sync();

@@ -1425,7 +1425,7 @@ namespace engine::renderer {
                 rtp.wrcFirstBounceEnabled = m_rtSettings.wrcFirstBounceEnabled;
                 rtp.wrcBaseCellSize = m_rtSettings.wrcBaseCellSize;
                 rtp.wrcBounceIntensity = m_rtSettings.wrcBounceIntensity;
-                rtp.wrcTemporalBlend = m_rtSettings.wrcTemporalBlend;
+                rtp.giSpatialReuseStrength = m_rtSettings.giSpatialReuseStrength;
                 rtp.wrcBatchesPerFrame = m_rtSettings.wrcBatchesPerFrame;
                 rtp.lightChanged = rtLightingChanged;
                 rtp.debugMode = m_rtSettings.debugMode;
