@@ -125,7 +125,9 @@ bool trySampleWorldRadianceCacheCascade(vec3 worldPos, vec3 n, vec2 pixel, uint 
                                        currentFrame, planeWeightEnabled, result, sampleWeight);
 }
 
-vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame, vec3 cameraPos) {
+vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame,
+                                           vec3 cameraPos, out float rawSampleWeight) {
+    rawSampleWeight = 0.0;
     bool clipmapEnabled = (pc.u.x & (1u << 8)) != 0u;
     bool jitterEnabled = (pc.u.x & (1u << 9)) != 0u;
     bool planeWeightEnabled = (pc.u.x & (1u << 12)) != 0u;
@@ -156,20 +158,27 @@ vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec
             bestResult = candidateResult;
             bestWeight = candidateWeight;
         }
-        if (i == 0 && candidateWeight >= 16.0)
+        if (i == 0 && candidateWeight >= 16.0) {
+            rawSampleWeight = candidateWeight;
             return candidateResult;
+        }
     }
+    rawSampleWeight = max(bestWeight, 0.0);
     return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
 
 // Overload taking 4 arguments defaulting cameraPos to ubo.cameraPos.xyz
 vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame) {
-    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, px, currentFrame, ubo.cameraPos.xyz);
+    float unusedSampleWeight = 0.0;
+    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, px, currentFrame,
+                                                  ubo.cameraPos.xyz, unusedSampleWeight);
 }
 
 // Fallback compatibility wrapper
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
-    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, ivec2(0), currentFrame, ubo.cameraPos.xyz);
+    float unusedSampleWeight = 0.0;
+    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, ivec2(0), currentFrame,
+                                                  ubo.cameraPos.xyz, unusedSampleWeight);
 }
 
 
@@ -246,8 +255,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             cacheDebugEnabled = (pc.u.x & 4u) != 0u;
             if (cacheDebugEnabled) {
                 // Diagnostic-only reads are intentionally excluded from runtime hit-rate counters.
-                cacheDebugValue = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
-                cacheDebugHit = cacheDebugValue.a > 0.0;
+                float debugSampleWeight = 0.0;
+                cacheDebugValue = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w,
+                                                                          ubo.cameraPos.xyz, debugSampleWeight);
+                cacheDebugValue.a = debugSampleWeight;
+                cacheDebugHit = debugSampleWeight > 0.0;
             }
         } else if ((pc.u.y & 8u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 2u) != 0u;
@@ -645,7 +657,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Surface History wins when it actually restored a contribution; WRC is fallback only.
         if (isDisoccluded && !surfaceHistoryApplied && (pc.u.x & 4u) != 0u) {
             pixelCacheDiag[2]++;
-            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
+            float cachedSampleWeight = 0.0;
+            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w,
+                                                                 ubo.cameraPos.xyz, cachedSampleWeight);
             if (cached.a > 0.0) {
                 pixelCacheDiag[0]++;
                 // WRC is a fallback seed, not authoritative surface history. Keep its
@@ -682,12 +696,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         if (cacheDebugEnabled && cacheDebugHit) {
             if ((pc.u.y & 32u) != 0u) {
                 // Log-compressed linear HDR radiance for readable cache inspection.
-                debugColor = clamp(log2(vec3(1.0) + max(cacheDebugValue.rgb, vec3(0.0))) * 0.1661,
-                                   vec3(0.0), vec3(1.0));
+                // Lift ordinary diffuse radiance into a visible range without losing
+                // relative HDR structure; channels remain independently encoded.
+                debugColor = clamp(log2(vec3(1.0) + max(cacheDebugValue.rgb, vec3(0.0)) * 8.0) /
+                                   log2(9.0), vec3(0.0), vec3(1.0));
             } else if ((pc.u.y & 64u) != 0u) {
                 if ((pc.u.y & 4u) != 0u) {
-                    float confidence = clamp(cacheDebugValue.a, 0.0, 1.0);
-                    debugColor = vec3(confidence, confidence * confidence, 1.0 - confidence);
+                    // Show the raw probe sample weight, not the already saturated
+                    // smoothstep confidence used by lighting. This exposes convergence.
+                    float weight = clamp(log2(1.0 + max(cacheDebugValue.a, 0.0)) / log2(257.0), 0.0, 1.0);
+                    debugColor = weight < 0.5
+                        ? mix(vec3(0.05, 0.10, 0.85), vec3(0.0, 0.95, 0.85), weight * 2.0)
+                        : mix(vec3(0.0, 0.95, 0.85), vec3(1.0, 0.90, 0.0), (weight - 0.5) * 2.0);
                 } else {
                     float age = clamp(log2(1.0 + max(cacheDebugValue.a, 0.0)) / log2(257.0), 0.0, 1.0);
                     debugColor = vec3(age, age * age, 1.0 - age);
