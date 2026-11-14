@@ -40,7 +40,7 @@ void addDiagCounter(uint counterIdx, uint value) {
 layout(push_constant) uniform PC {
 mat4 unused;
 vec4 f;
-uvec4 u; // x=samples, y=frame, z=GI/AO/cache/WRC flags, w=max bounces; f.x=epoch, f.y=wrcCellSize, f.z=wrcBounceIntensity, f.w=wrcTemporalBlend
+uvec4 u; // x=samples, y=frame, z=GI/AO/cache/WRC flags, w=max bounces; f.x=epoch, f.y=wrcCellSize, f.z=wrcBounceIntensity, f.w=GI spatial reuse strength
 } pc;
 
 vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
