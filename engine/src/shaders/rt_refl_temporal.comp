@@ -173,35 +173,36 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         if (wSum > 0.05) {
             pixelDiag[14] += 1u;
             // Re-use full history from previous frame when this pixel was active
-            vec3 checkerHistY = rgbToYCoCg((hist / wSum).rgb);
+            vec3 checkerHistY = rgbToYCoCg(karisCompress((hist / wSum).rgb));
             vec3 checkerMinY = vec3(1e20);
             vec3 checkerMaxY = vec3(-1e20);
             float checkerCount = 0.0;
-            vec3 cardinalSumRgb = vec3(0.0);
+            vec3 cardinalSumKaris = vec3(0.0);
             const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
             for (int ci = 0; ci < 4; ++ci) {
                 ivec2 cp = px + checkerOffsets[ci];
                 if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
                 vec4 cv = imageLoad(imgRefl, cp);
                 if (cv.a < 0.5) continue;
-                vec3 cy = rgbToYCoCg(cv.rgb);
+                vec3 cKaris = karisCompress(cv.rgb);
+                vec3 cy = rgbToYCoCg(cKaris);
                 checkerMinY = min(checkerMinY, cy);
                 checkerMaxY = max(checkerMaxY, cy);
-                cardinalSumRgb += cv.rgb;
+                cardinalSumKaris += cKaris;
                 checkerCount += 1.0;
             }
-            vec3 checkerHistRgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+            vec3 checkerHistRgb = karisExpand(max(vec3(0.0), yCoCgToRgb(checkerHistY)));
             if (checkerCount > 0.0 && motionPixels > 0.75 && checkerMaxY.x > 0.05) {
                 vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.0, vec3(0.15));
                 vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
-                vec3 clampedHistRgb = max(vec3(0.0), yCoCgToRgb(
+                vec3 clampedKaris = max(vec3(0.0), yCoCgToRgb(
                     clamp(checkerHistY, checkerMinY - margin, upperBound)));
                 if (motionPixels > 1.5) {
-                    vec3 cardinalAvgRgb = cardinalSumRgb / checkerCount;
-                    clampedHistRgb = mix(clampedHistRgb, cardinalAvgRgb,
+                    vec3 cardinalAvgKaris = cardinalSumKaris / checkerCount;
+                    clampedKaris = mix(clampedKaris, cardinalAvgKaris,
                         clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
                 }
-                checkerHistRgb = clampedHistRgb;
+                checkerHistRgb = karisExpand(clampedKaris);
             }
             result = vec4(checkerHistRgb, 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
@@ -256,7 +257,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
             } else {
                 // Rough specular surfaces or mirror denoiser enabled:
                 // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg for specular reflections
-                vec3 rawY = rgbToYCoCg(raw.rgb);
+                vec3 rawY = rgbToYCoCg(karisCompress(raw.rgb));
                 vec3 m1Y = vec3(0.0);
                 vec3 m2Y = vec3(0.0);
                 float count = 0.0;
@@ -272,7 +273,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                             if (sVal.a < 0.5) continue; // Skip checkerboard-skipped or empty neighbors
                             sampleRgb = sVal.rgb;
                         }
-                        vec3 sY = rgbToYCoCg(sampleRgb);
+                        vec3 sY = rgbToYCoCg(karisCompress(sampleRgb));
                         m1Y += sY;
                         m2Y += sY * sY;
                         count += 1.0;
@@ -289,12 +290,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     clampMinY.x = max(0.0, clampMinY.x);
                     clampMaxY.x = max(clampMinY.x, clampMaxY.x);
 
-                    vec3 histY = rgbToYCoCg(hist.rgb);
+                    vec3 histY = rgbToYCoCg(karisCompress(hist.rgb));
 
                     // Preserve bright features that have spatial support. A single high
                     // sample is rejected only when it is a rare outlier in a populated patch.
-                    float floorThreshold = (roughness < 0.08) ? 64.0 : 16.0;
-                    float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, floorThreshold));
+                    float floorThreshold = (roughness < 0.08) ? 1.50 : 0.80;
+                    float fireflyThreshold = max(4.0 * effectiveSigma.x, max(m1Y.x * 2.0, floorThreshold));
                     float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
                     float maxSupportedLum = clampMaxY.x;
@@ -305,7 +306,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                             if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                             vec4 fVal = imageLoad(imgRefl, fp);
                             if (fVal.a < 0.5) continue;
-                            float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
+                            float neighborLum = dot(karisCompress(fVal.rgb), vec3(0.2126, 0.7152, 0.0722));
                             if (neighborLum >= supportThreshold) {
                                 brightNeighborCount += 1.0;
                                 maxSupportedLum = max(maxSupportedLum, neighborLum);
@@ -325,11 +326,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                         clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                     if (outlierFilterEnabled)
                         histY = clamp(histY, clampMinY, clampMaxY);
-                    hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
+                    hist.rgb = karisExpand(max(vec3(0.0), yCoCgToRgb(histY)));
                     if (outlierFilterEnabled && isolatedFirefly &&
                         rawY.x > m1Y.x + fireflyThreshold) {
                         rawY.x = m1Y.x + fireflyThreshold;
-                        raw.rgb = max(vec3(0.0), yCoCgToRgb(rawY));
+                        raw.rgb = karisExpand(max(vec3(0.0), yCoCgToRgb(rawY)));
                     }
                 }
 
@@ -337,7 +338,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                 historyAge = min(hist.a + 1.0, maxHistory);
                 float minAlpha = 1.0 / maxHistory;
                 float alpha = (pc.f.z > 0.5) ? clamp(1.0 / historyAge, minAlpha, 1.0) : 1.0;
-                result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
+                vec3 blendedKaris = mix(karisCompress(hist.rgb), karisCompress(raw.rgb), alpha);
+                result = vec4(karisExpand(blendedKaris), 1.0);
             }
         } else {
             rejectedCounted = true;
