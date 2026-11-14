@@ -304,10 +304,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                             if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                             vec4 fVal = imageLoad(imgRefl, fp);
                             if (fVal.a < 0.5) continue;
-                            float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
-                            if (neighborLum >= supportThreshold) {
+                            float neighborLumY = rgbToYCoCg(fVal.rgb).x;
+                            if (neighborLumY >= supportThreshold) {
                                 brightNeighborCount += 1.0;
-                                maxSupportedLum = max(maxSupportedLum, neighborLum);
+                                maxSupportedLum = max(maxSupportedLum, neighborLumY);
                             }
                         }
                     }
@@ -328,10 +328,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                     if (outlierFilterEnabled && isolatedFirefly &&
                         rawY.x > m1Y.x + fireflyThreshold) {
-                        float rawLinearLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
-                        float softenedLum = m1Y.x + fireflyThreshold +
-                            (rawLinearLum - (m1Y.x + fireflyThreshold)) * 0.25;
-                        raw.rgb *= softenedLum / max(rawLinearLum, 1e-4);
+                        float softenedLumY = m1Y.x + fireflyThreshold +
+                            (rawY.x - (m1Y.x + fireflyThreshold)) * 0.25;
+                        raw.rgb *= softenedLumY / max(rawY.x, 1e-4);
                     }
                 }
 
