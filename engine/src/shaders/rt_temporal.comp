@@ -75,32 +75,54 @@ layout(push_constant) uniform PC {
 } pc;
 
 bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, vec3 n, float cellSize,
-                                 uint currentFrame, bool planeWeightEnabled, out vec4 result) {
+                                 uint currentFrame, bool planeWeightEnabled, out vec4 result,
+                                 out float sampleWeight) {
     uint baseIndex = cellKey % CACHE_CELL_COUNT;
     for (uint probe = 0u; probe < 4u; ++probe) {
         uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
         WorldRadianceCell cell = worldRadianceCache.cells[idx];
-        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
-            continue;
-        if (currentFrame < cell.lastSeenFrame)
+        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0 || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
         if (dot(cellNormal, n) <= 0.65)
             continue;
         float geomWeight = 1.0;
         if (planeWeightEnabled) {
-            // Plane-Distance Weighting with Projected Box Radius (System #5)
             vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
             float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
             if (excessDist > 0.75 * cellSize)
                 continue;
             geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
         }
-        float confidence = smoothstep(0.0, 32.0, cell.irradiance.a) * geomWeight;
-        result = vec4(cell.irradiance.rgb, confidence);
+        sampleWeight = cell.irradiance.a;
+        result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
         return true;
     }
     return false;
+}
+
+bool trySampleWorldRadianceCacheCascade(vec3 worldPos, vec3 n, vec2 pixel, uint currentFrame,
+                                        uint cascade, float baseCellSize, bool clipmapEnabled,
+                                        bool jitterEnabled, bool planeWeightEnabled,
+                                        out vec4 result, out float sampleWeight) {
+    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
+    vec3 T, B;
+    buildBasis(n, T, B);
+    if (jitterEnabled) {
+        vec2 xi = vec2(ignTemporal(pixel, currentFrame), ignTemporal(pixel.yx, currentFrame)) - 0.5;
+        vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
+        vec3 biasedJitter = jitteredPos + n * (cellSize * 0.25);
+        ivec3 jitterCoord = ivec3(floor(biasedJitter / cellSize));
+        uint keyJitter = computeWorldCellKeyFromCoord(jitterCoord, n, cascade);
+        if (trySampleWorldRadianceCache(keyJitter, jitterCoord, worldPos, n, cellSize,
+                                        currentFrame, planeWeightEnabled, result, sampleWeight))
+            return true;
+    }
+    vec3 biasedBase = worldPos + n * (cellSize * 0.25);
+    ivec3 baseCoord = ivec3(floor(biasedBase / cellSize));
+    uint keyBase = computeWorldCellKeyFromCoord(baseCoord, n, cascade);
+    return trySampleWorldRadianceCache(keyBase, baseCoord, worldPos, n, cellSize,
+                                       currentFrame, planeWeightEnabled, result, sampleWeight);
 }
 
 vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame, vec3 cameraPos) {
@@ -108,40 +130,38 @@ vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec
     bool jitterEnabled = (pc.u.x & (1u << 9)) != 0u;
     bool planeWeightEnabled = (pc.u.x & (1u << 12)) != 0u;
     float baseCellSize = (pc.f.y > 0.05) ? pc.f.y : DEFAULT_CELL_SIZE;
-
-    vec2 p = vec2(px);
-    float dither = jitterEnabled ? ((ignTemporal(p, currentFrame) - 0.5) * 0.50) : 0.0;
-    uint cascade = getCascadeIndexCfg(worldPos, cameraPos, dither, clipmapEnabled);
-    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
+    vec2 pixel = vec2(px);
+    float dither = jitterEnabled ? ((ignTemporal(pixel, currentFrame) - 0.5) * 0.50) : 0.0;
+    uint primaryCascade = getCascadeIndexCfg(worldPos, cameraPos, dither, clipmapEnabled);
+    uint candidates[3];
+    int candidateCount = 1;
+    candidates[0] = primaryCascade;
+    if (clipmapEnabled && primaryCascade > 0u)
+        candidates[candidateCount++] = primaryCascade - 1u;
+    if (clipmapEnabled && primaryCascade < 3u)
+        candidates[candidateCount++] = primaryCascade + 1u;
 
     vec3 n = normalize(worldNormal);
-    vec3 T, B;
-    buildBasis(n, T, B);
-
-    vec4 result = vec4(0.0);
-    if (jitterEnabled) {
-        vec2 xi = vec2(
-            ignTemporal(p, currentFrame),
-            ignTemporal(p.yx, currentFrame)
-        ) - 0.5;
-        vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
-        vec3 biasedJitter = jitteredPos + n * (cellSize * 0.25);
-        ivec3 jitterCoord = ivec3(floor(biasedJitter / cellSize));
-        uint keyJitter = computeWorldCellKeyFromCoord(jitterCoord, n, cascade);
-        if (trySampleWorldRadianceCache(keyJitter, jitterCoord, worldPos, n, cellSize, currentFrame, planeWeightEnabled, result)) {
-            return result;
+    vec4 bestResult = vec4(0.0);
+    float bestWeight = -1.0;
+    for (int i = 0; i < candidateCount; ++i) {
+        vec4 candidateResult = vec4(0.0);
+        float candidateWeight = 0.0;
+        if (!trySampleWorldRadianceCacheCascade(worldPos, n, pixel, currentFrame,
+                                                candidates[i], baseCellSize, clipmapEnabled,
+                                                jitterEnabled, planeWeightEnabled,
+                                                candidateResult, candidateWeight))
+            continue;
+        if (candidateWeight > bestWeight) {
+            bestResult = candidateResult;
+            bestWeight = candidateWeight;
         }
+        if (i == 0 && candidateWeight >= 16.0)
+            return candidateResult;
+        if (i > 0 && candidateWeight >= 16.0)
+            return candidateResult;
     }
-
-    // Fallback to unjittered base cell P if the jittered cell was not yet populated or was rejected
-    vec3 biasedBase = worldPos + n * (cellSize * 0.25);
-    ivec3 baseCoord = ivec3(floor(biasedBase / cellSize));
-    uint keyBase = computeWorldCellKeyFromCoord(baseCoord, n, cascade);
-    if (trySampleWorldRadianceCache(keyBase, baseCoord, worldPos, n, cellSize, currentFrame, planeWeightEnabled, result)) {
-        return result;
-    }
-
-    return vec4(0.0);
+    return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
 
 // Overload taking 4 arguments defaulting cameraPos to ubo.cameraPos.xyz
@@ -486,7 +506,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 // A bright sample is not automatically a firefly: preserve it when
                 // nearby pixels show the same bright feature. Reject only a high sample
                 // that is statistically rare in a sufficiently populated neighborhood.
-                float fireflyThreshold = max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
+                float fireflyThreshold = max(6.0 * effectiveSigma.x, max(m1Y.x * 5.0, 12.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;
@@ -504,14 +524,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                         }
                     }
                 }
-                bool isolatedFirefly = count >= 4.0 &&
-                    brightNeighborCount <= floor(count * 0.125) &&
-                    rawYCoCg.x > m1Y.x + fireflyThreshold;
-                // A valid reprojection (wSum > 0.2) identifies the same surface
-                // across camera motion. Preserve its accumulated diffuse irradiance;
-                // only an isolated firefly is allowed to force the history downward.
-                bool realHistFirefly = isolatedFirefly && histLen < 3.0 &&
-                    histY.x > m1Y.x + fireflyThreshold;
+                // count excludes the center; only test patches with enough valid neighbors.
+                bool unsupportedNeighborhood = count >= 3.0 &&
+                    brightNeighborCount <= floor(count * 0.125);
+                float fireflyLimit = m1Y.x + fireflyThreshold;
+                bool realHistFirefly = unsupportedNeighborhood && histLen < 4.0 &&
+                    histY.x > fireflyLimit;
+                bool realRawFirefly = unsupportedNeighborhood &&
+                    rawYCoCg.x > fireflyLimit;
+                // Keep valid reprojection history unless that history is itself an outlier.
                 if (!realHistFirefly && wSum > 0.2) {
                     clampMaxY = max(clampMaxY, histY);
                     clampMinY.x = min(clampMinY.x, histY.x * 0.5);
@@ -522,20 +543,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                         clampMaxY = max(clampMaxY, cachedY * 1.15 + effectiveSigma);
                     }
                 }
-                // Preserve newly visible, spatially supported bright structures.
-                bool realRawFirefly = isolatedFirefly &&
-                    rawYCoCg.x > m1Y.x + fireflyThreshold;
+                // Preserve supported bright structures; reject unsupported history and raw outliers.
+                if (realHistFirefly)
+                    clampMaxY.x = min(clampMaxY.x, fireflyLimit);
                 if (!realRawFirefly)
                     clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
                 if ((pc.u.y & 1u) != 0u)
                     histY = clamp(histY, clampMinY, clampMaxY);
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
-                if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
-                    rawYCoCg.x > m1Y.x + fireflyThreshold) {
-                    float softenedLumY = m1Y.x + fireflyThreshold +
-                        (rawYCoCg.x - (m1Y.x + fireflyThreshold)) * 0.25;
-                    raw.rgb *= softenedLumY / max(rawYCoCg.x, 1e-4);
-                }
+                if ((pc.u.y & 2u) != 0u && realRawFirefly)
+                    raw.rgb *= fireflyLimit / max(rawYCoCg.x, 1e-4);
             }
             raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
@@ -594,16 +611,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         float surfaceCoverage = 0.0;
         bool restoredSurface = (pc.u.x & 2u) != 0u &&
                                loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
-        if (restoredSurface && surfaceHistory.a > newLen) {
+        bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
+        if (surfaceHistoryApplied) {
             float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
             newLen = clamp(max(newLen, min(surfaceHistory.a, 8.0)), 4.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
         }
-        // SHaRC-style rule: seed only disoccluded pixels from the world cache.
-        // Do not paint voxel radiance onto valid screen-space reprojection.
-        if (isDisoccluded && (pc.u.x & 4u) != 0u) {
+        // Surface History wins when it actually restored a contribution; WRC is fallback only.
+        if (isDisoccluded && !surfaceHistoryApplied && (pc.u.x & 4u) != 0u) {
             vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
             if (cached.a > 0.0) {
                 result.rgb = mix(result.rgb, cached.rgb, 0.65 * cached.a);
