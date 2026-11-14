@@ -210,8 +210,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     float d = texelFetch(uDepth, fullPx, 0).r;
     float zC = rtLinearDepth(d);
 
-    // Match the full-resolution texel centre used by rt_indirect.comp.
-    vec3 P = rtWorldPos(vec2(fullPx) + 0.5, d, vec2(fullDepthSize));
+    // Reconstruct the GI pixel at its own texel centre. The selected full-res
+    // depth sample is nearest-neighbour, but its integer texel centre must not
+    // replace the GI pixel's continuous screen-space centre during reprojection.
+    vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
     // Evaluate cache diagnostics before temporal work, but do not return here:
     // cache writes must still run while a cache-hit debug view is selected.
@@ -332,7 +334,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             if (nSim < 0.82) continue;
             ivec2 qFullPx = min(ivec2(((vec2(qPx) + 0.5) / size) * vec2(fullDepthSize)), fullDepthSize - 1);
             float qD = texelFetch(uDepth, qFullPx, 0).r;
-            vec3 qP = rtWorldPos(vec2(qFullPx) + 0.5, qD, vec2(fullDepthSize));
+            // Keep neighbour reconstruction on the GI grid for consistent
+            // reprojection and spatial reuse coordinates.
+            vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
             // Plane-distance rejection prevents reuse across curved silhouettes.
             if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
             float qFirstHitDist = qGeom.w;
