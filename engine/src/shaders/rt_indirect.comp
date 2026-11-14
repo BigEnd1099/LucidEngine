@@ -43,51 +43,78 @@ vec4 f;
 uvec4 u; // x=samples, y=frame, z=GI/AO/cache/WRC flags, w=max bounces; f.x=epoch, f.y=wrcCellSize, f.z=wrcBounceIntensity, f.w=GI spatial reuse strength
 } pc;
 
-vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
-    bool clipmapEnabled = (pc.u.z & (1u << 8)) != 0u;
-    bool jitterEnabled = (pc.u.z & (1u << 9)) != 0u;
-    bool planeWeightEnabled = (pc.u.z & (1u << 12)) != 0u;
-    float baseCellSize = (pc.f.y > 0.05) ? pc.f.y : DEFAULT_CELL_SIZE;
-
-    uint cascade = getCascadeIndexCfg(worldPos, ubo.cameraPos.xyz, 0.0, clipmapEnabled);
+bool trySampleWorldRadianceCacheFastCascade(vec3 worldPos, vec3 n, uint cascade,
+                                            float baseCellSize, bool clipmapEnabled, vec2 jitter,
+                                            bool jitterEnabled, bool planeWeightEnabled,
+                                            out vec4 result, out float sampleWeight) {
     float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
-
-    vec3 n = normalize(worldNormal);
     vec3 T, B;
     buildBasis(n, T, B);
-
-    // Tangent-plane blue-noise jitter using PRNG rand2()
-    vec2 xi = jitterEnabled ? (rand2() - 0.5) : vec2(0.0);
-    vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
-
-    // Test jittered cell first, falling back to unjittered base cell
-    vec3 testPositions[2] = vec3[](jitteredPos, worldPos);
-    int numTests = jitterEnabled ? 2 : 1;
-    for (int c = 0; c < numTests; ++c) {
-        vec3 pSample = testPositions[c];
-        vec3 biasedPos = pSample + n * (cellSize * 0.25);
+    vec3 positions[2] = vec3[](
+        worldPos + (T * jitter.x + B * jitter.y) * cellSize,
+        worldPos);
+    int positionCount = jitterEnabled ? 2 : 1;
+    for (int p = 0; p < positionCount; ++p) {
+        vec3 biasedPos = positions[p] + n * (cellSize * 0.25);
         ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
         uint cellKey = computeWorldCellKeyFromCoord(cellCoord, n, cascade);
         uint baseIndex = cellKey % CACHE_CELL_COUNT;
         for (uint probe = 0u; probe < 4u; ++probe) {
             WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-            if (cell.cellKey == cellKey && cell.irradiance.a > 0.0) {
-                vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
-                if (dot(cellN, n) > 0.65) {
-                    float geomWeight = 1.0;
-                    if (planeWeightEnabled) {
-                        vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
-                        float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-                        if (excessDist > 0.75 * cellSize) continue;
-                        geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
-                    }
-                    float confidence = smoothstep(0.0, 8.0, cell.irradiance.a) * geomWeight;
-                    return vec4(cell.irradiance.rgb, confidence);
-                }
+            if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
+                continue;
+            vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
+            if (dot(cellN, n) <= 0.65)
+                continue;
+            float geomWeight = 1.0;
+            if (planeWeightEnabled) {
+                vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
+                float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
+                if (excessDist > 0.75 * cellSize)
+                    continue;
+                geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
             }
+            sampleWeight = cell.irradiance.a;
+            result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
+            return true;
         }
     }
-    return vec4(0.0);
+    return false;
+}
+
+vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
+    bool clipmapEnabled = (pc.u.z & (1u << 8)) != 0u;
+    bool jitterEnabled = (pc.u.z & (1u << 9)) != 0u;
+    bool planeWeightEnabled = (pc.u.z & (1u << 12)) != 0u;
+    float baseCellSize = (pc.f.y > 0.05) ? pc.f.y : DEFAULT_CELL_SIZE;
+    uint primaryCascade = getCascadeIndexCfg(worldPos, ubo.cameraPos.xyz, 0.0, clipmapEnabled);
+    vec3 n = normalize(worldNormal);
+    vec2 jitter = jitterEnabled ? (rand2() - 0.5) : vec2(0.0);
+    uint candidates[3];
+    int candidateCount = 1;
+    candidates[0] = primaryCascade;
+    if (clipmapEnabled && primaryCascade > 0u)
+        candidates[candidateCount++] = primaryCascade - 1u;
+    if (clipmapEnabled && primaryCascade < 3u)
+        candidates[candidateCount++] = primaryCascade + 1u;
+
+    vec4 bestResult = vec4(0.0);
+    float bestWeight = -1.0;
+    for (int i = 0; i < candidateCount; ++i) {
+        vec4 candidateResult = vec4(0.0);
+        float candidateWeight = 0.0;
+        if (!trySampleWorldRadianceCacheFastCascade(worldPos, n, candidates[i], baseCellSize,
+                                                    clipmapEnabled, jitter, jitterEnabled,
+                                                    planeWeightEnabled, candidateResult, candidateWeight))
+            continue;
+        if (candidateWeight > bestWeight) {
+            bestResult = candidateResult;
+            bestWeight = candidateWeight;
+        }
+        if (candidateWeight >= 16.0)
+            return candidateResult;
+    }
+    return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
 
 
