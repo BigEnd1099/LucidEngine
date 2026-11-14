@@ -158,8 +158,6 @@ vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec
         }
         if (i == 0 && candidateWeight >= 16.0)
             return candidateResult;
-        if (i > 0 && candidateWeight >= 16.0)
-            return candidateResult;
     }
     return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
