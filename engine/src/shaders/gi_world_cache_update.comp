@@ -102,6 +102,33 @@ void main() {
             bounceHit, bouncePos, bounceNormal, bounceUv, bounceTangent, bounceDist)) {
         vec3 bN = normalize(bounceNormal);
         if (dot(bN, -bounceDir) < 0.0) bN = -bN;
+
+        // A mirror bounce must gather radiance from the reflected scene, not from
+        // the mirror's zero diffuse albedo. Trace one specular continuation.
+        float bRoughnessInitial = clamp(bounceHit.material.y *
+            textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).g, 0.0, 1.0);
+        bool bIsMirror = (bounceHit.material.w > 0.5) &&
+                         (bRoughnessInitial < 0.18 || bounceHit.material.x > 0.65);
+        if (bIsMirror) {
+            vec3 reflDir = reflect(bounceDir, bN);
+            RtInstanceData reflHit;
+            vec3 reflPos, reflNormal;
+            vec2 reflUv;
+            vec4 reflTangent;
+            float reflDist;
+            if (traceSceneSurface(bouncePos + bN * 0.02, reflDir, 40.0,
+                    reflHit, reflPos, reflNormal, reflUv, reflTangent, reflDist)) {
+                bounceHit = reflHit;
+                bouncePos = reflPos;
+                bounceNormal = reflNormal;
+                bounceUv = reflUv;
+                bounceTangent = reflTangent;
+                bounceDir = reflDir;
+                bN = normalize(bounceNormal);
+                if (dot(bN, -bounceDir) < 0.0) bN = -bN;
+            }
+        }
+
         int numActiveLights = min(ubo.numLights, 8);
         int singleLight = -1;
         float singleWeight = 1.0;
