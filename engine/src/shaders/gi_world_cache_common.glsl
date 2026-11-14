@@ -39,7 +39,21 @@ vec3 unpackNormalOctahedral(uint packedN) {
     return normalize(n);
 }
 
-uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal) {
+uint getCascadeIndex(vec3 worldPos, vec3 cameraPos, float dither) {
+    float dist = max(0.0, length(worldPos - cameraPos) + dither);
+    // Cascade 0: [0.0, 2.5m) -> 0.20m cells
+    // Cascade 1: [2.5, 5.0m) -> 0.40m cells
+    // Cascade 2: [5.0, 10.0m) -> 0.80m cells
+    // Cascade 3: [10.0m, inf) -> 1.60m cells
+    if (dist < 2.5) return 0u;
+    return uint(clamp(floor(log2(dist / 2.5)) + 1.0, 0.0, 3.0));
+}
+
+float getCascadeCellSize(uint cascade) {
+    return 0.20 * exp2(float(cascade)); // 0.20m, 0.40m, 0.80m, 1.60m
+}
+
+uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal, uint cascade) {
     vec3 n = normalize(normal);
     uint normIdx = 0u;
     if (abs(n.x) > abs(n.y) && abs(n.x) > abs(n.z)) {
@@ -49,11 +63,15 @@ uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal) {
     } else {
         normIdx = n.z > 0.0 ? 4u : 5u;
     }
-    uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u;
+    uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u ^ (cascade * 1640531527u);
     return h ^ (h >> 16u);
 }
 
-uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
+uint computeWorldCellKeyFromCoord(ivec3 cellCoord, vec3 normal) {
+    return computeWorldCellKeyFromCoord(cellCoord, normal, 0u);
+}
+
+uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize, uint cascade) {
     // Apply the same deterministic normal bias for ray hits and G-buffer lookups.
     vec3 n = normalize(normal);
     vec3 biasedPos = pos + n * (cellSize * 0.25);
@@ -66,12 +84,111 @@ uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
     } else {
         normIdx = normal.z > 0.0 ? 4u : 5u;
     }
-    uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u;
+    uint h = uint(cellCoord.x) * 73856093u ^ uint(cellCoord.y) * 19349663u ^ uint(cellCoord.z) * 83492791u ^ normIdx * 2654435761u ^ (cascade * 1640531527u);
     return h ^ (h >> 16u);
 }
 
+uint computeWorldCellKey(vec3 pos, vec3 normal, float cellSize) {
+    return computeWorldCellKey(pos, normal, cellSize, 0u);
+}
+
+uint computeWorldCellKeyCascaded(vec3 pos, vec3 normal, vec3 cameraPos, float dither, out uint outCascade, out float outCellSize) {
+    outCascade = getCascadeIndex(pos, cameraPos, dither);
+    outCellSize = getCascadeCellSize(outCascade);
+    return computeWorldCellKey(pos, normal, outCellSize, outCascade);
+}
+
+uint computeWorldCellKeyCascaded(vec3 pos, vec3 normal, vec3 cameraPos) {
+    uint cascade = getCascadeIndex(pos, cameraPos, 0.0);
+    float cellSize = getCascadeCellSize(cascade);
+    return computeWorldCellKey(pos, normal, cellSize, cascade);
+}
+
+uint hashWorldCell(vec3 pos, vec3 normal, float cellSize, uint cascade) {
+    return computeWorldCellKey(pos, normal, cellSize, cascade) % CACHE_CELL_COUNT;
+}
+
 uint hashWorldCell(vec3 pos, vec3 normal, float cellSize) {
-    return computeWorldCellKey(pos, normal, cellSize) % CACHE_CELL_COUNT;
+    return hashWorldCell(pos, normal, cellSize, 0u);
+}
+
+// Jimenez animated Interleaved Gradient Noise (IGN) for temporal jittering
+float ignTemporal(vec2 p, uint frame) {
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)) + float(frame & 63u) * 0.06711056));
+}
+
+// Computes the center in world space of a cell given its coordinate, normal bias, and cell size
+vec3 computeWorldCellCenter(ivec3 cellCoord, vec3 normal, float cellSize) {
+    vec3 n = normalize(normal);
+    return (vec3(cellCoord) + 0.5) * cellSize - n * (cellSize * 0.25);
+}
+
+// Half-extent of a cubic voxel of size cellSize projected onto unit normal
+float computeWorldCellBoxRadius(vec3 normal, float cellSize) {
+    vec3 n = normalize(normal);
+    return 0.5 * cellSize * (abs(n.x) + abs(n.y) + abs(n.z));
+}
+
+// Plane distance from sample position P to cell plane (defined by cellCenter and surface normal)
+float computeWorldCellPlaneDistance(vec3 cellCenter, vec3 worldPos, vec3 normal) {
+    return abs(dot(cellCenter - worldPos, normalize(normal)));
+}
+
+// Excess plane distance beyond the voxel's projected bounding box extent along normal
+float computeWorldCellPlaneDistanceExcess(vec3 cellCenter, vec3 worldPos, vec3 normal, float cellSize) {
+    float planeDist = computeWorldCellPlaneDistance(cellCenter, worldPos, normal);
+    float boxRadius = computeWorldCellBoxRadius(normal, cellSize);
+    return max(0.0, planeDist - boxRadius);
+}
+
+// Exponential geometry weight to prevent edge bleeding across corners (System #5)
+float computePlaneDistanceWeight(float excessDist, float cellSize) {
+    return exp(-excessDist / (cellSize * 0.15));
+}
+
+#ifndef BUILD_BASIS_DEFINED
+#define BUILD_BASIS_DEFINED
+// Orthonormal basis without singularity (Duff et al. 2017).
+void buildBasis(vec3 n, out vec3 t, out vec3 b) {
+    float s = n.z >= 0.0 ? 1.0 : -1.0;
+    float a = -1.0 / (s + n.z);
+    float c = n.x * n.y * a;
+    t = vec3(1.0 + s * n.x * n.x * a, s * c, -s * n.x);
+    b = vec3(c, s + n.y * n.y * a, -n.y);
+}
+#endif
+
+// Pack cell coordinate and cascade index into 31 bits (leaving bit 0 for writer lock)
+uint packCellCoord(ivec3 coord, uint cascade) {
+    uint ux = uint(clamp(coord.x + 512, 0, 1023));
+    uint uz = uint(clamp(coord.z + 512, 0, 1023));
+    uint uy = uint(clamp(coord.y + 256, 0, 511));
+    uint uc = cascade & 3u;
+    return ux | (uz << 10u) | (uy << 20u) | (uc << 29u);
+}
+
+void unpackCellCoord(uint packed, out ivec3 coord, out uint cascade) {
+    int x = int(packed & 1023u) - 512;
+    int z = int((packed >> 10u) & 1023u) - 512;
+    int y = int((packed >> 20u) & 511u) - 256;
+    cascade = (packed >> 29u) & 3u;
+    coord = ivec3(x, y, z);
+}
+
+// System #1: 8x4 stratified hemispherical direction generation (1 warp = 1 cell)
+vec3 getStratifiedHemisphereDirection(vec3 normal, uint laneIdx, vec2 jitter) {
+    uint col = laneIdx & 7u;  // 8 azimuth columns (0..7)
+    uint row = laneIdx >> 3u; // 4 elevation rings (0..3)
+    float uElevation = (float(row) + jitter.y) / 4.0;
+    float uAzimuth = (float(col) + jitter.x) / 8.0;
+
+    float r = sqrt(clamp(uElevation, 0.0, 1.0));
+    float phi = 6.28318530718 * uAzimuth;
+
+    vec3 n = normalize(normal);
+    vec3 t, b;
+    buildBasis(n, t, b);
+    return normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + n * sqrt(max(1.0 - uElevation, 0.0)));
 }
 
 #endif // GI_WORLD_CACHE_COMMON_GLSL

@@ -39,16 +39,29 @@ namespace engine::renderer {
             return;
         }
 
+        // Allocate ping-pong storage buffer for spatial filter output (16 MB)
+        if (vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocInfo, &m_filteredCellBuffer, &m_filteredCellAlloc, nullptr) != VK_SUCCESS) {
+            core::Logger::error("WorldRadianceCache: failed to allocate filtered cell SSBO buffer!");
+            return;
+        }
+
         // Create descriptor set layout for Set 1 (World Radiance Cache)
-        VkDescriptorSetLayoutBinding binding{};
-        binding.binding = 0;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        binding.descriptorCount = 1;
-        binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        // Binding 0: cellBuffer (read/write in update, readonly in filter)
+        // Binding 1: filteredCellBuffer (writeonly in filter, readable downstream)
+        VkDescriptorSetLayoutBinding bindings[2]{};
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &binding;
+        layoutInfo.bindingCount = 2;
+        layoutInfo.pBindings = bindings;
 
         if (vkCreateDescriptorSetLayout(m_context->getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
             core::Logger::error("WorldRadianceCache: failed to create descriptor set layout!");
@@ -62,20 +75,31 @@ namespace engine::renderer {
         allocSetInfo.pSetLayouts = &m_descriptorSetLayout;
 
         if (vkAllocateDescriptorSets(m_context->getDevice(), &allocSetInfo, &m_descriptorSet) == VK_SUCCESS) {
-            VkDescriptorBufferInfo bufferDescInfo{};
-            bufferDescInfo.buffer = m_cellBuffer;
-            bufferDescInfo.offset = 0;
-            bufferDescInfo.range = bufferSize;
+            VkDescriptorBufferInfo bufferDescInfo[2]{};
+            bufferDescInfo[0].buffer = m_cellBuffer;
+            bufferDescInfo[0].offset = 0;
+            bufferDescInfo[0].range = bufferSize;
 
-            VkWriteDescriptorSet write{};
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.dstSet = m_descriptorSet;
-            write.dstBinding = 0;
-            write.descriptorCount = 1;
-            write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            write.pBufferInfo = &bufferDescInfo;
+            bufferDescInfo[1].buffer = m_filteredCellBuffer;
+            bufferDescInfo[1].offset = 0;
+            bufferDescInfo[1].range = bufferSize;
 
-            vkUpdateDescriptorSets(m_context->getDevice(), 1, &write, 0, nullptr);
+            VkWriteDescriptorSet writes[2]{};
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = m_descriptorSet;
+            writes[0].dstBinding = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[0].pBufferInfo = &bufferDescInfo[0];
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = m_descriptorSet;
+            writes[1].dstBinding = 1;
+            writes[1].descriptorCount = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[1].pBufferInfo = &bufferDescInfo[1];
+
+            vkUpdateDescriptorSets(m_context->getDevice(), 2, writes, 0, nullptr);
         }
     }
 
@@ -128,24 +152,69 @@ namespace engine::renderer {
 
         vkCreateComputePipelines(m_context->getDevice(), VK_NULL_HANDLE, 1, &cpInfo, nullptr, &m_updatePipeline);
         vkDestroyShaderModule(m_context->getDevice(), compModule, nullptr);
+
+        // Load and create spatial filter pipeline (gi_world_cache_filter.comp.spv)
+        std::vector<char> filterShaderCode;
+        try {
+            filterShaderCode = utils::readFile("gi_world_cache_filter.comp.spv");
+        } catch (...) {
+            return;
+        }
+
+        if (!filterShaderCode.empty()) {
+            VkShaderModuleCreateInfo filterSmInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+            filterSmInfo.codeSize = filterShaderCode.size();
+            filterSmInfo.pCode = reinterpret_cast<const uint32_t*>(filterShaderCode.data());
+
+            VkShaderModule filterCompModule = VK_NULL_HANDLE;
+            if (vkCreateShaderModule(m_context->getDevice(), &filterSmInfo, nullptr, &filterCompModule) == VK_SUCCESS) {
+                VkComputePipelineCreateInfo filterCpInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+                filterCpInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                filterCpInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                filterCpInfo.stage.module = filterCompModule;
+                filterCpInfo.stage.pName = "main";
+                filterCpInfo.layout = m_pipelineLayout;
+
+                vkCreateComputePipelines(m_context->getDevice(), VK_NULL_HANDLE, 1, &filterCpInfo, nullptr, &m_filterPipeline);
+                vkDestroyShaderModule(m_context->getDevice(), filterCompModule, nullptr);
+            }
+        }
     }
 
     void WorldRadianceCache::clear(VkCommandBuffer cmd) {
         if (!m_cellBuffer) return;
         vkCmdFillBuffer(cmd, m_cellBuffer, 0, sizeof(WorldRadianceCell) * CACHE_CELL_COUNT, 0);
+        if (m_filteredCellBuffer) {
+            vkCmdFillBuffer(cmd, m_filteredCellBuffer, 0, sizeof(WorldRadianceCell) * CACHE_CELL_COUNT, 0);
+        }
         m_needsClear = false;
 
-        VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        barrier.buffer = m_cellBuffer;
-        barrier.offset = 0;
-        barrier.size = VK_WHOLE_SIZE;
+        VkBufferMemoryBarrier2 barriers[2]{};
+        barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+        barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barriers[0].srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barriers[0].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barriers[0].buffer = m_cellBuffer;
+        barriers[0].offset = 0;
+        barriers[0].size = VK_WHOLE_SIZE;
+
+        uint32_t barrierCount = 1;
+        if (m_filteredCellBuffer) {
+            barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            barriers[1].srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            barriers[1].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            barriers[1].buffer = m_filteredCellBuffer;
+            barriers[1].offset = 0;
+            barriers[1].size = VK_WHOLE_SIZE;
+            barrierCount = 2;
+        }
+
         VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        dep.bufferMemoryBarrierCount = 1;
-        dep.pBufferMemoryBarriers = &barrier;
+        dep.bufferMemoryBarrierCount = barrierCount;
+        dep.pBufferMemoryBarriers = barriers;
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
@@ -167,9 +236,9 @@ namespace engine::renderer {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
-        // Update 4096 cells per frame in a sliding window
-        constexpr uint32_t SLICE_SIZE = 4096;
-        uint32_t sliceOffset = (frameCounter * SLICE_SIZE) % 32768u;
+        // System #1: 1 warp = 1 cell. 128 cells * 32 lanes = 4096 rays per frame.
+        constexpr uint32_t CELL_BATCH_SIZE = 128;
+        uint32_t sliceOffset = (frameCounter * CELL_BATCH_SIZE) % 32768u;
 
         struct PushConstants {
             glm::vec4 cameraPosAndCellSize;
@@ -181,41 +250,88 @@ namespace engine::renderer {
         pc.cameraPosAndCellSize = glm::vec4(cameraPos, DEFAULT_CELL_SIZE);
         pc.sunDirAndIntensity = glm::vec4(sunDirection, 2.5f);
         pc.sunColor = sunColor;
-        pc.frameAndSlice = glm::uvec4(frameCounter, sliceOffset, SLICE_SIZE, 0u);
+        pc.frameAndSlice = glm::uvec4(frameCounter, sliceOffset, CELL_BATCH_SIZE, 0u);
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
         const VkDescriptorSet sets[2] = { sceneSet, m_descriptorSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
 
-        // Timestamp only the compute dispatch itself. Cache clears and the
-        // post-dispatch visibility barrier are deliberately outside this interval.
+        // Timestamp only the compute dispatch itself.
         if (timingQueryPool != VK_NULL_HANDLE)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timingQueryPool, 11);
-        vkCmdDispatch(cmd, SLICE_SIZE / 64, 1, 1);
+
+        // Dispatch update pass (writing to m_cellBuffer)
+        vkCmdDispatch(cmd, CELL_BATCH_SIZE, 1, 1);
+
+        // Barrier 1: Synchronize update pass writes to m_cellBuffer with filter pass reads from m_cellBuffer
+        VkBufferMemoryBarrier2 barrier1{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        barrier1.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier1.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barrier1.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier1.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        barrier1.buffer = m_cellBuffer;
+        barrier1.offset = 0;
+        barrier1.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+
+        VkDependencyInfo depInfo1{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        depInfo1.bufferMemoryBarrierCount = 1;
+        depInfo1.pBufferMemoryBarriers = &barrier1;
+        vkCmdPipelineBarrier2(cmd, &depInfo1);
+
+        // Dispatch filter pass if available (reading m_cellBuffer and writing to m_filteredCellBuffer)
+        if (m_filterPipeline && m_filteredCellBuffer) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_filterPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
+            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
+
+            // 524,288 cells / 64 threads per workgroup = 8192 workgroups
+            vkCmdDispatch(cmd, CACHE_CELL_COUNT / 64, 1, 1);
+
+            // Barrier 2: Synchronize filter pass writes to m_filteredCellBuffer with downstream reads
+            VkBufferMemoryBarrier2 barrier2{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            barrier2.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            barrier2.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrier2.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            barrier2.buffer = m_filteredCellBuffer;
+            barrier2.offset = 0;
+            barrier2.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+
+            VkDependencyInfo depInfo2{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depInfo2.bufferMemoryBarrierCount = 1;
+            depInfo2.pBufferMemoryBarriers = &barrier2;
+            vkCmdPipelineBarrier2(cmd, &depInfo2);
+        } else {
+            // Fallback barrier if filter pass is inactive
+            VkBufferMemoryBarrier2 fallbackBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            fallbackBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            fallbackBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            fallbackBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            fallbackBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            fallbackBarrier.buffer = m_cellBuffer;
+            fallbackBarrier.offset = 0;
+            fallbackBarrier.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+
+            VkDependencyInfo depFallback{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depFallback.bufferMemoryBarrierCount = 1;
+            depFallback.pBufferMemoryBarriers = &fallbackBarrier;
+            vkCmdPipelineBarrier2(cmd, &depFallback);
+        }
+
         if (timingQueryPool != VK_NULL_HANDLE)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timingQueryPool, 12);
 
-        // Buffer memory barrier to synchronize compute write with downstream compute reads
-        VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        barrier.buffer = m_cellBuffer;
-        barrier.offset = 0;
-        barrier.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
-
-        VkDependencyInfo depInfo{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        depInfo.bufferMemoryBarrierCount = 1;
-        depInfo.pBufferMemoryBarriers = &barrier;
-        vkCmdPipelineBarrier2(cmd, &depInfo);
         return true;
     }
 
     void WorldRadianceCache::cleanup() {
         if (!m_context) return;
         VkDevice device = m_context->getDevice();
+        if (m_filterPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, m_filterPipeline, nullptr);
+            m_filterPipeline = VK_NULL_HANDLE;
+        }
         if (m_updatePipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(device, m_updatePipeline, nullptr);
             m_updatePipeline = VK_NULL_HANDLE;
@@ -228,6 +344,11 @@ namespace engine::renderer {
             vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
             m_descriptorSetLayout = VK_NULL_HANDLE;
         }
+        if (m_filteredCellBuffer != VK_NULL_HANDLE && m_context->getAllocator()) {
+            vmaDestroyBuffer(m_context->getAllocator(), m_filteredCellBuffer, m_filteredCellAlloc);
+            m_filteredCellBuffer = VK_NULL_HANDLE;
+            m_filteredCellAlloc = VK_NULL_HANDLE;
+        }
         if (m_cellBuffer != VK_NULL_HANDLE && m_context->getAllocator()) {
             vmaDestroyBuffer(m_context->getAllocator(), m_cellBuffer, m_cellAlloc);
             m_cellBuffer = VK_NULL_HANDLE;
@@ -237,23 +358,8 @@ namespace engine::renderer {
         m_needsClear = true;
     }
 
-    uint32_t WorldRadianceCache::hashWorldCell(const glm::vec3& pos, const glm::vec3& normal, float cellSize) {
-        const glm::vec3 n = glm::normalize(normal);
-        const glm::vec3 biasedPos = pos + n * (cellSize * 0.25f);
-        glm::ivec3 cellCoord = glm::ivec3(glm::floor(biasedPos / cellSize));
-        uint32_t normIdx = 0u;
-        if (std::abs(normal.x) > std::abs(normal.y) && std::abs(normal.x) > std::abs(normal.z)) {
-            normIdx = normal.x > 0.0f ? 0u : 1u;
-        } else if (std::abs(normal.y) > std::abs(normal.z)) {
-            normIdx = normal.y > 0.0f ? 2u : 3u;
-        } else {
-            normIdx = normal.z > 0.0f ? 4u : 5u;
-        }
-        uint32_t h = static_cast<uint32_t>(cellCoord.x) * 73856093u ^
-                     static_cast<uint32_t>(cellCoord.y) * 19349663u ^
-                     static_cast<uint32_t>(cellCoord.z) * 83492791u ^
-                     normIdx * 2654435761u;
-        return (h ^ (h >> 16u)) % CACHE_CELL_COUNT;
+    uint32_t WorldRadianceCache::hashWorldCell(const glm::vec3& pos, const glm::vec3& normal, float cellSize, uint32_t cascade) {
+        return computeWorldCellKey(pos, normal, cellSize, cascade) % CACHE_CELL_COUNT;
     }
 
     uint32_t WorldRadianceCache::packNormalOctahedral(const glm::vec3& n) {

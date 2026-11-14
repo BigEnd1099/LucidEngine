@@ -211,6 +211,179 @@ int main() {
     const uint32_t wallAbove = WorldRadianceCache::hashWorldCell(glm::vec3(2.00001f, 2.0f, 3.0f), rightNormal);
     CHECK(wallBelow == wallAbove);
 
+    // Cascaded World Radiance Cache (Milestone 2 - Clipmaps / LOD):
+    // 1. getCascadeIndex distance mapping verification:
+    // [0.0, 2.4] -> Cascade 0 (0.20m cells, 0 to 2.5m)
+    // [2.6, 4.9] -> Cascade 1 (0.40m cells, 2.5 to 5.0m)
+    // [5.1, 9.9] -> Cascade 2 (0.80m cells, 5.0 to 10.0m)
+    // [10.5, inf) -> Cascade 3 (1.60m cells, 10.0m+)
+    const glm::vec3 camOrigin(0.0f);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 0.0f, 0.0f), camOrigin) == 0u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(1.0f, 0.0f, 0.0f), camOrigin) == 0u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 2.4f, 0.0f), camOrigin) == 0u);
+
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 0.0f, 2.6f), camOrigin) == 1u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(3.5f, 0.0f, 0.0f), camOrigin) == 1u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 4.9f, 0.0f), camOrigin) == 1u);
+
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(5.1f, 0.0f, 0.0f), camOrigin) == 2u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 7.5f, 0.0f), camOrigin) == 2u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 0.0f, 9.9f), camOrigin) == 2u);
+
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(10.5f, 0.0f, 0.0f), camOrigin) == 3u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 25.0f, 0.0f), camOrigin) == 3u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(0.0f, 0.0f, 150.0f), camOrigin) == 3u);
+
+    // Verify distance offset from non-zero camera position:
+    const glm::vec3 shiftedCam(10.0f, 20.0f, 30.0f);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(10.0f, 20.0f, 32.0f), shiftedCam) == 0u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(10.0f, 20.0f, 33.5f), shiftedCam) == 1u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(10.0f, 20.0f, 37.0f), shiftedCam) == 2u);
+    CHECK(WorldRadianceCache::getCascadeIndex(glm::vec3(10.0f, 20.0f, 45.0f), shiftedCam) == 3u);
+
+    // 2. getCascadeCellSize returns 0.20m, 0.40m, 0.80m, 1.60m:
+    CHECK(std::abs(WorldRadianceCache::getCascadeCellSize(0u) - 0.20f) < 1.0e-5f);
+    CHECK(std::abs(WorldRadianceCache::getCascadeCellSize(1u) - 0.40f) < 1.0e-5f);
+    CHECK(std::abs(WorldRadianceCache::getCascadeCellSize(2u) - 0.80f) < 1.0e-5f);
+    CHECK(std::abs(WorldRadianceCache::getCascadeCellSize(3u) - 1.60f) < 1.0e-5f);
+
+    // 3. Bit-for-bit backward compatibility: hashWorldCell with cascade = 0 matches prior default hash:
+    const glm::vec3 testPosA(12.3f, 4.5f, -8.1f);
+    CHECK(WorldRadianceCache::hashWorldCell(testPosA, testNorm, 0.65f) == WorldRadianceCache::hashWorldCell(testPosA, testNorm, 0.65f, 0u));
+    CHECK(WorldRadianceCache::hashWorldCell(glm::vec3(2.0f, 0.0f, 3.0f), upNormal, 0.35f) == WorldRadianceCache::hashWorldCell(glm::vec3(2.0f, 0.0f, 3.0f), upNormal, 0.35f, 0u));
+    CHECK(WorldRadianceCache::computeWorldCellKey(testPosA, testNorm, 0.65f) == WorldRadianceCache::computeWorldCellKey(testPosA, testNorm, 0.65f, 0u));
+
+    // 4. Uniqueness: Distinct cascade indices yield distinct hashes for the same position:
+    const glm::vec3 samplePos(7.2f, 3.4f, 15.8f);
+    const glm::vec3 sampleNorm = glm::normalize(glm::vec3(0.0f, 1.0f, 0.0f));
+    uint32_t cascadeHash0 = WorldRadianceCache::hashWorldCell(samplePos, sampleNorm, WorldRadianceCache::getCascadeCellSize(0u), 0u);
+    uint32_t cascadeHash1 = WorldRadianceCache::hashWorldCell(samplePos, sampleNorm, WorldRadianceCache::getCascadeCellSize(1u), 1u);
+    uint32_t cascadeHash2 = WorldRadianceCache::hashWorldCell(samplePos, sampleNorm, WorldRadianceCache::getCascadeCellSize(2u), 2u);
+    uint32_t cascadeHash3 = WorldRadianceCache::hashWorldCell(samplePos, sampleNorm, WorldRadianceCache::getCascadeCellSize(3u), 3u);
+    CHECK(cascadeHash0 != cascadeHash1);
+    CHECK(cascadeHash0 != cascadeHash2);
+    CHECK(cascadeHash0 != cascadeHash3);
+    CHECK(cascadeHash1 != cascadeHash2);
+    CHECK(cascadeHash1 != cascadeHash3);
+    CHECK(cascadeHash2 != cascadeHash3);
+
+    // Uniqueness across keys with same cell size:
+    uint32_t key0 = WorldRadianceCache::computeWorldCellKey(samplePos, sampleNorm, 0.5f, 0u);
+    uint32_t key1 = WorldRadianceCache::computeWorldCellKey(samplePos, sampleNorm, 0.5f, 1u);
+    uint32_t key2 = WorldRadianceCache::computeWorldCellKey(samplePos, sampleNorm, 0.5f, 2u);
+    uint32_t key3 = WorldRadianceCache::computeWorldCellKey(samplePos, sampleNorm, 0.5f, 3u);
+    CHECK(key0 != key1 && key0 != key2 && key0 != key3);
+    CHECK(key1 != key2 && key1 != key3);
+    CHECK(key2 != key3);
+
+    // =========================================================================
+    // Milestone 3: World-Space Spatial Filter & Subgroup Batched Tracing Tests
+    // =========================================================================
+
+    // 1. Cell coordinate bit-packing round-trip (packCellCoord / unpackCellCoord)
+    const glm::ivec3 testCoords[] = {
+        glm::ivec3(0, 0, 0),
+        glm::ivec3(12, -5, 42),
+        glm::ivec3(-512, -256, -512), // Minimum representable bounds
+        glm::ivec3(511, 255, 511),    // Maximum representable bounds
+        glm::ivec3(-15, 80, -200),
+        glm::ivec3(100, -100, 300)
+    };
+    for (uint32_t cascade = 0; cascade < 4; ++cascade) {
+        for (const auto& coord : testCoords) {
+            uint32_t packed = WorldRadianceCache::packCellCoord(coord, cascade);
+            glm::ivec3 unpackedCoord;
+            uint32_t unpackedCascade = 0;
+            WorldRadianceCache::unpackCellCoord(packed, unpackedCoord, unpackedCascade);
+            CHECK(unpackedCoord == coord);
+            CHECK(unpackedCascade == cascade);
+        }
+    }
+
+    // 2. System #1: 8x4 Stratified Hemispherical Tracing (1 warp = 1 cell, 32 lanes)
+    const glm::vec3 surfaceNormals[] = {
+        glm::vec3(0.0f, 1.0f, 0.0f),  // Up (floor)
+        glm::vec3(1.0f, 0.0f, 0.0f),  // Right (wall)
+        glm::vec3(0.0f, 0.0f, -1.0f), // Negative-Z
+        glm::normalize(glm::vec3(0.577f, 0.577f, 0.577f)) // Arbitrary diagonal
+    };
+
+    for (const auto& normal : surfaceNormals) {
+        std::vector<glm::vec3> laneDirections(32);
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+            glm::vec3 dir = WorldRadianceCache::getStratifiedHemisphereDirection(normal, lane);
+            laneDirections[lane] = dir;
+
+            // Unit length constraint
+            CHECK(std::abs(glm::length(dir) - 1.0f) < 1.0e-5f);
+
+            // Positive hemisphere constraint (must be on the front side of the surface)
+            CHECK(glm::dot(dir, normal) > 0.0f);
+        }
+
+        // All 32 directions within the warp must be distinct
+        for (uint32_t i = 0; i < 32; ++i) {
+            for (uint32_t j = i + 1; j < 32; ++j) {
+                float similarity = glm::dot(laneDirections[i], laneDirections[j]);
+                CHECK(similarity < 0.999f);
+            }
+        }
+
+        // Stratified elevation check: row 0 (near horizon/low cosine) to row 3 (near pole/high cosine)
+        for (uint32_t row = 0; row < 4; ++row) {
+            for (uint32_t col = 0; col < 8; ++col) {
+                uint32_t lane = row * 8 + col;
+                float cosTheta = glm::dot(laneDirections[lane], normal);
+                // In sampleCosineHemisphere with uElevation = (row + 0.5)/4:
+                // cosTheta = sqrt(1.0 - uElevation), so row 0 has highest cos, row 3 lowest cos (or vice versa)
+                CHECK(cosTheta > 0.0f && cosTheta <= 1.0f);
+            }
+        }
+    }
+
+    // 3. System #2: World-Space Spatial Filter - Coplanar Normal Acceptance & Gaussian Weights
+    const glm::vec3 baseNormal(0.0f, 1.0f, 0.0f);
+    // Identical normal (100% coplanar) -> dot = 1.0 > 0.8
+    CHECK(WorldRadianceCache::isCoplanarNormal(baseNormal, glm::vec3(0.0f, 1.0f, 0.0f), 0.8f));
+
+    // Slight curvature (angle ~20 degrees, cos(20 deg) ~ 0.94) -> accepted
+    glm::vec3 slightCurvature = glm::normalize(glm::vec3(0.342f, 0.940f, 0.0f));
+    CHECK(WorldRadianceCache::isCoplanarNormal(baseNormal, slightCurvature, 0.8f));
+
+    // Perpendicular surface (angle = 90 degrees, wall vs floor) -> dot = 0.0 < 0.8 (rejected)
+    CHECK(!WorldRadianceCache::isCoplanarNormal(baseNormal, glm::vec3(1.0f, 0.0f, 0.0f), 0.8f));
+    CHECK(!WorldRadianceCache::isCoplanarNormal(baseNormal, glm::vec3(0.0f, 0.0f, 1.0f), 0.8f));
+
+    // Opposing surface (angle = 180 degrees, backface) -> dot = -1.0 < 0.8 (rejected)
+    CHECK(!WorldRadianceCache::isCoplanarNormal(baseNormal, glm::vec3(0.0f, -1.0f, 0.0f), 0.8f));
+
+    // Sharp corner (angle = 45 degrees, cos(45 deg) ~ 0.707) -> dot = 0.707 < 0.8 (rejected, kills edge halos)
+    glm::vec3 sharpCorner = glm::normalize(glm::vec3(1.0f, 1.0f, 0.0f));
+    CHECK(!WorldRadianceCache::isCoplanarNormal(baseNormal, sharpCorner, 0.8f));
+
+    // 4. Spatial Filter Gaussian Distance Weights
+    float wFilterCenter = WorldRadianceCache::evaluateSpatialFilterWeight(0.0f, 1.0f);
+    float wFilterOrtho = WorldRadianceCache::evaluateSpatialFilterWeight(1.0f, 1.0f);
+    float wFilterDiag = WorldRadianceCache::evaluateSpatialFilterWeight(std::sqrt(2.0f), 1.0f);
+    float wFilterFar = WorldRadianceCache::evaluateSpatialFilterWeight(2.0f, 1.0f);
+
+    CHECK(std::abs(wFilterCenter - 1.0f) < 1.0e-5f);
+    CHECK(std::abs(wFilterOrtho - std::exp(-0.5f)) < 1.0e-5f);
+    CHECK(std::abs(wFilterDiag - std::exp(-1.0f)) < 1.0e-5f);
+    CHECK(std::abs(wFilterFar - std::exp(-2.0f)) < 1.0e-5f);
+    CHECK(wFilterCenter > wFilterOrtho);
+    CHECK(wFilterOrtho > wFilterDiag);
+    CHECK(wFilterDiag > wFilterFar);
+
+    // 5. Normalization Preservation: uniform field remains identical after Gaussian blend
+    const glm::vec3 uniformRadiance(2.5f, 1.8f, 0.4f);
+    float totalWeight = wFilterCenter + 4.0f * wFilterOrtho + 4.0f * wFilterDiag;
+    glm::vec3 accumulated = uniformRadiance * wFilterCenter +
+                            uniformRadiance * (4.0f * wFilterOrtho) +
+                            uniformRadiance * (4.0f * wFilterDiag);
+    glm::vec3 blended = accumulated / totalWeight;
+    CHECK(glm::distance(blended, uniformRadiance) < 1.0e-5f);
+
     // GPU Frustum Culling Sphere Test
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);
     glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));

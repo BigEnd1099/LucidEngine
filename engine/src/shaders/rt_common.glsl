@@ -104,6 +104,8 @@ float rand1() {
 
 vec2 rand2() { float a = rand1(); return vec2(a, rand1()); }
 
+#ifndef BUILD_BASIS_DEFINED
+#define BUILD_BASIS_DEFINED
 // Orthonormal basis without singularity (Duff et al. 2017).
 void buildBasis(vec3 n, out vec3 t, out vec3 b) {
     float s = n.z >= 0.0 ? 1.0 : -1.0;
@@ -112,6 +114,7 @@ void buildBasis(vec3 n, out vec3 t, out vec3 b) {
     t = vec3(1.0 + s * n.x * n.x * a, s * c, -s * n.x);
     b = vec3(c, s + n.y * n.y * a, -n.y);
 }
+#endif
 
 // Cosine-weighted hemisphere (pdf = cos/PI), u in [0,1)^2.
 vec3 sampleCosineHemisphere(vec3 n, vec2 u) {

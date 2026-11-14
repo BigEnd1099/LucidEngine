@@ -1,0 +1,107 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+#include "gi_world_cache_common.glsl"
+
+layout(std430, set = 1, binding = 0) readonly buffer InputWorldCache {
+    WorldRadianceCell inCells[];
+} inCache;
+
+layout(std430, set = 1, binding = 1) writeonly buffer OutputWorldCache {
+    WorldRadianceCell outCells[];
+} outCache;
+
+layout(push_constant) uniform PC {
+    vec4 cameraPosAndCellSize; // xyz = cameraPos, w = cellSize
+    vec4 sunDirAndIntensity;   // xyz = sunDirection, w = sunIntensity
+    vec4 sunColor;             // rgb = sunColor, a = reserved
+    uvec4 frameAndSlice;       // x = frameIndex, y = sliceOffset, z = cellCount, w = reserved
+} pc;
+
+void main() {
+    uint cellIdx = gl_GlobalInvocationID.x;
+    if (cellIdx >= CACHE_CELL_COUNT) return;
+
+    WorldRadianceCell cell = inCache.inCells[cellIdx];
+
+    // If cell is inactive or has an uninitialized key, pass through unchanged
+    if (cell.irradiance.a <= 0.0 || cell.cellKey == 0u) {
+        outCache.outCells[cellIdx] = cell;
+        return;
+    }
+
+    vec3 N = unpackNormalOctahedral(cell.packedNormal);
+
+    // Unpack cell coordinate and cascade from lockOrFlags (shifted by 1 for writer lock)
+    uint packedCoord = cell.lockOrFlags >> 1u;
+    ivec3 coord;
+    uint cascade;
+    unpackCellCoord(packedCoord, coord, cascade);
+
+    // Verify coordinate validity against stored spatial hash key
+    if (computeWorldCellKeyFromCoord(coord, N, cascade) != cell.cellKey) {
+        // Stale or unmapped coordinates; pass through original irradiance
+        outCache.outCells[cellIdx] = cell;
+        return;
+    }
+
+    float cellSize = getCascadeCellSize(cascade);
+    vec3 P = computeWorldCellCenter(coord, N, cellSize);
+
+    // Tangent plane orthonormal basis (Duff et al. 2017)
+    vec3 T, B;
+    buildBasis(N, T, B);
+
+    // Center sample has distance 0, weight = 1.0 (exp(0) = 1.0)
+    vec3 accumIrr = cell.irradiance.rgb;
+    float accumWeight = 1.0;
+    uint validNeighbors = 0u;
+
+    // 8 coplanar neighbor offsets on the tangent plane: 4 orthogonal + 4 diagonal
+    const ivec2 neighborOffsets[8] = ivec2[8](
+        ivec2( 1,  0),
+        ivec2(-1,  0),
+        ivec2( 0,  1),
+        ivec2( 0, -1),
+        ivec2( 1,  1),
+        ivec2(-1,  1),
+        ivec2( 1, -1),
+        ivec2(-1, -1)
+    );
+
+    for (int i = 0; i < 8; ++i) {
+        ivec2 off = neighborOffsets[i];
+        vec3 neighborPos = P + (T * float(off.x) + B * float(off.y)) * cellSize;
+        vec3 biasedPos = neighborPos + N * (cellSize * 0.25);
+        ivec3 neighborCoord = ivec3(floor(biasedPos / cellSize));
+        uint neighborKey = computeWorldCellKeyFromCoord(neighborCoord, N, cascade);
+        uint neighborBase = neighborKey % CACHE_CELL_COUNT;
+
+        for (uint probe = 0u; probe < 4u; ++probe) {
+            uint slot = (neighborBase + probe) % CACHE_CELL_COUNT;
+            WorldRadianceCell nCell = inCache.inCells[slot];
+            if (nCell.cellKey == neighborKey && nCell.irradiance.a > 0.0) {
+                vec3 nNormal = unpackNormalOctahedral(nCell.packedNormal);
+                // Normal alignment threshold: only blend coplanar surfaces (dot > 0.8)
+                if (dot(N, nNormal) > 0.8) {
+                    float distSq = float(off.x * off.x + off.y * off.y);
+                    // Gaussian distance weight: exp(-0.5 * distSq / sigma^2) with sigma = 1.0
+                    float w = exp(-0.5 * distSq);
+                    accumIrr += nCell.irradiance.rgb * w;
+                    accumWeight += w;
+                    validNeighbors++;
+                    break;
+                }
+            }
+        }
+    }
+
+    WorldRadianceCell filteredCell = cell;
+    if (validNeighbors > 0u && accumWeight > 0.0) {
+        filteredCell.irradiance.rgb = accumIrr / accumWeight;
+    }
+    outCache.outCells[cellIdx] = filteredCell;
+}

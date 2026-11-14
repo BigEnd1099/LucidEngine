@@ -85,9 +85,9 @@ bool loadSurfaceHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uin
     if (weightSum > 0.001) {
         history = accumHistory / weightSum;
         // A sparse cache should still contribute when one or two neighboring
-        // cells are available; normalized interpolation handles the radiance,
-        // while this count-based confidence avoids suppressing every isolated hit.
-        coverage = clamp(float(validCorners) * 0.5, 0.0, 1.0);
+        // cells are available. Normalized interpolation handles the radiance,
+        // and full coverage is preserved so valid boundary cells are not darkened.
+        coverage = 1.0;
         return true;
     }
     return false;

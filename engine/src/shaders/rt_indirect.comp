@@ -38,29 +38,38 @@ void addDiagCounter(uint counterIdx, uint value) {
 }
 
 vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
+    uint cascade = getCascadeIndex(worldPos, ubo.cameraPos.xyz, 0.0);
+    float cellSize = getCascadeCellSize(cascade);
+
     vec3 n = normalize(worldNormal);
-    vec3 biasedPos = worldPos + n * (DEFAULT_CELL_SIZE * 0.25);
-    vec3 gridPos = biasedPos / DEFAULT_CELL_SIZE - 0.5;
-    ivec3 baseCell = ivec3(floor(gridPos));
-    vec3 f = fract(gridPos);
-    ivec3 jitterOffset = ivec3(
-        rand1() < f.x ? 1 : 0,
-        rand1() < f.y ? 1 : 0,
-        rand1() < f.z ? 1 : 0
-    );
-    ivec3 coords[2] = ivec3[](
-        baseCell + jitterOffset,
-        ivec3(floor(biasedPos / DEFAULT_CELL_SIZE))
-    );
+    vec3 T, B;
+    buildBasis(n, T, B);
+
+    // Tangent-plane blue-noise jitter using PRNG rand2()
+    vec2 xi = rand2() - 0.5;
+    vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
+
+    // Test jittered cell first, falling back to unjittered base cell
+    vec3 testPositions[2] = vec3[](jitteredPos, worldPos);
     for (int c = 0; c < 2; ++c) {
-        uint cellKey = computeWorldCellKeyFromCoord(coords[c], n);
+        vec3 pSample = testPositions[c];
+        vec3 biasedPos = pSample + n * (cellSize * 0.25);
+        ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
+        uint cellKey = computeWorldCellKeyFromCoord(cellCoord, n, cascade);
         uint baseIndex = cellKey % CACHE_CELL_COUNT;
         for (uint probe = 0u; probe < 4u; ++probe) {
             WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-            if (cell.cellKey == cellKey && cell.irradiance.a > 0.0 &&
-                dot(unpackNormalOctahedral(cell.packedNormal), n) > 0.65) {
-                float confidence = smoothstep(1.0, 16.0, cell.irradiance.a);
-                return vec4(cell.irradiance.rgb, confidence);
+            if (cell.cellKey == cellKey && cell.irradiance.a > 0.0) {
+                vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
+                if (dot(cellN, n) > 0.65) {
+                    vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
+                    float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
+                    if (excessDist <= 0.5 * cellSize) {
+                        float geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
+                        float confidence = smoothstep(1.0, 16.0, cell.irradiance.a) * geomWeight;
+                        return vec4(cell.irradiance.rgb, confidence);
+                    }
+                }
             }
         }
     }

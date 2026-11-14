@@ -5,8 +5,11 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_ballot : require
 
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 #include "rt_common.glsl"
 #include "gi_world_cache_common.glsl"
@@ -23,16 +26,16 @@ layout(push_constant) uniform PC {
 } pc;
 
 void main() {
-    uint threadIdx = gl_GlobalInvocationID.x;
-    if (threadIdx >= pc.frameAndSlice.z) return;
+    uint cellBatchIdx = gl_WorkGroupID.x;
+    if (cellBatchIdx >= pc.frameAndSlice.z) return;
 
-    uint probeLinearIdx = (gl_GlobalInvocationID.x + pc.frameAndSlice.y) & 32767u;
+    uint probeLinearIdx = (cellBatchIdx + pc.frameAndSlice.y) & 32767u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
     float cellSize = DEFAULT_CELL_SIZE;
     vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
 
-    // Uniform full-sphere ray direction shared by both probe populations.
+    // Uniform full-sphere ray direction shared across all 32 lanes in this cell workgroup
     float dirY = 1.0 - 2.0 * rand1();
     float dirPhi = 6.28318530718 * rand1();
     float dirRadius = sqrt(max(0.0, 1.0 - dirY * dirY));
@@ -40,9 +43,8 @@ void main() {
                           dirRadius * sin(dirPhi));
 
     vec3 probePos;
-    if ((threadIdx & 3u) != 0u) {
-        // 75% of rays originate at the player/camera, with a tiny spherical
-        // jitter to avoid repeatedly starting exactly inside nearby geometry.
+    if ((cellBatchIdx & 3u) != 0u) {
+        // 75% of rays originate near the player/camera with tiny spherical jitter
         float offsetY = 1.0 - 2.0 * rand1();
         float offsetPhi = 6.28318530718 * rand1();
         float offsetRadius = sqrt(max(0.0, 1.0 - offsetY * offsetY));
@@ -50,8 +52,7 @@ void main() {
                               offsetRadius * sin(offsetPhi));
         probePos = cameraPos + offsetDir * (0.35 * rand1());
     } else {
-        // The remaining 25% retain broad spatial coverage, but allocate only
-        // 17 vertical bands to [-2 m, +14 m] instead of wasting half below floor.
+        // 25% maintain broad spatial coverage in structured grid around camera
         int gz = int(probeLinearIdx / 1024u) - 16;
         uint rem = probeLinearIdx % 1024u;
         int gy = int(round(float(rem / 32u) * (16.0 / 31.0))) - 2;
@@ -66,19 +67,21 @@ void main() {
     float hitDistance;
     if (!traceSceneSurface(probePos, sampleDir, 40.0,
             hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance)) {
-        // This cache is queried using visible surface positions and normals.
-        // Sky misses have no matching surface key and only pollute the table.
+        // Missed scene geometry; all lanes exit together
         return;
     }
 
     vec3 cellNormal = normalize(hitNormal);
     if (dot(cellNormal, -sampleDir) < 0.0) cellNormal = -cellNormal;
 
-    // Evaluate incoming indirect irradiance arriving at (hitPos, cellNormal) by
-    // tracing a cosine-hemisphere bounce ray. Storing incoming indirect light
-    // (rather than direct light * self-albedo) populates shadowed objects (sphere,
-    // cube, walls) with floor bounce light and prevents self-albedo edge outlines.
-    vec3 bounceDir = sampleCosineHemisphere(cellNormal, vec2(rand1(), rand1()));
+    // System #1: 32 threads in the workgroup correspond to 1 active cell.
+    // Each lane gl_SubgroupInvocationID (0..31) calculates a stratified direction in the hemisphere:
+    // 8x4 stratified octahedral grid (8 azimuth columns, 4 elevation rings).
+    uint lane = gl_SubgroupInvocationID;
+    rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x + lane * 1013904223u), pc.frameAndSlice.x);
+    vec2 laneJitter = vec2(rand1(), rand1());
+    vec3 bounceDir = getStratifiedHemisphereDirection(cellNormal, lane, laneJitter);
+
     RtInstanceData bounceHit;
     vec3 bouncePos, bounceNormal;
     vec2 bounceUv;
@@ -91,7 +94,9 @@ void main() {
         if (dot(bN, -bounceDir) < 0.0) bN = -bN;
         hitRad = shadeRtHitEx(bounceHit, bouncePos, bN, bounceUv, bounceTangent,
                               bounceDir, true, -1.0, -1, 1.0, 1.5);
-        uint bKey = computeWorldCellKey(bouncePos, bN, cellSize);
+        uint bCascade = getCascadeIndex(bouncePos, cameraPos, 0.0);
+        float bCellSize = getCascadeCellSize(bCascade);
+        uint bKey = computeWorldCellKey(bouncePos, bN, bCellSize, bCascade);
         uint bBase = bKey % CACHE_CELL_COUNT;
         for (uint bp = 0u; bp < 4u; ++bp) {
             WorldRadianceCell bCell = worldCache.cells[(bBase + bp) % CACHE_CELL_COUNT];
@@ -110,62 +115,68 @@ void main() {
         hitRad = sampleRtSkyRadiance(bounceDir);
     }
 
-    uint cellKey = computeWorldCellKey(hitPos, cellNormal, cellSize);
-    uint baseIndex = cellKey % CACHE_CELL_COUNT;
+    // Outlier clamp per sample before reduction
+    float hitLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
+    if (hitLum > 1.5) {
+        hitRad *= (1.5 / hitLum);
+    }
 
-    // Four-slot linear probing prevents a different surface with the same
-    // initial hash from evicting a still-live visible surface.
-    for (uint probe = 0u; probe < 4u; ++probe) {
-        uint hIndex = (baseIndex + probe) % CACHE_CELL_COUNT;
-        bool acquired = false;
-        for (uint spin = 0u; spin < 64u; ++spin) {
-            if (atomicCompSwap(worldCache.cells[hIndex].lockOrFlags, 0u, 1u) == 0u) {
-                acquired = true;
-                break;
+    // Hardware subgroup reduction across the 32 lanes
+    vec3 avgRad = subgroupAdd(hitRad) / 32.0;
+
+    // Master lane writes the 32-sample averaged irradiance into the cell
+    if (subgroupElect()) {
+        uint cascade = getCascadeIndex(hitPos, cameraPos, 0.0);
+        cellSize = getCascadeCellSize(cascade);
+        vec3 biasedPos = hitPos + cellNormal * (cellSize * 0.25);
+        ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
+        uint cellKey = computeWorldCellKeyFromCoord(cellCoord, cellNormal, cascade);
+        uint baseIndex = cellKey % CACHE_CELL_COUNT;
+
+        for (uint probe = 0u; probe < 4u; ++probe) {
+            uint hIndex = (baseIndex + probe) % CACHE_CELL_COUNT;
+            bool acquired = false;
+            for (uint spin = 0u; spin < 64u; ++spin) {
+                if ((atomicOr(worldCache.cells[hIndex].lockOrFlags, 1u) & 1u) == 0u) {
+                    acquired = true;
+                    break;
+                }
             }
-        }
-        if (!acquired) continue;
+            if (!acquired) continue;
 
-        memoryBarrierBuffer();
-        WorldRadianceCell prevCell = worldCache.cells[hIndex];
-        float prevWeight = prevCell.irradiance.a;
-        bool expired = (prevWeight <= 0.0) ||
-            (pc.frameAndSlice.x < prevCell.lastSeenFrame);
-        bool keyMismatch = prevCell.cellKey != cellKey;
-        bool normalMismatch = !expired &&
-            dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;
-
-        if (!expired && (keyMismatch || normalMismatch)) {
-            // Do not evict another live surface. Release and try the next slot.
             memoryBarrierBuffer();
-            atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
-            continue;
-        }
+            WorldRadianceCell prevCell = worldCache.cells[hIndex];
+            float prevWeight = prevCell.irradiance.a;
+            bool expired = (prevWeight <= 0.0) ||
+                (pc.frameAndSlice.x < prevCell.lastSeenFrame);
+            bool keyMismatch = prevCell.cellKey != cellKey;
+            bool normalMismatch = !expired &&
+                dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;
 
-        // 1. Ogranicz maksymalną jasność pojedynczego promienia (usuwa jasne kulki/plamy):
-        float hitLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
-        if (hitLum > 1.5) {
-            hitRad *= (1.5 / hitLum);
-        }
-        float newWeight;
-        vec3 newIrr;
-        if (expired) {
-            // 2. Cold-start damping: pojedyncza próbka nie może od razu świecić z pełną mocą,
-            // dopóki kolejne promienie nie potwierdzą tej jasności:
-            newWeight = 1.0;
-            newIrr = hitRad * 0.25;
-        } else {
-            newWeight = min(prevWeight + 1.0, 64.0);
-            float alpha = clamp(1.0 / newWeight, 0.03, 0.15);
-            newIrr = mix(prevCell.irradiance.rgb, hitRad, alpha);
-        }
+            if (!expired && (keyMismatch || normalMismatch)) {
+                memoryBarrierBuffer();
+                atomicAnd(worldCache.cells[hIndex].lockOrFlags, ~1u);
+                continue;
+            }
 
-        worldCache.cells[hIndex].irradiance = vec4(sanitizeHDR(newIrr), newWeight);
-        worldCache.cells[hIndex].cellKey = cellKey;
-        worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
-        worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
-        memoryBarrierBuffer();
-        atomicExchange(worldCache.cells[hIndex].lockOrFlags, 0u);
-        return;
+            float newWeight;
+            vec3 newIrr;
+            if (expired) {
+                newWeight = 1.0;
+                newIrr = avgRad;
+            } else {
+                newWeight = min(prevWeight + 1.0, 64.0);
+                float alpha = clamp(1.0 / newWeight, 0.03, 0.15);
+                newIrr = mix(prevCell.irradiance.rgb, avgRad, alpha);
+            }
+
+            worldCache.cells[hIndex].irradiance = vec4(sanitizeHDR(newIrr), newWeight);
+            worldCache.cells[hIndex].cellKey = cellKey;
+            worldCache.cells[hIndex].packedNormal = packNormalOctahedral(cellNormal);
+            worldCache.cells[hIndex].lastSeenFrame = pc.frameAndSlice.x;
+            memoryBarrierBuffer();
+            atomicExchange(worldCache.cells[hIndex].lockOrFlags, packCellCoord(cellCoord, cascade) << 1u);
+            return;
+        }
     }
 }
