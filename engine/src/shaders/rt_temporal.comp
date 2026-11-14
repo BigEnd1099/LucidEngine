@@ -65,7 +65,7 @@ layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: m
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
 
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
 layout(push_constant) uniform PC {
@@ -183,8 +183,10 @@ void addDiagCounter(uint counterIdx, uint value) {
     }
 }
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint pixelDiag[8]) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
+                  out uint pixelDiag[8], out uint pixelCacheDiag[4]) {
     for (int i = 0; i < 8; ++i) pixelDiag[i] = 0u;
+    for (int i = 0; i < 4; ++i) pixelCacheDiag[i] = 0u;
     histogramCounted = false;
     ageBin = 0u;
 
@@ -243,14 +245,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         if ((pc.u.y & 4u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 4u) != 0u;
             if (cacheDebugEnabled) {
+                pixelCacheDiag[2]++;
                 cacheDebugValue = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
                 cacheDebugHit = cacheDebugValue.a > 0.0;
+                if (cacheDebugHit) pixelCacheDiag[0]++;
             }
         } else if ((pc.u.y & 8u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 2u) != 0u;
             if (cacheDebugEnabled) {
                 float debugCoverage = 0.0;
+                pixelCacheDiag[3]++;
                 cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cacheDebugValue, debugCoverage);
+                if (cacheDebugHit) pixelCacheDiag[1]++;
             }
         }
     }
@@ -532,8 +538,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 float fireflyLimit = m1Y.x + fireflyThreshold;
                 vec4 cachedSurf = vec4(0.0);
                 float cachedCov = 0.0;
-                bool cachedSurfaceValid = (pc.u.x & 2u) != 0u &&
-                    loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
+                bool cachedSurfaceValid = false;
+                if ((pc.u.x & 2u) != 0u && (wSum > 0.2 || rawYCoCg.x > fireflyLimit)) {
+                    pixelCacheDiag[3]++;
+                    cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
+                    if (cachedSurfaceValid) pixelCacheDiag[1]++;
+                }
                 bool cacheSupportsBright = cachedSurfaceValid &&
                     rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, fireflyLimit * 0.5);
                 bool historySupportsBright = wSum > 0.2 && histLen >= 2.0 &&
@@ -620,8 +630,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     if (isDisoccluded || newLen < 8.0) {
         vec4 surfaceHistory = vec4(0.0);
         float surfaceCoverage = 0.0;
-        bool restoredSurface = (pc.u.x & 2u) != 0u &&
-                               loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
+        bool restoredSurface = false;
+        if ((pc.u.x & 2u) != 0u) {
+            pixelCacheDiag[3]++;
+            restoredSurface = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
+            if (restoredSurface) pixelCacheDiag[1]++;
+        }
         bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
         if (surfaceHistoryApplied) {
             float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
@@ -632,8 +646,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         }
         // Surface History wins when it actually restored a contribution; WRC is fallback only.
         if (isDisoccluded && !surfaceHistoryApplied && (pc.u.x & 4u) != 0u) {
+            pixelCacheDiag[2]++;
             vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
             if (cached.a > 0.0) {
+                pixelCacheDiag[0]++;
                 result.rgb = mix(result.rgb, cached.rgb, 0.65 * cached.a);
                 newLen = max(newLen, 4.0 * cached.a);
             }
@@ -686,8 +702,9 @@ void main() {
     uint ageBin = 0u;
     bool histogramCounted = false;
     uint pixelDiag[8];
+    uint pixelCacheDiag[4];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted, pixelDiag);
+    processPixel(px, ageBin, histogramCounted, pixelDiag, pixelCacheDiag);
 
     uint diagMask = 0u;
     for (uint metric = 0u; metric < 8u; ++metric) diagMask |= pixelDiag[metric];
@@ -695,6 +712,15 @@ void main() {
     if (subgroupBallotBitCount(diagBallot) != 0u) {
         for (uint metric = 0u; metric < 8u; ++metric) {
             addDiagCounter(metric, pixelDiag[metric]);
+        }
+    }
+
+    uint cacheDiagMask = 0u;
+    for (uint metric = 0u; metric < 4u; ++metric) cacheDiagMask |= pixelCacheDiag[metric];
+    uvec4 cacheDiagBallot = subgroupBallot(cacheDiagMask != 0u);
+    if (subgroupBallotBitCount(cacheDiagBallot) != 0u) {
+        for (uint metric = 0u; metric < 4u; ++metric) {
+            addDiagCounter(56u + metric, pixelCacheDiag[metric]);
         }
     }
 
