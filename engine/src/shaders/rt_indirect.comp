@@ -354,8 +354,8 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         // Specular caustic reflection: when ray hits a reflective surface (mirror or low roughness metal),
         // analytically evaluate the reflection of active lights (Spot & Point) bouncing off the mirror onto this path
         bool isMirrorSurface = hitReflects && (hitMetallic > 0.4 || hitRoughness < 0.12);
-        // Evaluate mirror caustics on every path bounce, including reflected light from
-        // mirror walls and floors. Use all active lights rather than the diffuse RIS pick.
+        // Evaluate the analytic mirror-light estimate only at the terminal bounce;
+        // intermediate mirror hits are handled by the sampled specular continuation.
         if (isMirrorSurface && hitRoughness < 0.20 && b == bounces - 1) {
             diagMirrorHits++;
             vec3 hitN = normalize(hitNormal);
