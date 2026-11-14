@@ -96,7 +96,7 @@ bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, v
                 continue;
             geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
         }
-        float confidence = smoothstep(0.0, 8.0, cell.irradiance.a) * geomWeight;
+        float confidence = smoothstep(0.0, 32.0, cell.irradiance.a) * geomWeight;
         result = vec4(cell.irradiance.rgb, confidence);
         return true;
     }
@@ -309,8 +309,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     // into an already converged history buffer.
     float projectedHistoryLen = (wSum > 0.05)
         ? min(histLen / wSum + 1.0, effectiveMaxHist) : 1.0;
-    bool allowSpatialReuse = projectedHistoryLen < 8.0;
-    if (!isCheckerSkipped && allowSpatialReuse && giSpatialReuseStrength > 0.01) {
+    float spatialReuseFade = 1.0 - smoothstep(4.0, 10.0, projectedHistoryLen);
+    if (!isCheckerSkipped && spatialReuseFade > 0.001 && giSpatialReuseStrength > 0.01) {
         vec3 accumRgb = raw.rgb;
         float accumW = 1.0;
         float searchRadius = mix(2.0, 6.5, curHitDistFactor) * giSpatialReuseStrength;
@@ -335,15 +335,20 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             vec3 qP = rtWorldPos(vec2(qFullPx) + 0.5, qD, vec2(fullDepthSize));
             // Plane-distance rejection prevents reuse across curved silhouettes.
             if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
-            float virtualDist = max(curHitDistFactor * 1.75, 0.15);
-            vec3 virtualHit = qP + qN * virtualDist;
-            vec3 toVirtualHit = virtualHit - P;
-            float distSq = max(dot(toVirtualHit, toVirtualHit), 1e-3);
-            vec3 dirToHit = toVirtualHit * inversesqrt(distSq);
-            float cosP = max(dot(N, dirToHit), 0.0);
-            float cosQ = max(dot(qN, dirToHit), 0.1);
-            float jacobian = clamp((virtualDist * virtualDist / distSq) * (cosP / cosQ), 0.0, 1.25);
-            float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * 0.45;
+            float qFirstHitDist = qGeom.w;
+            float qHitDistFactor = (qFirstHitDist > 0.001)
+                ? clamp(qFirstHitDist / 1.75, 0.15, 1.0) : 0.85;
+            float qVirtualDist = max(qHitDistFactor * 1.75, 0.15);
+            vec3 virtualHit = qP + qN * qVirtualDist;
+            vec3 toVirtualHitP = virtualHit - P;
+            vec3 toVirtualHitQ = virtualHit - qP;
+            float distPSq = max(dot(toVirtualHitP, toVirtualHitP), 1e-3);
+            vec3 dirPToHit = toVirtualHitP * inversesqrt(distPSq);
+            vec3 dirQToHit = normalize(toVirtualHitQ);
+            float cosP = max(dot(N, dirPToHit), 0.0);
+            float cosQ = max(dot(qN, dirQToHit), 0.1);
+            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) * (cosP / cosQ), 0.0, 1.25);
+            float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * spatialReuseFade * 0.45;
             accumRgb += qRaw.rgb * reuseWeight;
             accumW += reuseWeight;
         }
@@ -488,10 +493,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                         if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                         vec4 fVal = imageLoad(imgS, fp);
                         if (fVal.a < 0.0) continue;
-                        float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
-                        if (neighborLum >= supportThreshold) {
+                        float neighborLumY = rgbToYCoCg(fVal.rgb).x;
+                        if (neighborLumY >= supportThreshold) {
                             brightNeighborCount += 1.0;
-                            maxSupportedLum = max(maxSupportedLum, neighborLum);
+                            maxSupportedLum = max(maxSupportedLum, neighborLumY);
                         }
                     }
                 }
@@ -523,10 +528,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
                 if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
                     rawYCoCg.x > m1Y.x + fireflyThreshold) {
-                    float rawLinearLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
-                    float softenedLum = m1Y.x + fireflyThreshold +
-                        (rawLinearLum - (m1Y.x + fireflyThreshold)) * 0.25;
-                    raw.rgb *= softenedLum / max(rawLinearLum, 1e-4);
+                    float softenedLumY = m1Y.x + fireflyThreshold +
+                        (rawYCoCg.x - (m1Y.x + fireflyThreshold)) * 0.25;
+                    raw.rgb *= softenedLumY / max(rawYCoCg.x, 1e-4);
                 }
             }
             raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
@@ -579,11 +583,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.
-    if (isCheckerSkipped && wSum > 0.05 && motionPixels <= 1.5) {
-        // Preserve the accumulated signal on slow-moving half-rate trace frames.
-        result.rgb = max(result.rgb, hist.rgb * 0.96);
-    }
-
     bool isDisoccluded = (isCheckerSkipped && wSum <= 0.05) ||
                          (!isCheckerSkipped && wSum <= 0.05);
     if (isDisoccluded || newLen < 8.0) {
