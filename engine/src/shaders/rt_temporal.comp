@@ -650,13 +650,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
             if (cached.a > 0.0) {
                 pixelCacheDiag[0]++;
-                result.rgb = mix(result.rgb, cached.rgb, 0.65 * cached.a);
+                // WRC is a fallback seed, not authoritative surface history. Keep its
+                // initial colour influence modest so a partially converged probe cannot
+                // darken or tint a newly visible bright surface.
+                result.rgb = mix(result.rgb, cached.rgb, 0.35 * cached.a);
                 newLen = max(newLen, 4.0 * cached.a);
             }
         }
     }
 
-    bool surfaceHistoryDebug = (pc.u.y & 12u) != 0u;
+    bool surfaceHistoryDebug = (pc.u.y & 8u) != 0u;
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
     if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 &&
