@@ -16,7 +16,11 @@ namespace engine::renderer {
         CausticHitDensity = 9,
         TemporalIndirect = 10,
         WorldRadianceCacheHits = 11,
-        SurfaceHistoryCacheHits = 12
+        SurfaceHistoryCacheHits = 12,
+        WorldRadianceCacheRadiance = 13,
+        WorldRadianceCacheConfidence = 14,
+        SurfaceHistoryCacheRadiance = 15,
+        SurfaceHistoryCacheAge = 16
     };
 
     struct RtSettings {
