@@ -32,7 +32,12 @@ void main() {
     uint probeLinearIdx = (cellBatchIdx + pc.frameAndSlice.y) & 32767u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
-    float cellSize = DEFAULT_CELL_SIZE;
+    uint flags = pc.frameAndSlice.w;
+    bool clipmapEnabled = (flags & 1u) != 0u;
+    bool stratifiedEnabled = (flags & 4u) != 0u;
+    float baseCellSize = pc.cameraPosAndCellSize.w > 0.05 ? pc.cameraPosAndCellSize.w : DEFAULT_CELL_SIZE;
+    float bounceIntensity = max(pc.sunColor.a, 0.0);
+    float cellSize = baseCellSize;
     vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
 
     // Uniform full-sphere ray direction shared across all 32 lanes in this cell workgroup
@@ -65,11 +70,14 @@ void main() {
     vec2 hitUv;
     vec4 hitTangent;
     float hitDistance;
-    if (!traceSceneSurface(probePos, sampleDir, 40.0,
-            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance)) {
-        // Missed scene geometry; all lanes exit together
-        return;
+    bool hitSurface = traceSceneSurface(probePos, sampleDir, 40.0,
+            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance);
+    if (!hitSurface) {
+        sampleDir = normalize(vec3(sampleDir.x, -abs(sampleDir.y) - 0.35, sampleDir.z));
+        hitSurface = traceSceneSurface(probePos, sampleDir, 40.0,
+            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance);
     }
+    if (!hitSurface) return;
 
     vec3 cellNormal = normalize(hitNormal);
     if (dot(cellNormal, -sampleDir) < 0.0) cellNormal = -cellNormal;
@@ -94,8 +102,8 @@ void main() {
         if (dot(bN, -bounceDir) < 0.0) bN = -bN;
         hitRad = shadeRtHitEx(bounceHit, bouncePos, bN, bounceUv, bounceTangent,
                               bounceDir, true, -1.0, -1, 1.0, 1.5);
-        uint bCascade = getCascadeIndex(bouncePos, cameraPos, 0.0);
-        float bCellSize = getCascadeCellSize(bCascade);
+        uint bCascade = getCascadeIndexCfg(bouncePos, cameraPos, 0.0, clipmapEnabled);
+        float bCellSize = getCascadeCellSizeCfg(bCascade, baseCellSize, clipmapEnabled);
         uint bKey = computeWorldCellKey(bouncePos, bN, bCellSize, bCascade);
         uint bBase = bKey % CACHE_CELL_COUNT;
         for (uint bp = 0u; bp < 4u; ++bp) {
@@ -107,7 +115,7 @@ void main() {
                 float bMetallic = clamp(bounceHit.material.x *
                     textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b, 0.0, 1.0);
                 float bConf = smoothstep(1.0, 16.0, bCell.irradiance.a);
-                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * bConf;
+                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * bConf * bounceIntensity;
                 break;
             }
         }
@@ -117,8 +125,8 @@ void main() {
 
     // Outlier clamp per sample before reduction
     float hitLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
-    if (hitLum > 1.5) {
-        hitRad *= (1.5 / hitLum);
+    if (hitLum > 4.0) {
+        hitRad *= (4.0 / hitLum);
     }
 
     // Hardware subgroup reduction across the 32 lanes
@@ -126,8 +134,8 @@ void main() {
 
     // Master lane writes the 32-sample averaged irradiance into the cell
     if (subgroupElect()) {
-        uint cascade = getCascadeIndex(hitPos, cameraPos, 0.0);
-        cellSize = getCascadeCellSize(cascade);
+        uint cascade = getCascadeIndexCfg(hitPos, cameraPos, 0.0, clipmapEnabled);
+        cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
         vec3 biasedPos = hitPos + cellNormal * (cellSize * 0.25);
         ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
         uint cellKey = computeWorldCellKeyFromCoord(cellCoord, cellNormal, cascade);
@@ -162,11 +170,13 @@ void main() {
             float newWeight;
             vec3 newIrr;
             if (expired) {
-                newWeight = 1.0;
+                // A 32-lane warp already integrates 32 hemisphere rays on the first update.
+                // Start weight at 8.0 so confidence is immediately non-zero on first hit.
+                newWeight = 8.0;
                 newIrr = avgRad;
             } else {
-                newWeight = min(prevWeight + 1.0, 64.0);
-                float alpha = clamp(1.0 / newWeight, 0.03, 0.15);
+                newWeight = min(prevWeight + 4.0, 64.0);
+                float alpha = clamp(4.0 / newWeight, 0.05, 0.25);
                 newIrr = mix(prevCell.irradiance.rgb, avgRad, alpha);
             }
 

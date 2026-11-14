@@ -772,6 +772,13 @@ namespace engine::renderer {
                          m_giHistoryValid ? 1.0f : 0.0f,
                          (params.svgfEnabled && params.giTemporalFilterEnabled) ? 1.0f : 0.0f);
         pd.u[0] = samples;
+        const uint32_t wrcFlags =
+            (params.wrcClipmapEnabled ? (1u << 8) : 0u) |
+            (params.wrcTangentJitterEnabled ? (1u << 9) : 0u) |
+            (params.wrcSpatialFilterEnabled ? (1u << 10) : 0u) |
+            (params.wrcSubgroupStratifiedEnabled ? (1u << 11) : 0u) |
+            (params.wrcPlaneDistanceWeightEnabled ? (1u << 12) : 0u) |
+            (params.wrcFirstBounceEnabled ? (1u << 13) : 0u);
         pd.u[1] = params.frameIndex;
         pd.u[2] = (params.giEnabled ? 1u : 0u) | (params.aoEnabled ? 2u : 0u) |
                   ((params.giCheckerboard && params.giTemporalFilterEnabled) ? 4u : 0u) |
@@ -780,7 +787,8 @@ namespace engine::renderer {
                   (params.giSurfaceHistoryCacheEnabled ? 32u : 0u) |
                   (params.debugMode == RtDebugMode::RawIndirect ? 64u : 0u) |
                   ((params.debugMode == RtDebugMode::RawSpecularCaustics ||
-                    params.debugMode == RtDebugMode::CausticHitDensity) ? 128u : 0u);
+                    params.debugMode == RtDebugMode::CausticHitDensity) ? 128u : 0u) |
+                  wrcFlags;
         pd.u[3] = std::clamp(params.bounces, 1u, 15u);
         // rt_indirect.comp reads the persistent surface cache's lighting epoch
         // from f.x as raw uint bits; restore the temporal pass' max-history value
@@ -792,8 +800,14 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
 
             pd.f.x = std::bit_cast<float>(m_surfaceHistoryLightingEpoch);
+            pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
+            pd.f.z = std::clamp(params.wrcBounceIntensity, 0.0f, 4.0f);
+            pd.f.w = std::clamp(params.wrcTemporalBlend, 0.0f, 1.0f);
             bindGI(m_tracePipelineHandle, pd); // 1. trace
             pd.f.x = std::max(params.maxHistory, 1.0f);
+            pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
+            pd.f.z = m_giHistoryValid ? 1.0f : 0.0f;
+            pd.f.w = std::clamp(params.wrcTemporalBlend, 0.0f, 1.0f);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
             sync();
@@ -802,7 +816,8 @@ namespace engine::renderer {
 
             pd.u[0] = (params.giTemporalFilterEnabled ? 0u : 1u) |
                       (params.giSurfaceHistoryCacheEnabled ? 2u : 0u) |
-                      (params.worldRadianceCacheEnabled ? 4u : 0u); // bit 0 bypass, bit 1 surface cache, bit 2 world cache
+                      (params.worldRadianceCacheEnabled ? 4u : 0u) |
+                      wrcFlags; // bit 0 bypass, bit 1 surface cache, bit 2 world cache, bits 8..13 WRC features
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
                       (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
@@ -816,6 +831,9 @@ namespace engine::renderer {
             sync();
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
+
+            pd.f.y = std::max(params.maxHistory, 1.0f);
+            pd.f.w = 0.0f;
 
             // Pass 3: Atrous step 1 (hist -> A, step 1)
             pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;

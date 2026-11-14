@@ -26,9 +26,10 @@ void main() {
     if (cellIdx >= CACHE_CELL_COUNT) return;
 
     WorldRadianceCell cell = inCache.inCells[cellIdx];
+    bool filterEnabled = (pc.frameAndSlice.w & 2u) != 0u;
 
     // If cell is inactive or has an uninitialized key, pass through unchanged
-    if (cell.irradiance.a <= 0.0 || cell.cellKey == 0u) {
+    if (!filterEnabled || cell.irradiance.a <= 0.0 || cell.cellKey == 0u) {
         outCache.outCells[cellIdx] = cell;
         return;
     }
@@ -48,7 +49,9 @@ void main() {
         return;
     }
 
-    float cellSize = getCascadeCellSize(cascade);
+    bool clipmapEnabled = (pc.frameAndSlice.w & 1u) != 0u;
+    float baseCellSize = pc.cameraPosAndCellSize.w;
+    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
     vec3 P = computeWorldCellCenter(coord, N, cellSize);
 
     // Tangent plane orthonormal basis (Duff et al. 2017)

@@ -1313,6 +1313,13 @@ namespace engine::renderer {
                     if (rtLightingChanged && !worldCacheClearedThisFrame)
                         m_worldRadianceCache.clear(m_commandBuffer);
 
+                    const uint32_t wrcFeatureFlags =
+                        (m_rtSettings.wrcClipmapEnabled ? 1u : 0u) |
+                        (m_rtSettings.wrcSpatialFilterEnabled ? 2u : 0u) |
+                        (m_rtSettings.wrcSubgroupStratifiedEnabled ? 4u : 0u) |
+                        (m_rtSettings.wrcPlaneDistanceWeightEnabled ? 8u : 0u) |
+                        (m_rtSettings.wrcTangentJitterEnabled ? 16u : 0u) |
+                        (m_rtSettings.wrcFirstBounceEnabled ? 32u : 0u);
                     const auto* sceneUbo = static_cast<const SceneUboData*>(m_sceneUboMappedPtr);
                     worldCacheUpdateRecorded = m_worldRadianceCache.dispatchUpdate(
                         m_commandBuffer,
@@ -1322,7 +1329,11 @@ namespace engine::renderer {
                         glm::vec3(sceneUbo->cameraPos),
                         glm::vec3(sceneUbo->sunDirection),
                         sceneUbo->sunColor,
-                        m_timestampQueryPool
+                        m_timestampQueryPool,
+                        m_rtSettings.wrcBaseCellSize,
+                        m_rtSettings.wrcBounceIntensity,
+                        static_cast<uint32_t>(std::clamp(m_rtSettings.wrcBatchesPerFrame, 64, 2048)),
+                        wrcFeatureFlags
                     );
                 }
             }
@@ -1406,6 +1417,16 @@ namespace engine::renderer {
                 rtp.reflectionSpatialFilterEnabled = m_rtSettings.reflectionSpatialFilterEnabled;
                 rtp.worldRadianceCacheEnabled = m_rtSettings.worldRadianceCacheEnabled;
                 rtp.giSurfaceHistoryCacheEnabled = m_rtSettings.giSurfaceHistoryCacheEnabled;
+                rtp.wrcClipmapEnabled = m_rtSettings.wrcClipmapEnabled;
+                rtp.wrcTangentJitterEnabled = m_rtSettings.wrcTangentJitterEnabled;
+                rtp.wrcSpatialFilterEnabled = m_rtSettings.wrcSpatialFilterEnabled;
+                rtp.wrcSubgroupStratifiedEnabled = m_rtSettings.wrcSubgroupStratifiedEnabled;
+                rtp.wrcPlaneDistanceWeightEnabled = m_rtSettings.wrcPlaneDistanceWeightEnabled;
+                rtp.wrcFirstBounceEnabled = m_rtSettings.wrcFirstBounceEnabled;
+                rtp.wrcBaseCellSize = m_rtSettings.wrcBaseCellSize;
+                rtp.wrcBounceIntensity = m_rtSettings.wrcBounceIntensity;
+                rtp.wrcTemporalBlend = m_rtSettings.wrcTemporalBlend;
+                rtp.wrcBatchesPerFrame = m_rtSettings.wrcBatchesPerFrame;
                 rtp.lightChanged = rtLightingChanged;
                 rtp.debugMode = m_rtSettings.debugMode;
                 core::Profiler::ScopedSample rtDenoiserRecordSample("RT Denoiser Command Recording");

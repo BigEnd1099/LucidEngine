@@ -28,7 +28,7 @@ namespace engine::renderer {
 
         VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
@@ -225,7 +225,11 @@ namespace engine::renderer {
                                             const glm::vec3& cameraPos,
                                             const glm::vec3& sunDirection,
                                             const glm::vec4& sunColor,
-                                            VkQueryPool timingQueryPool) {
+                                            VkQueryPool timingQueryPool,
+                                            float baseCellSize,
+                                            float bounceIntensity,
+                                            uint32_t cellBatchCount,
+                                            uint32_t featureFlags) {
         if (!m_updatePipeline || !m_pipelineLayout || !m_cellBuffer ||
             m_sceneSetLayout == VK_NULL_HANDLE || m_descriptorSet == VK_NULL_HANDLE ||
             tlas == VK_NULL_HANDLE || sceneSet == VK_NULL_HANDLE) return false;
@@ -236,9 +240,9 @@ namespace engine::renderer {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_updatePipeline);
 
-        // System #1: 1 warp = 1 cell. 128 cells * 32 lanes = 4096 rays per frame.
-        constexpr uint32_t CELL_BATCH_SIZE = 128;
-        uint32_t sliceOffset = (frameCounter * CELL_BATCH_SIZE) % 32768u;
+        // System #1: 1 warp (32 lanes) = 1 cell. Default 512 cells/frame.
+        const uint32_t batchCount = std::clamp(cellBatchCount, 32u, 4096u);
+        const uint32_t sliceOffset = (frameCounter * batchCount) % 32768u;
 
         struct PushConstants {
             glm::vec4 cameraPosAndCellSize;
@@ -247,9 +251,9 @@ namespace engine::renderer {
             glm::uvec4 frameAndSlice;
         } pc{};
 
-        pc.cameraPosAndCellSize = glm::vec4(cameraPos, DEFAULT_CELL_SIZE);
+        pc.cameraPosAndCellSize = glm::vec4(cameraPos, std::clamp(baseCellSize, 0.10f, 2.0f));
         pc.sunDirAndIntensity = glm::vec4(sunDirection, 2.5f);
-        pc.sunColor = sunColor;
+        pc.sunColor = glm::vec4(glm::vec3(sunColor), std::clamp(bounceIntensity, 0.0f, 4.0f));
         pc.frameAndSlice = glm::uvec4(frameCounter, sliceOffset, CELL_BATCH_SIZE, 0u);
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
@@ -262,7 +266,7 @@ namespace engine::renderer {
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timingQueryPool, 11);
 
         // Dispatch update pass (writing to m_cellBuffer)
-        vkCmdDispatch(cmd, CELL_BATCH_SIZE, 1, 1);
+        vkCmdDispatch(cmd, batchCount, 1, 1);
 
         // Barrier 1: Synchronize update pass writes to m_cellBuffer with filter pass reads from m_cellBuffer
         VkBufferMemoryBarrier2 barrier1{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
@@ -279,8 +283,9 @@ namespace engine::renderer {
         depInfo1.pBufferMemoryBarriers = &barrier1;
         vkCmdPipelineBarrier2(cmd, &depInfo1);
 
+        const bool runSpatialFilter = ((featureFlags & 2u) != 0u) && (m_filterPipeline != VK_NULL_HANDLE);
         // Dispatch filter pass if available (reading m_cellBuffer and writing to m_filteredCellBuffer)
-        if (m_filterPipeline && m_filteredCellBuffer) {
+        if (runSpatialFilter && m_filteredCellBuffer) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_filterPipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 2, sets, 0, nullptr);
             vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
@@ -302,6 +307,38 @@ namespace engine::renderer {
             depInfo2.bufferMemoryBarrierCount = 1;
             depInfo2.pBufferMemoryBarriers = &barrier2;
             vkCmdPipelineBarrier2(cmd, &depInfo2);
+        } else if (m_filteredCellBuffer) {
+            // Fallback when spatial filter pass is disabled in UI or .spv was not loaded:
+            // copy m_cellBuffer -> m_filteredCellBuffer so RtDenoiser binding 20 always has live data.
+            VkBufferMemoryBarrier2 preCopyBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            preCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            preCopyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            preCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            preCopyBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+            preCopyBarrier.buffer = m_cellBuffer;
+            preCopyBarrier.offset = 0;
+            preCopyBarrier.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+            VkDependencyInfo depPreCopy{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depPreCopy.bufferMemoryBarrierCount = 1;
+            depPreCopy.pBufferMemoryBarriers = &preCopyBarrier;
+            vkCmdPipelineBarrier2(cmd, &depPreCopy);
+
+            VkBufferCopy copyRegion{};
+            copyRegion.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+            vkCmdCopyBuffer(cmd, m_cellBuffer, m_filteredCellBuffer, 1, &copyRegion);
+
+            VkBufferMemoryBarrier2 postCopyBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            postCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            postCopyBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            postCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            postCopyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            postCopyBarrier.buffer = m_filteredCellBuffer;
+            postCopyBarrier.offset = 0;
+            postCopyBarrier.size = sizeof(WorldRadianceCell) * CACHE_CELL_COUNT;
+            VkDependencyInfo depPostCopy{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            depPostCopy.bufferMemoryBarrierCount = 1;
+            depPostCopy.pBufferMemoryBarriers = &postCopyBarrier;
+            vkCmdPipelineBarrier2(cmd, &depPostCopy);
         } else {
             // Fallback barrier if filter pass is inactive
             VkBufferMemoryBarrier2 fallbackBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };

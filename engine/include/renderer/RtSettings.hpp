@@ -49,6 +49,16 @@ namespace engine::renderer {
         bool svgfEnabled{true};
         bool worldRadianceCacheEnabled{true};
         bool giSurfaceHistoryCacheEnabled{true};
+        bool wrcClipmapEnabled{true};
+        bool wrcTangentJitterEnabled{true};
+        bool wrcSpatialFilterEnabled{true};
+        bool wrcSubgroupStratifiedEnabled{true};
+        bool wrcPlaneDistanceWeightEnabled{true};
+        bool wrcFirstBounceEnabled{true};
+        float wrcBaseCellSize{0.35f};
+        float wrcBounceIntensity{1.0f};
+        float wrcTemporalBlend{0.55f};
+        int wrcBatchesPerFrame{128};
         bool reflectionTemporalFilterEnabled{true};
         bool reflectionOutlierFilterEnabled{true};
         bool reflectionSpatialFilterEnabled{true};
