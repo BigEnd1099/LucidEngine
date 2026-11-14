@@ -833,7 +833,7 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
 
             pd.f.y = std::max(params.maxHistory, 1.0f);
-            pd.f.w = 0.0f;
+            pd.f.w = (params.svgfEnabled && params.giTemporalFilterEnabled) ? 1.0f : 0.0f;
 
             // Pass 3: Atrous step 1 (hist -> A, step 1)
             pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
