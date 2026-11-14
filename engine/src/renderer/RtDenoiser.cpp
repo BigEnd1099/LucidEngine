@@ -820,8 +820,16 @@ namespace engine::renderer {
                       wrcFlags; // bit 0 bypass, bit 1 surface cache, bit 2 world cache, bits 8..13 WRC features
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
-                      (params.debugMode == RtDebugMode::WorldRadianceCacheHits ? 4u : 0u) |
-                      (params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ? 8u : 0u) |
+                      ((params.debugMode == RtDebugMode::WorldRadianceCacheHits ||
+                        params.debugMode == RtDebugMode::WorldRadianceCacheRadiance ||
+                        params.debugMode == RtDebugMode::WorldRadianceCacheConfidence) ? 4u : 0u) |
+                      ((params.debugMode == RtDebugMode::SurfaceHistoryCacheHits ||
+                        params.debugMode == RtDebugMode::SurfaceHistoryCacheRadiance ||
+                        params.debugMode == RtDebugMode::SurfaceHistoryCacheAge) ? 8u : 0u) |
+                      ((params.debugMode == RtDebugMode::WorldRadianceCacheRadiance ||
+                        params.debugMode == RtDebugMode::SurfaceHistoryCacheRadiance) ? 32u : 0u) |
+                      ((params.debugMode == RtDebugMode::WorldRadianceCacheConfidence ||
+                        params.debugMode == RtDebugMode::SurfaceHistoryCacheAge) ? 64u : 0u) |
                       (!params.giAtrousPassEnabled[3] ? 16u : 0u); // bit 4: temporal cache write when final Atrous is bypassed
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
