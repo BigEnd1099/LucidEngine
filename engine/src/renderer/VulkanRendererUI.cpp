@@ -712,6 +712,11 @@ namespace engine::renderer {
                 metric("Surface History queries", avgRtDiagnostics[59], "samples/frame");
                 metric("Surface History hit rate", cacheHitRate(57, 59), "%", avgRtDiagnostics[59] > 0.0);
                 metric("Surface History", metrics.value("rtGiSurfaceHistoryCacheEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                ImGui::TableNextRow();
+                metric("WRC", metrics.value("rtWorldRadianceCacheEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("WRC clipmaps", metrics.value("rtWrcClipmapsEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("WRC spatial filter", metrics.value("rtWrcSpatialFilterEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
+                metric("Surface History", metrics.value("rtGiSurfaceHistoryCacheEnabled", 0.0) > 0.5 ? 1.0 : 0.0, "enabled");
                 ImGui::EndTable();
             }
             ImGui::TextDisabled("All 60 counters and exact histogram bin values are included in the copied report.");
