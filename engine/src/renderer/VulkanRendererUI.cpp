@@ -177,6 +177,8 @@ namespace engine::renderer {
             "rtGiHistoryAgeBin08", "rtGiHistoryAgeBin09", "rtGiHistoryAgeBin10", "rtGiHistoryAgeBin11", "rtGiHistoryAgeBin12", "rtGiHistoryAgeBin13", "rtGiHistoryAgeBin14", "rtGiHistoryAgeBin15",
             "rtReflectionHistoryAgeBin00", "rtReflectionHistoryAgeBin01", "rtReflectionHistoryAgeBin02", "rtReflectionHistoryAgeBin03", "rtReflectionHistoryAgeBin04", "rtReflectionHistoryAgeBin05", "rtReflectionHistoryAgeBin06", "rtReflectionHistoryAgeBin07",
             "rtReflectionHistoryAgeBin08", "rtReflectionHistoryAgeBin09", "rtReflectionHistoryAgeBin10", "rtReflectionHistoryAgeBin11", "rtReflectionHistoryAgeBin12", "rtReflectionHistoryAgeBin13", "rtReflectionHistoryAgeBin14", "rtReflectionHistoryAgeBin15",
+            "rtGiSurfaceHits", "rtGiMirrorSurfaceHits", "rtGiCausticLightTests", "rtGiCausticConeHits",
+            "rtGiCausticVisibleHits", "rtGiCausticContributions", "rtGiTraceSamples", "rtGiPathBounces",
             "rtGiWorldRadianceCacheActiveHits", "rtGiSurfaceHistoryCacheActiveHits",
             "rtGiWorldRadianceCacheQueries", "rtGiSurfaceHistoryCacheQueries"
         };
