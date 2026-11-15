@@ -32,12 +32,27 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
     vec3 n = normalize(worldNormal);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
+
+        // Writers publish odd sequence values while replacing/updating a cell and
+        // advance to the next even value when the snapshot is complete. Do not
+        // consume radiance/identity fields from a cell while a writer owns it.
+        uint sequenceBefore = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if ((sequenceBefore & 1u) != 0u)
+            continue;
+
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         memoryBarrierBuffer();
+        uint sequenceAfter = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if (sequenceBefore != sequenceAfter || (sequenceAfter & 1u) != 0u)
+            continue;
+
         empty = entry.meta.x == 0u;
-        bool match = !empty &&
-                     entry.meta.x == lightingEpoch &&
-                     all(equal(entry.identity.xyz, cell)) &&
+        // Insertions always claim the first empty or stale-epoch slot in this
+        // probe sequence, so neither can hide a later entry from this epoch.
+        if (empty || entry.meta.x != lightingEpoch)
+            return false;
+
+        bool match = all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         if (match) {
             history = entry.radianceAge;
