@@ -130,6 +130,17 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
             float oldAge = max(entry.radianceAge.a, 1.0);
             float nextAge = min(max(oldAge, historyLength) + 1.0, 256.0);
             float alpha = (historyLength > oldAge) ? 0.35 : clamp(1.0 / nextAge, 0.05, 0.20);
+
+            // Surface history is a persistent world-space observation, not a
+            // per-frame average that should collapse when a later low-SPP sample
+            // happens to miss a bright indirect-light path.
+            float previousLum = dot(entry.radianceAge.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float incomingLum = dot(safeIrradiance, vec3(0.2126, 0.7152, 0.0722));
+            if (incomingLum < previousLum) {
+                float relativeLum = incomingLum / max(previousLum, 1e-3);
+                float darkAdaptation = mix(0.015, 0.05, smoothstep(0.35, 0.90, relativeLum));
+                alpha = min(alpha, darkAdaptation);
+            }
             vec3 nextRadiance = mix(entry.radianceAge.rgb, safeIrradiance, alpha);
             surfaceHistoryCache.cells[index].radianceAge =
                 vec4(nextRadiance, max(historyLength, nextAge));
