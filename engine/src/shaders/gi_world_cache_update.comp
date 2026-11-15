@@ -228,7 +228,10 @@ void main() {
                     break;
                 }
             }
-            if (!acquired) continue;
+            // Never advance past a slot whose lock could not be acquired.
+            // A later insertion would leave a hole in this probe chain, while the
+            // read paths legitimately terminate at the first empty slot.
+            if (!acquired) return;
 
             memoryBarrierBuffer();
             WorldRadianceCell prevCell = worldCache.cells[hIndex];
