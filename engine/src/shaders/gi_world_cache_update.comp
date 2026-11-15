@@ -157,7 +157,11 @@ void main() {
         uint bBase = bKey % CACHE_CELL_COUNT;
         for (uint bp = 0u; bp < 4u; ++bp) {
             WorldRadianceCell bCell = worldCache.cells[(bBase + bp) % CACHE_CELL_COUNT];
-            if (bCell.cellKey == bKey && bCell.irradiance.a > 0.0 &&
+            // Probe insertion also uses first-empty placement, so a miss at an
+            // empty slot cannot be repaired by reading later hash slots.
+            if (bCell.irradiance.a <= 0.0)
+                break;
+            if (bCell.cellKey == bKey &&
                 dot(unpackNormalOctahedral(bCell.packedNormal), bN) > 0.65) {
                 vec3 bAlbedo = bounceHit.baseColor.rgb *
                     pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0)), vec3(2.2));
