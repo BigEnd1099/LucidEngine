@@ -81,7 +81,12 @@ bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, v
     for (uint probe = 0u; probe < 4u; ++probe) {
         uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
         WorldRadianceCell cell = worldRadianceCache.cells[idx];
-        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0 || currentFrame < cell.lastSeenFrame)
+        // WRC writers claim the first empty slot in this same bounded probe
+        // sequence. An empty slot therefore terminates the search; probing
+        // subsequent slots only adds random SSBO reads on cache misses.
+        if (cell.irradiance.a <= 0.0)
+            return false;
+        if (cell.cellKey != cellKey || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
         if (dot(cellNormal, n) <= 0.65)
