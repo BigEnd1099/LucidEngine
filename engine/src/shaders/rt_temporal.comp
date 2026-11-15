@@ -154,16 +154,18 @@ vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec
                                                 jitterEnabled, planeWeightEnabled,
                                                 candidateResult, candidateWeight))
             continue;
-        if (candidateWeight > bestWeight) {
+        float cascadePenalty = (i == 0) ? 1.0 : 0.25;
+        float candidateScore = candidateWeight * cascadePenalty;
+        if (candidateScore > bestWeight) {
             bestResult = candidateResult;
-            bestWeight = candidateWeight;
+            bestWeight = candidateScore;
+            rawSampleWeight = candidateWeight;
         }
-        if (i == 0 && candidateWeight >= 16.0) {
+        if (i == 0 && candidateWeight >= 8.0) {
             rawSampleWeight = candidateWeight;
             return candidateResult;
         }
     }
-    rawSampleWeight = max(bestWeight, 0.0);
     return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
 
@@ -227,9 +229,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
 
 
     vec4 raw = imageLoad(imgS, px);
-    float rawFirstHitDist = geom.w;
-    float curHitDistFactor = (rawFirstHitDist > 0.001)
-        ? clamp(rawFirstHitDist / 1.75, 0.15, 1.0) : 0.85;
+    float curHitDistFactor = unpackGiHitDistFactor(geom.w);
 
     vec3 N = rtOctDecode(geom.xy);
 
@@ -377,19 +377,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
             // Plane-distance rejection prevents reuse across curved silhouettes.
             if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
-            float qFirstHitDist = qGeom.w;
-            float qHitDistFactor = (qFirstHitDist > 0.001)
-                ? clamp(qFirstHitDist / 1.75, 0.15, 1.0) : 0.85;
+            float qHitDistFactor = unpackGiHitDistFactor(qGeom.w);
             float qVirtualDist = max(qHitDistFactor * 1.75, 0.15);
             vec3 virtualHit = qP + qN * qVirtualDist;
             vec3 toVirtualHitP = virtualHit - P;
             vec3 toVirtualHitQ = virtualHit - qP;
             float distPSq = max(dot(toVirtualHitP, toVirtualHitP), 1e-3);
             vec3 dirPToHit = toVirtualHitP * inversesqrt(distPSq);
-            vec3 dirQToHit = normalize(toVirtualHitQ);
-            float cosP = max(dot(N, dirPToHit), 0.0);
-            float cosQ = max(dot(qN, dirQToHit), 0.1);
-            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) * (cosP / cosQ), 0.0, 1.25);
+            float cosReceiverP = max(dot(N, dirPToHit), 0.0);
+            float cosVirtualHit = max(dot(qN, dirPToHit), 0.0);
+            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) *
+                                   cosReceiverP * cosVirtualHit, 0.0, 1.25);
             float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * spatialReuseFade * 0.45;
             accumRgb += qRaw.rgb * reuseWeight;
             accumW += reuseWeight;
@@ -558,8 +556,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 }
                 bool cacheSupportsBright = cachedSurfaceValid &&
                     rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, fireflyLimit * 0.5);
-                bool historySupportsBright = wSum > 0.2 && histLen >= 2.0 &&
-                    histY.x > m1Y.x + 2.0 * effectiveSigma.x;
+                bool historySupportsBright = wSum > 0.2 && histLen >= 4.0 &&
+                    histY.x > m1Y.x + 2.0 * effectiveSigma.x &&
+                    histY.x <= fireflyLimit * 1.5;
                 bool realHistFirefly = unsupportedNeighborhood && histLen < 4.0 &&
                     histY.x > fireflyLimit && !historySupportsBright && !cacheSupportsBright;
                 bool realRawFirefly = unsupportedNeighborhood &&
