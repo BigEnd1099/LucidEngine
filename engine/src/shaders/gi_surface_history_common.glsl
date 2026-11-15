@@ -34,17 +34,29 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
         // Writers publish odd sequence values while replacing/updating a cell and
-        // advance to the next even value when the snapshot is complete. Do not
-        // consume radiance/identity fields from a cell while a writer owns it.
-        uint sequenceBefore = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((sequenceBefore & 1u) != 0u)
-            continue;
+        // advance to the next even value when the snapshot is complete. A reader
+        // must not skip an unstable slot: it may be the first empty slot currently
+        // being published, and later probes are only valid after a stable occupied
+        // slot. Retry briefly because the writer's critical section is only a few
+        // SSBO stores; unresolved contention is a cache miss, never a probe-chain gap.
+        SurfaceHistoryCell entry;
+        bool stableSnapshot = false;
+        for (uint retry = 0u; retry < 8u; ++retry) {
+            uint sequenceBefore = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if ((sequenceBefore & 1u) != 0u)
+                continue;
 
-        SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
-        memoryBarrierBuffer();
-        uint sequenceAfter = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if (sequenceBefore != sequenceAfter || (sequenceAfter & 1u) != 0u)
-            continue;
+            SurfaceHistoryCell candidate = surfaceHistoryCache.cells[index];
+            memoryBarrierBuffer();
+            uint sequenceAfter = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if (sequenceBefore == sequenceAfter && (sequenceAfter & 1u) == 0u) {
+                entry = candidate;
+                stableSnapshot = true;
+                break;
+            }
+        }
+        if (!stableSnapshot)
+            return false;
 
         empty = entry.meta.x == 0u;
         // Insertions always claim the first empty or stale-epoch slot in this
