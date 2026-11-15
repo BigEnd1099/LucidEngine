@@ -107,11 +107,15 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
                                                     clipmapEnabled, jitter, jitterEnabled,
                                                     planeWeightEnabled, candidateResult, candidateWeight))
             continue;
-        if (candidateWeight > bestWeight) {
+        float cascadePenalty = (i == 0) ? 1.0 : 0.25;
+        float candidateScore = candidateWeight * cascadePenalty;
+        if (candidateScore > bestWeight) {
             bestResult = candidateResult;
-            bestWeight = candidateWeight;
+            bestWeight = candidateScore;
         }
-        if (i == 0 && candidateWeight >= 16.0)
+        // A populated primary cascade (even at its initial 8-sample confidence)
+        // is more spatially accurate than a neighboring coarse fallback.
+        if (i == 0 && candidateWeight >= 8.0)
             return candidateResult;
     }
     return bestWeight >= 0.0 ? bestResult : vec4(0.0);
@@ -508,7 +512,8 @@ gi = sanitizeHDR(gi * invSamples);
 
 float vis = 1.0 - occ * invSamples;
 float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount) : AO_DISTANCE;
-imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, avgFirstHitDist));
+float initHitDistFactor = clamp(avgFirstHitDist / AO_DISTANCE, 0.15, 1.0);
+imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, packGiGeomW(0.0, initHitDistFactor)));
 imageStore(imgS, px, vec4(gi, vis));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
