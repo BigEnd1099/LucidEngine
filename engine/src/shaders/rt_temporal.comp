@@ -550,7 +550,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 vec4 cachedSurf = vec4(0.0);
                 float cachedCov = 0.0;
                 bool cachedSurfaceValid = false;
-                if ((pc.u.x & 2u) != 0u && (wSum > 0.2 || rawYCoCg.x > fireflyLimit)) {
+                // Surface History is only needed as independent evidence for a
+                // statistically unsupported bright outlier. Querying it merely
+                // because reprojection succeeded made every mature GI pixel perform
+                // up to eight 16-probe hash searches, despite no firefly candidate.
+                bool needsCacheEvidence = unsupportedNeighborhood &&
+                    (rawYCoCg.x > fireflyLimit ||
+                     (histLen < 2.0 && histY.x > fireflyLimit));
+                if ((pc.u.x & 2u) != 0u && needsCacheEvidence) {
                     pixelCacheDiag[3]++;
                     cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
                     if (cachedSurfaceValid) pixelCacheDiag[1]++;
