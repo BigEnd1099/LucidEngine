@@ -66,7 +66,7 @@ vec3 karisExpand(vec3 compressed) {
 
 // Packs history length (1/16 steps) and normalized first-hit distance into geom.w.
 float packGiGeomW(float historyLen, float hitDistFactor) {
-    float quantLen = floor(clamp(historyLen, 1.0, 255.0) * 16.0) / 16.0;
+    float quantLen = floor(clamp(historyLen, 0.0, 255.0) * 16.0) / 16.0;
     float quantHit = clamp(floor(clamp(hitDistFactor, 0.15, 1.0) * 255.0 + 0.5), 1.0, 255.0) / 4096.0;
     return quantLen + quantHit;
 }
