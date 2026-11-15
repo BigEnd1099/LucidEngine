@@ -46,7 +46,11 @@ namespace engine::renderer {
                             const glm::vec3& cameraPos,
                             const glm::vec3& sunDirection,
                             const glm::vec4& sunColor,
-                            VkQueryPool timingQueryPool = VK_NULL_HANDLE);
+                            VkQueryPool timingQueryPool = VK_NULL_HANDLE,
+                            float baseCellSize = DEFAULT_CELL_SIZE,
+                            float bounceIntensity = 1.0f,
+                            uint32_t cellBatchCount = 128u,
+                            uint32_t featureFlags = 0x3Fu);
 
         void clear(VkCommandBuffer cmd);
 

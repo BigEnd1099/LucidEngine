@@ -65,96 +65,125 @@ layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: m
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
 
-layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[48]; } rtDiag;
+layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
-bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, vec3 n, float cellSize, uint currentFrame, out vec4 result) {
+layout(push_constant) uniform PC {
+    mat4 prevViewProj;
+    vec4 f;   // x = max history, y = wrcBaseCellSize, z = history valid, w = GI spatial reuse strength
+    uvec4 u;  // x: bit 0=bypass, bit 1=surfaceCache, bit 2=worldCache, bits 8..13=WRC flags; y: clamp/debug; z: epoch; w: frameIndex
+} pc;
+
+bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, vec3 n, float cellSize,
+                                 uint currentFrame, bool planeWeightEnabled, out vec4 result,
+                                 out float sampleWeight) {
     uint baseIndex = cellKey % CACHE_CELL_COUNT;
     for (uint probe = 0u; probe < 4u; ++probe) {
         uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
         WorldRadianceCell cell = worldRadianceCache.cells[idx];
-        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
-            continue;
-        if (currentFrame < cell.lastSeenFrame)
+        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0 || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
         if (dot(cellNormal, n) <= 0.65)
             continue;
-        // Plane-Distance Weighting with Projected Box Radius (System #5)
-        vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
-        float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-        if (excessDist > 0.5 * cellSize)
-            continue;
-        float geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
-        float confidence = smoothstep(1.0, 16.0, cell.irradiance.a) * geomWeight;
-        result = vec4(cell.irradiance.rgb, confidence);
+        float geomWeight = 1.0;
+        if (planeWeightEnabled) {
+            vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
+            float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
+            if (excessDist > 0.75 * cellSize)
+                continue;
+            geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
+        }
+        sampleWeight = cell.irradiance.a;
+        result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
         return true;
     }
     return false;
 }
 
-vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame, vec3 cameraPos) {
-    vec2 p = vec2(px);
-    float dither = (ignTemporal(p, currentFrame) - 0.5) * 0.50;
-    uint cascade = getCascadeIndex(worldPos, cameraPos, dither);
-    float cellSize = getCascadeCellSize(cascade);
-
-    vec3 n = normalize(worldNormal);
+bool trySampleWorldRadianceCacheCascade(vec3 worldPos, vec3 n, vec2 pixel, uint currentFrame,
+                                        uint cascade, float baseCellSize, bool clipmapEnabled,
+                                        bool jitterEnabled, bool planeWeightEnabled,
+                                        out vec4 result, out float sampleWeight) {
+    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
     vec3 T, B;
     buildBasis(n, T, B);
-
-    // Compute high-frequency blue-noise jitter using animated Jorge Jimenez Interleaved Gradient Noise (IGN)
-    // Decorrelated 2D sampling: coordinate transposition (p.yx) achieves isotropic decorrelation (r ~ 0)
-    vec2 xi = vec2(
-        ignTemporal(p, currentFrame),
-        ignTemporal(p.yx, currentFrame)
-    ) - 0.5;
-
-    // Offset sampling point strictly along the surface tangent plane
-    vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
-
-    // Single-tap lookup at P_jitter
-    vec3 biasedJitter = jitteredPos + n * (cellSize * 0.25);
-    ivec3 jitterCoord = ivec3(floor(biasedJitter / cellSize));
-    uint keyJitter = computeWorldCellKeyFromCoord(jitterCoord, n, cascade);
-
-    vec4 result = vec4(0.0);
-    if (trySampleWorldRadianceCache(keyJitter, jitterCoord, worldPos, n, cellSize, currentFrame, result)) {
-        return result;
+    if (jitterEnabled) {
+        vec2 xi = vec2(ignTemporal(pixel, currentFrame), ignTemporal(pixel.yx, currentFrame)) - 0.5;
+        vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
+        vec3 biasedJitter = jitteredPos + n * (cellSize * 0.25);
+        ivec3 jitterCoord = ivec3(floor(biasedJitter / cellSize));
+        uint keyJitter = computeWorldCellKeyFromCoord(jitterCoord, n, cascade);
+        if (trySampleWorldRadianceCache(keyJitter, jitterCoord, worldPos, n, cellSize,
+                                        currentFrame, planeWeightEnabled, result, sampleWeight))
+            return true;
     }
-
-    // Fallback to unjittered base cell P if the jittered cell was not yet populated or was rejected
     vec3 biasedBase = worldPos + n * (cellSize * 0.25);
     ivec3 baseCoord = ivec3(floor(biasedBase / cellSize));
     uint keyBase = computeWorldCellKeyFromCoord(baseCoord, n, cascade);
-    if (trySampleWorldRadianceCache(keyBase, baseCoord, worldPos, n, cellSize, currentFrame, result)) {
-        return result;
-    }
+    return trySampleWorldRadianceCache(keyBase, baseCoord, worldPos, n, cellSize,
+                                       currentFrame, planeWeightEnabled, result, sampleWeight);
+}
 
-    return vec4(0.0);
+vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame,
+                                           vec3 cameraPos, out float rawSampleWeight) {
+    rawSampleWeight = 0.0;
+    bool clipmapEnabled = (pc.u.x & (1u << 8)) != 0u;
+    bool jitterEnabled = (pc.u.x & (1u << 9)) != 0u;
+    bool planeWeightEnabled = (pc.u.x & (1u << 12)) != 0u;
+    float baseCellSize = (pc.f.y > 0.05) ? pc.f.y : DEFAULT_CELL_SIZE;
+    vec2 pixel = vec2(px);
+    float dither = jitterEnabled ? ((ignTemporal(pixel, currentFrame) - 0.5) * 0.50) : 0.0;
+    uint primaryCascade = getCascadeIndexCfg(worldPos, cameraPos, dither, clipmapEnabled);
+    uint candidates[3];
+    int candidateCount = 1;
+    candidates[0] = primaryCascade;
+    if (clipmapEnabled && primaryCascade > 0u)
+        candidates[candidateCount++] = primaryCascade - 1u;
+    if (clipmapEnabled && primaryCascade < 3u)
+        candidates[candidateCount++] = primaryCascade + 1u;
+
+    vec3 n = normalize(worldNormal);
+    vec4 bestResult = vec4(0.0);
+    float bestWeight = -1.0;
+    for (int i = 0; i < candidateCount; ++i) {
+        vec4 candidateResult = vec4(0.0);
+        float candidateWeight = 0.0;
+        if (!trySampleWorldRadianceCacheCascade(worldPos, n, pixel, currentFrame,
+                                                candidates[i], baseCellSize, clipmapEnabled,
+                                                jitterEnabled, planeWeightEnabled,
+                                                candidateResult, candidateWeight))
+            continue;
+        float cascadePenalty = (i == 0) ? 1.0 : 0.25;
+        float candidateScore = candidateWeight * cascadePenalty;
+        if (candidateScore > bestWeight) {
+            bestResult = candidateResult;
+            bestWeight = candidateScore;
+            rawSampleWeight = candidateWeight;
+        }
+        if (i == 0 && candidateWeight >= 8.0) {
+            rawSampleWeight = candidateWeight;
+            return candidateResult;
+        }
+    }
+    return bestWeight >= 0.0 ? bestResult : vec4(0.0);
 }
 
 // Overload taking 4 arguments defaulting cameraPos to ubo.cameraPos.xyz
 vec4 sampleWorldRadianceCacheTangentJitter(vec3 worldPos, vec3 worldNormal, ivec2 px, uint currentFrame) {
-    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, px, currentFrame, ubo.cameraPos.xyz);
+    float unusedSampleWeight = 0.0;
+    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, px, currentFrame,
+                                                  ubo.cameraPos.xyz, unusedSampleWeight);
 }
 
 // Fallback compatibility wrapper
 vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame) {
-    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, ivec2(0), currentFrame, ubo.cameraPos.xyz);
+    float unusedSampleWeight = 0.0;
+    return sampleWorldRadianceCacheTangentJitter(worldPos, worldNormal, ivec2(0), currentFrame,
+                                                  ubo.cameraPos.xyz, unusedSampleWeight);
 }
 
 
-
-layout(push_constant) uniform PC {
-
-    mat4 prevViewProj;
-
-    vec4 f;   // x = max history, y = samples per pixel, z = history valid, w = svgfEnabled
-
-    uvec4 u;
-
-} pc;
 
 
 
@@ -165,8 +194,10 @@ void addDiagCounter(uint counterIdx, uint value) {
     }
 }
 
-void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint pixelDiag[8]) {
+void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
+                  out uint pixelDiag[8], out uint pixelCacheDiag[4]) {
     for (int i = 0; i < 8; ++i) pixelDiag[i] = 0u;
+    for (int i = 0; i < 4; ++i) pixelCacheDiag[i] = 0u;
     histogramCounted = false;
     ageBin = 0u;
 
@@ -198,6 +229,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
 
     vec4 raw = imageLoad(imgS, px);
+    float curHitDistFactor = unpackGiHitDistFactor(geom.w);
 
     vec3 N = rtOctDecode(geom.xy);
 
@@ -207,6 +239,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     float d = texelFetch(uDepth, fullPx, 0).r;
     float zC = rtLinearDepth(d);
 
+    // Reconstruct the GI pixel at its own texel centre. The selected full-res
+    // depth sample is nearest-neighbour, but its integer texel centre must not
+    // replace the GI pixel's continuous screen-space centre during reprojection.
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 
     // Evaluate cache diagnostics before temporal work, but do not return here:
@@ -214,17 +249,26 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     bool cacheDebugMode = (pc.u.y & 12u) != 0u;
     bool cacheDebugEnabled = false;
     bool cacheDebugHit = false;
+    vec4 cacheDebugValue = vec4(0.0);
+    float cacheDebugConfidence = 0.0;
     if (cacheDebugMode) {
         if ((pc.u.y & 4u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 4u) != 0u;
-            if (cacheDebugEnabled)
-                cacheDebugHit = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz).a > 0.0;
+            if (cacheDebugEnabled) {
+                // Diagnostic-only reads are intentionally excluded from runtime hit-rate counters.
+                float debugSampleWeight = 0.0;
+                cacheDebugValue = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w,
+                                                                          ubo.cameraPos.xyz, debugSampleWeight);
+                cacheDebugConfidence = cacheDebugValue.a;
+                cacheDebugValue.a = debugSampleWeight;
+                cacheDebugHit = debugSampleWeight > 0.0;
+            }
         } else if ((pc.u.y & 8u) != 0u) {
             cacheDebugEnabled = (pc.u.x & 2u) != 0u;
             if (cacheDebugEnabled) {
-                vec4 debugHistory = vec4(0.0);
                 float debugCoverage = 0.0;
-                cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, debugHistory, debugCoverage);
+                // Diagnostic-only reads are intentionally excluded from runtime hit-rate counters.
+                cacheDebugHit = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cacheDebugValue, debugCoverage);
             }
         }
     }
@@ -233,7 +277,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
         imageStore(imgHistCur, px, raw);
         imageStore(imgMomentsCur, px, vec4(rawLum, rawLum * rawLum, 0.0, 0.0));
-        geom.w = 1.0;
+        geom.w = packGiGeomW(1.0, curHitDistFactor);
         imageStore(imgGeomCur, px, geom);
         ageBin = 0u;
         histogramCounted = true;
@@ -246,6 +290,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     vec4  hist = vec4(0.0);
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
+    float histHitDist = 0.0;
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -281,7 +326,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             float w = ((o.x == 0) ? (1.0 - fr.x) : fr.x) * ((o.y == 0) ? (1.0 - fr.y) : fr.y);
             hist        += w * imageLoad(imgHistPrev, tp);
             histMoments += w * imageLoad(imgMomentsPrev, tp);
-            histLen     += w * g.w;
+            histLen     += w * unpackGiHistoryLen(g.w);
+            histHitDist += w * unpackGiHitDistFactor(g.w);
             wSum        += w;
         }
 
@@ -294,12 +340,65 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     float effectiveMaxHist = maxHist;
     vec4 result;
     float newLen;
+    float finalHitDistFactor = curHitDistFactor;
+    bool isCheckerSkipped = (raw.a < -0.5);
+    float giSpatialReuseStrength = clamp(pc.f.w, 0.0, 1.0);
+
+    // Reuse compatible current-frame neighbors before temporal accumulation. This lets
+    // the temporal filter integrate the reused estimate instead of injecting fresh noise
+    // into an already converged history buffer.
+    float projectedHistoryLen = (wSum > 0.05)
+        ? min(histLen / wSum + 1.0, effectiveMaxHist) : 1.0;
+    float spatialReuseFade = 1.0 - smoothstep(4.0, 10.0, projectedHistoryLen);
+    if (!isCheckerSkipped && spatialReuseFade > 0.001 && giSpatialReuseStrength > 0.01) {
+        vec3 accumRgb = raw.rgb;
+        float accumW = 1.0;
+        float searchRadius = mix(2.0, 6.5, curHitDistFactor) * giSpatialReuseStrength;
+        float baseAngle = ignTemporal(vec2(px), pc.u.w) * 6.2831853;
+        float localDepthTol = max(0.025 * zC, 0.015);
+        for (int si = 0; si < 6; ++si) {
+            float r = sqrt((float(si) + 0.5) / 6.0) * searchRadius;
+            float ang = baseAngle + float(si) * 2.3999632;
+            ivec2 qPx = px + ivec2(round(vec2(cos(ang), sin(ang)) * r));
+            if (any(lessThan(qPx, ivec2(0))) || any(greaterThanEqual(qPx, isize)) || qPx == px)
+                continue;
+            vec4 qRaw = imageLoad(imgS, qPx);
+            if (qRaw.a < 0.0) continue;
+            vec4 qGeom = imageLoad(imgGeomCur, qPx);
+            if (qGeom.z <= 0.0 || abs(qGeom.z - zC) > localDepthTol)
+                continue;
+            vec3 qN = rtOctDecode(qGeom.xy);
+            float nSim = dot(qN, N);
+            if (nSim < 0.82) continue;
+            ivec2 qFullPx = min(ivec2(((vec2(qPx) + 0.5) / size) * vec2(fullDepthSize)), fullDepthSize - 1);
+            float qD = texelFetch(uDepth, qFullPx, 0).r;
+            // Keep neighbour reconstruction on the GI grid for consistent
+            // reprojection and spatial reuse coordinates.
+            vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
+            // Plane-distance rejection prevents reuse across curved silhouettes.
+            if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
+            float qHitDistFactor = unpackGiHitDistFactor(qGeom.w);
+            float qVirtualDist = max(qHitDistFactor * 1.75, 0.15);
+            vec3 virtualHit = qP + qN * qVirtualDist;
+            vec3 toVirtualHitP = virtualHit - P;
+            vec3 toVirtualHitQ = virtualHit - qP;
+            float distPSq = max(dot(toVirtualHitP, toVirtualHitP), 1e-3);
+            vec3 dirPToHit = toVirtualHitP * inversesqrt(distPSq);
+            float cosReceiverP = max(dot(N, dirPToHit), 0.0);
+            float cosVirtualHit = max(dot(qN, dirPToHit), 0.0);
+            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) *
+                                   cosReceiverP * cosVirtualHit, 0.0, 1.25);
+            float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * spatialReuseFade * 0.45;
+            accumRgb += qRaw.rgb * reuseWeight;
+            accumW += reuseWeight;
+        }
+        raw.rgb = accumRgb / accumW;
+    }
 
     float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
     vec2 curSampleMoments = vec2(rawLum, rawLum * rawLum);
     vec4 outMoments = vec4(0.0);
 
-    bool isCheckerSkipped = (raw.a < -0.5);
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             pixelDiag[6]++;
@@ -307,11 +406,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
+            histHitDist /= wSum;
+            finalHitDistFactor = histHitDist;
             result = hist;
-            if (motionPixels > 1.0) {
-                vec3 checkerHistY = rgbToYCoCg(result.rgb);
-                vec3 checkerMinY = vec3(1e20);
-                vec3 checkerMaxY = vec3(-1e20);
+            // Checkerboard-skipped pixels have no fresh radiance observation this
+            // frame. Do not clamp mature reprojected HDR history against four sparse
+            // 1-SPP neighbors: they may simply have missed the bright indirect path.
+            // For young history only, apply a small luminance-only safety bound and
+            // scale RGB uniformly so chroma and HDR energy ratio remain intact.
+            if (motionPixels > 1.5 && histLen < 4.0) {
+                float checkerMaxLum = 0.0;
                 float checkerCount = 0.0;
                 const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
                 for (int ci = 0; ci < 4; ++ci) {
@@ -319,16 +423,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                     if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
                     vec4 cv = imageLoad(imgS, cp);
                     if (cv.a < 0.0) continue;
-                    vec3 cy = rgbToYCoCg(cv.rgb);
-                    checkerMinY = min(checkerMinY, cy);
-                    checkerMaxY = max(checkerMaxY, cy);
+                    checkerMaxLum = max(checkerMaxLum, rgbToYCoCg(cv.rgb).x);
                     checkerCount += 1.0;
                 }
-                if (checkerCount > 0.0 && checkerMaxY.x > 0.05) {
-                    vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.5, vec3(0.25));
-                    vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
-                    checkerHistY = clamp(checkerHistY, checkerMinY - margin, upperBound);
-                    result.rgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
+                float histLum = rgbToYCoCg(result.rgb).x;
+                if (checkerCount >= 2.0 && checkerMaxLum > 0.05 &&
+                    histLum > checkerMaxLum * 4.0) {
+                    float targetLum = max(checkerMaxLum * 4.0, histLum * 0.85);
+                    result.rgb *= targetLum / max(histLum, 1e-4);
                 }
             }
             newLen = min(histLen, effectiveMaxHist); // Checkerboard reuse adds no new temporal observation.
@@ -373,6 +475,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             hist /= wSum;
             histMoments /= wSum;
             histLen /= wSum;
+            histHitDist /= wSum;
+            float prevHitDistFactor = histHitDist;
 
             // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
             vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
@@ -419,7 +523,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                 // A bright sample is not automatically a firefly: preserve it when
                 // nearby pixels show the same bright feature. Reject only a high sample
                 // that is statistically rare in a sufficiently populated neighborhood.
-                float fireflyThreshold = max(6.0 * sigmaY.x, max(m1Y.x * 7.0, 24.0));
+                // Keep temporal rejection conservative in HDR scenes: bright indirect
+                // features must not be capped just because checkerboard leaves few neighbours.
+                float fireflyThreshold = max(8.0 * effectiveSigma.x, max(m1Y.x * 8.0, 64.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;
@@ -430,43 +536,59 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
                         if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
                         vec4 fVal = imageLoad(imgS, fp);
                         if (fVal.a < 0.0) continue;
-                        float neighborLum = dot(fVal.rgb, vec3(0.2126, 0.7152, 0.0722));
-                        if (neighborLum >= supportThreshold) {
+                        float neighborLumY = rgbToYCoCg(fVal.rgb).x;
+                        if (neighborLumY >= supportThreshold) {
                             brightNeighborCount += 1.0;
-                            maxSupportedLum = max(maxSupportedLum, neighborLum);
+                            maxSupportedLum = max(maxSupportedLum, neighborLumY);
                         }
                     }
                 }
-                bool isolatedFirefly = count >= 4.0 &&
+                // count excludes the center; only test patches with enough valid neighbors.
+                bool unsupportedNeighborhood = count >= 3.0 &&
                     brightNeighborCount <= floor(count * 0.125);
-                // A valid reprojection (wSum > 0.2) identifies the same surface
-                // across camera motion. Preserve its accumulated diffuse irradiance;
-                // only an isolated firefly is allowed to force the history downward.
-                bool realHistFirefly = isolatedFirefly && histLen < 3.0 &&
-                    histY.x > m1Y.x + max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
+                float fireflyLimit = m1Y.x + fireflyThreshold;
+                vec4 cachedSurf = vec4(0.0);
+                float cachedCov = 0.0;
+                bool cachedSurfaceValid = false;
+                if ((pc.u.x & 2u) != 0u && (wSum > 0.2 || rawYCoCg.x > fireflyLimit)) {
+                    pixelCacheDiag[3]++;
+                    cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
+                    if (cachedSurfaceValid) pixelCacheDiag[1]++;
+                }
+                bool cacheSupportsBright = cachedSurfaceValid &&
+                    rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, fireflyLimit * 0.35);
+                // In checkerboard mode history receives a new traced observation every
+                // other frame. Two accumulated observations are already four real frames.
+                // Do not reject mature, reprojected HDR energy because the current sparse
+                // 1-SPP neighborhood happened to miss the bright path.
+                bool historySupportsBright = (wSum > 0.25) && (histLen >= 2.0) &&
+                    (histY.x > m1Y.x + 1.5 * effectiveSigma.x);
+                bool realHistFirefly = unsupportedNeighborhood && (histLen < 2.0) &&
+                    (histY.x > fireflyLimit) && !cacheSupportsBright;
+                bool realRawFirefly = unsupportedNeighborhood &&
+                    rawYCoCg.x > fireflyLimit && !historySupportsBright && !cacheSupportsBright;
+                // Reprojected history and persistent surface radiance are independent
+                // evidence that a bright feature is real, not a transient firefly.
                 if (!realHistFirefly && wSum > 0.2) {
                     clampMaxY = max(clampMaxY, histY);
                     clampMinY.x = min(clampMinY.x, histY.x * 0.5);
-                    vec4 cachedSurf = vec4(0.0);
-                    float cachedCov = 0.0;
-                    if ((pc.u.x & 2u) != 0u && loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25) {
-                        vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
-                        clampMaxY = max(clampMaxY, cachedY * 1.15 + effectiveSigma);
-                    }
                 }
-                // Preserve newly visible, spatially supported bright structures.
-                bool realRawFirefly = isolatedFirefly &&
-                    dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722)) > m1Y.x + max(6.0 * effectiveSigma.x, max(m1Y.x * 7.0, 24.0));
-                if (!realRawFirefly)
+                if (cachedSurfaceValid && !realHistFirefly) {
+                    vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
+                    clampMaxY = max(clampMaxY, cachedY * 1.15 + effectiveSigma);
+                }
+                if (realHistFirefly)
+                    clampMaxY.x = min(clampMaxY.x, fireflyLimit);
+                if (!realRawFirefly && !realHistFirefly)
                     clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
-                if ((pc.u.y & 1u) != 0u)
-                    histY = clamp(histY, clampMinY, clampMaxY);
-                hist.rgb = max(vec3(0.0), yCoCgToRgb(histY));
-                if ((pc.u.y & 2u) != 0u && isolatedFirefly &&
-                    rawYCoCg.x > m1Y.x + fireflyThreshold) {
-                    rawYCoCg.x = m1Y.x + fireflyThreshold;
-                    raw.rgb = max(vec3(0.0), yCoCgToRgb(rawYCoCg));
+                if ((pc.u.y & 1u) != 0u) {
+                    // Clamp luminance only. Independent Co/Cg clipping changes warm
+                    // cream bounce-light chroma and can make it appear yellow-green.
+                    float clampedHistY = clamp(histY.x, clampMinY.x, clampMaxY.x);
+                    hist.rgb *= clampedHistY / max(histY.x, 1e-4);
                 }
+                if ((pc.u.y & 2u) != 0u && realRawFirefly)
+                    raw.rgb *= fireflyLimit / max(rawYCoCg.x, 1e-4);
             }
             raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
@@ -475,7 +597,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
             // not change the temporal response speed or make 1 SPP freeze the image.
             newLen = min(histLen + 1.0, effectiveMaxHist);
             float alpha = 1.0 / newLen;
-            result = mix(hist, raw, alpha);
+            finalHitDistFactor = mix(prevHitDistFactor, curHitDistFactor, max(alpha, 0.25));
+            result = vec4(mix(hist.rgb, raw.rgb, alpha), mix(hist.a, raw.a, alpha));
 
             // SVGF moments accumulation: blend spatial and temporal variance when history is short (< 4 frames)
             // to prevent variance starvation, edge-stopping collapse, and noisy boiling on disocclusions.
@@ -490,6 +613,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         } else {
             pixelDiag[2]++;
             newLen = 1.0;
+            finalHitDistFactor = curHitDistFactor;
             result = raw;
 
             // Disocclusion / rejected history: compute spatial variance over local 3x3 footprint
@@ -518,34 +642,42 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
     // reprojection history while it converges to the current per-pixel estimate.
     bool isDisoccluded = (isCheckerSkipped && wSum <= 0.05) ||
                          (!isCheckerSkipped && wSum <= 0.05);
-    if (isDisoccluded || newLen < 4.0) {
+    if (isDisoccluded || newLen < 3.0) {
         vec4 surfaceHistory = vec4(0.0);
         float surfaceCoverage = 0.0;
-        bool restoredSurface = (pc.u.x & 2u) != 0u &&
-                               loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
-        if (restoredSurface && surfaceHistory.a > newLen) {
-            float blendW = isDisoccluded ? (0.90 * surfaceCoverage) : (0.50 * surfaceCoverage);
-            result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
-            newLen = clamp(max(newLen, min(surfaceHistory.a, 8.0)), 4.0, effectiveMaxHist);
+        bool restoredSurface = false;
+        if ((pc.u.x & 2u) != 0u) {
+            pixelCacheDiag[3]++;
+            restoredSurface = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, surfaceHistory, surfaceCoverage);
+            if (restoredSurface) pixelCacheDiag[1]++;
+        }
+        bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
+        if (surfaceHistoryApplied) {
+            float blendW = isDisoccluded ? (0.85 * surfaceCoverage) : (0.25 * surfaceCoverage);
+            vec3 blendedSurf = mix(result.rgb, surfaceHistory.rgb, blendW);
+            // A world-space cache may restore missing information, but must not dim
+            // a valid screen-space reprojection that already contains brighter energy.
+            result.rgb = isDisoccluded ? blendedSurf : max(result.rgb, blendedSurf);
+            newLen = clamp(max(newLen, min(surfaceHistory.a, 6.0)), 2.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
         }
-        if (!isDisoccluded && (pc.u.x & 4u) != 0u && newLen < 6.0 && motionPixels > 0.5) {
-            vec4 wrcCell = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
-            if (wrcCell.a > 0.0) {
-                float wrcFactor = clamp((1.0 - newLen / 6.0) * clamp(motionPixels * 0.15, 0.0, 0.35) * wrcCell.a, 0.0, 0.35);
-                result.rgb = mix(result.rgb, wrcCell.rgb, wrcFactor);
-            }
-        } else if (isDisoccluded && (pc.u.x & 4u) != 0u) {
-            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w, ubo.cameraPos.xyz);
+        // Surface History wins when it actually restored a contribution; WRC is fallback only.
+        if (isDisoccluded && !surfaceHistoryApplied && (pc.u.x & 4u) != 0u) {
+            pixelCacheDiag[2]++;
+            vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w);
             if (cached.a > 0.0) {
-                result.rgb = mix(result.rgb, cached.rgb, 0.80 * cached.a);
-                newLen = max(newLen, 8.0 * cached.a);
+                pixelCacheDiag[0]++;
+                // WRC only seeds a disoccluded pixel. Keep its history contribution
+                // low so the next traced observation is not held back by a dark probe.
+                vec3 seeded = mix(result.rgb, cached.rgb, 0.35 * cached.a);
+                result.rgb = isCheckerSkipped ? seeded : max(result.rgb, seeded);
+                newLen = max(newLen, 2.0 * cached.a);
             }
         }
     }
 
-    bool surfaceHistoryDebug = (pc.u.y & 12u) != 0u;
+    bool surfaceHistoryDebug = (pc.u.y & 8u) != 0u;
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
     if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 &&
@@ -558,7 +690,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
 
     // Publish temporal history length before replacing the display output with
     // cache diagnostics. The diagnostic view must not poison temporal history.
-    geom.w = newLen;
+    geom.w = packGiGeomW(newLen, finalHitDistFactor);
     imageStore(imgGeomCur, px, geom);
     ageBin = min(uint(clamp(newLen / effectiveMaxHist, 0.0, 0.999999) * 16.0), 15u);
     histogramCounted = true;
@@ -567,6 +699,30 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out uint
         vec3 debugColor = !cacheDebugEnabled ? vec3(0.05, 0.15, 0.85)
                          : cacheDebugHit ? vec3(0.0, 0.85, 0.05)
                                          : vec3(0.85, 0.02, 0.02);
+        if (cacheDebugEnabled && cacheDebugHit) {
+            if ((pc.u.y & 32u) != 0u) {
+                // Log-compressed linear HDR radiance for readable cache inspection.
+                // Lift ordinary diffuse radiance into a visible range without losing
+                // relative HDR structure; channels remain independently encoded.
+                debugColor = clamp(log2(vec3(1.0) + max(cacheDebugValue.rgb, vec3(0.0)) * 8.0) /
+                                   log2(9.0), vec3(0.0), vec3(1.0));
+            } else if ((pc.u.y & 64u) != 0u) {
+                if ((pc.u.y & 4u) != 0u) {
+                    // Show the raw probe sample weight, not the already saturated
+                    // smoothstep confidence used by lighting. This exposes convergence.
+                    // WRC stores weights from 8 (new cell) to 64 (mature cell).
+                    float weight = clamp(log2(1.0 + max(cacheDebugValue.a, 0.0)) / log2(65.0), 0.0, 1.0);
+                    vec3 weightColor = weight < 0.5
+                        ? mix(vec3(0.05, 0.10, 0.85), vec3(0.0, 0.95, 0.85), weight * 2.0)
+                        : mix(vec3(0.0, 0.95, 0.85), vec3(1.0, 0.90, 0.0), (weight - 0.5) * 2.0);
+                    // Brightness carries the plane-distance confidence multiplier.
+                    debugColor = weightColor * (0.2 + 0.8 * cacheDebugConfidence);
+                } else {
+                    float age = clamp(log2(1.0 + max(cacheDebugValue.a, 0.0)) / log2(257.0), 0.0, 1.0);
+                    debugColor = vec3(age, age * age, 1.0 - age);
+                }
+            }
+        }
         imageStore(imgHistCur, px, vec4(debugColor, 1.0));
     }
 
@@ -576,8 +732,9 @@ void main() {
     uint ageBin = 0u;
     bool histogramCounted = false;
     uint pixelDiag[8];
+    uint pixelCacheDiag[4];
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-    processPixel(px, ageBin, histogramCounted, pixelDiag);
+    processPixel(px, ageBin, histogramCounted, pixelDiag, pixelCacheDiag);
 
     uint diagMask = 0u;
     for (uint metric = 0u; metric < 8u; ++metric) diagMask |= pixelDiag[metric];
@@ -585,6 +742,15 @@ void main() {
     if (subgroupBallotBitCount(diagBallot) != 0u) {
         for (uint metric = 0u; metric < 8u; ++metric) {
             addDiagCounter(metric, pixelDiag[metric]);
+        }
+    }
+
+    uint cacheDiagMask = 0u;
+    for (uint metric = 0u; metric < 4u; ++metric) cacheDiagMask |= pixelCacheDiag[metric];
+    uvec4 cacheDiagBallot = subgroupBallot(cacheDiagMask != 0u);
+    if (subgroupBallotBitCount(cacheDiagBallot) != 0u) {
+        for (uint metric = 0u; metric < 4u; ++metric) {
+            addDiagCounter(56u + metric, pixelCacheDiag[metric]);
         }
     }
 

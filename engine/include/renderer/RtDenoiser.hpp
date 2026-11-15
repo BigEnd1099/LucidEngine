@@ -42,6 +42,16 @@ namespace engine::renderer {
             bool      reflectionSpatialFilterEnabled{true};
             bool      worldRadianceCacheEnabled{true};
             bool      giSurfaceHistoryCacheEnabled{true};
+            bool      wrcClipmapEnabled{true};
+            bool      wrcTangentJitterEnabled{true};
+            bool      wrcSpatialFilterEnabled{true};
+            bool      wrcSubgroupStratifiedEnabled{true};
+            bool      wrcPlaneDistanceWeightEnabled{true};
+            bool      wrcFirstBounceEnabled{false};
+            float     wrcBaseCellSize{0.35f};
+            float     wrcBounceIntensity{1.0f};
+            float     giSpatialReuseStrength{0.55f};
+            int       wrcBatchesPerFrame{128};
             bool      lightChanged{false}; // Resets accumulation when scene lighting changes
             RtDebugMode debugMode{RtDebugMode::None};
 

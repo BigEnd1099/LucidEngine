@@ -50,4 +50,32 @@ vec3 rtOctDecode(vec2 e) {
     return normalize(n);
 }
 
+#ifndef KARIS_TONEMAP_DEFINED
+#define KARIS_TONEMAP_DEFINED
+vec3 karisCompress(vec3 hdr) {
+    vec3 s = max(hdr, vec3(0.0));
+    float lum = dot(s, vec3(0.2126, 0.7152, 0.0722));
+    return s / (1.0 + lum * 0.25);
+}
+vec3 karisExpand(vec3 compressed) {
+    vec3 c = max(compressed, vec3(0.0));
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return c / max(1.0 - lum * 0.25, 0.02);
+}
+#endif
+
+// Packs history length (1/16 steps) and normalized first-hit distance into geom.w.
+float packGiGeomW(float historyLen, float hitDistFactor) {
+    float quantLen = floor(clamp(historyLen, 0.0, 255.0) * 16.0) / 16.0;
+    float quantHit = clamp(floor(clamp(hitDistFactor, 0.15, 1.0) * 255.0 + 0.5), 1.0, 255.0) / 4096.0;
+    return quantLen + quantHit;
+}
+float unpackGiHistoryLen(float geomW) {
+    return floor(max(geomW, 0.0) * 16.0) / 16.0;
+}
+float unpackGiHitDistFactor(float geomW) {
+    float frac = fract(max(geomW, 0.0) * 16.0) * (256.0 / 255.0);
+    return (frac > 0.01) ? clamp(frac, 0.15, 1.0) : 1.0;
+}
+
 #endif

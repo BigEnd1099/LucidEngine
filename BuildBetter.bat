@@ -43,7 +43,14 @@ if "!DO_CLEAN!"=="1" (
     if exist "engine\build" rmdir /s /q "engine\build"
 )
 
+set NEED_CMAKE=0
 if not exist "engine\build\CMakeCache.txt" (
+    set NEED_CMAKE=1
+)
+if not exist "engine\build\gi_world_cache_filter.comp.spv" (
+    set NEED_CMAKE=1
+)
+if "!NEED_CMAKE!"=="1" (
     echo [INFO] Inicjalizacja konfiguracji CMake dla silnika Lucid Engine...
 
     :: Wymuszenie wieloprocesowej kompilacji plikow .cpp w MSVC (/MP)

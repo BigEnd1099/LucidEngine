@@ -627,6 +627,32 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::Checkbox("World Radiance Probe Cache", &m_rtSettings.worldRadianceCacheEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Controls probe-cache updates and temporal GI fallback sampling. Toggling clears cached probes to prevent stale re-use.");
+                        if (m_rtSettings.worldRadianceCacheEnabled) {
+                            ImGui::Indent();
+                            ImGui::Checkbox("WRC LOD Clipmaps (Cascades 0..3)", &m_rtSettings.wrcClipmapEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Scales cell size with distance from camera (1x, 2x, 4x, 8x base cell size).");
+                            ImGui::Checkbox("WRC Tangent-Plane Blue-Noise Jitter", &m_rtSettings.wrcTangentJitterEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Stochastically jitters cache lookups along the surface tangent plane to eliminate grid seams.");
+                            ImGui::Checkbox("WRC World-Space Spatial Filter Pass", &m_rtSettings.wrcSpatialFilterEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Runs a coplanar 3x3 Gaussian filter across neighboring cache cells before GI sampling.");
+                            ImGui::Checkbox("WRC Subgroup 8x4 Stratified Tracing", &m_rtSettings.wrcSubgroupStratifiedEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Uses 32-lane stratified hemispherical ray bundles per cell instead of unstratified cosine sampling.");
+                            ImGui::Checkbox("WRC Plane-Distance Edge Weighting", &m_rtSettings.wrcPlaneDistanceWeightEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip(" suppresses light bleeding across corners using projected voxel box radius and plane-distance falloff.");
+                            ImGui::Checkbox("WRC First-Bounce GI Boost (b == 0)", &m_rtSettings.wrcFirstBounceEnabled);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Injects cached multi-bounce irradiance already at the first GI bounce to stabilize low-SPP lighting.");
+                            ImGui::SliderFloat("WRC Base Cell Size (m)", &m_rtSettings.wrcBaseCellSize, 0.10f, 1.50f, "%.2f");
+                            ImGui::SliderFloat("WRC Bounce Intensity", &m_rtSettings.wrcBounceIntensity, 0.0f, 4.0f, "%.2f");
+                            ImGui::SliderInt("WRC Cell Batches / Frame", &m_rtSettings.wrcBatchesPerFrame, 64, 2048, "%d");
+                            ImGui::Unindent();
+                        }
+                        ImGui::SliderFloat("GI Screen-Space Spatial Reuse Strength", &m_rtSettings.giSpatialReuseStrength, 0.0f, 1.0f, "%.2f");
                         ImGui::Checkbox("Persistent GI Surface History Cache", &m_rtSettings.giSurfaceHistoryCacheEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Controls world-space diffuse history restore and final à-trous writeback. Toggling invalidates the cache epoch.");
@@ -659,7 +685,11 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "9: Caustic Contribution Density",
                             "10: Temporal GI (before A-Trous)",
                             "11: World Radiance Cache Hits (green=hit, red=miss, blue=disabled)",
-                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)"
+                            "12: Persistent Surface History Hits (green=hit, red=miss, blue=disabled)",
+                            "13: WRC Cached Radiance (log HDR RGB)",
+                            "14: WRC Confidence (sample weight + plane weight)",
+                            "15: Surface History Radiance (log HDR RGB)",
+                            "16: Surface History Age (history length)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {

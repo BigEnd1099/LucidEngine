@@ -37,51 +37,90 @@ void addDiagCounter(uint counterIdx, uint value) {
     }
 }
 
-vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
-    uint cascade = getCascadeIndex(worldPos, ubo.cameraPos.xyz, 0.0);
-    float cellSize = getCascadeCellSize(cascade);
+layout(push_constant) uniform PC {
+mat4 unused;
+vec4 f;
+uvec4 u; // x=samples, y=frame, z=GI/AO/cache/WRC flags, w=max bounces; f.x=epoch, f.y=wrcCellSize, f.z=wrcBounceIntensity, f.w=GI spatial reuse strength
+} pc;
 
-    vec3 n = normalize(worldNormal);
+bool trySampleWorldRadianceCacheFastCascade(vec3 worldPos, vec3 n, uint cascade,
+                                            float baseCellSize, bool clipmapEnabled, vec2 jitter,
+                                            bool jitterEnabled, bool planeWeightEnabled,
+                                            out vec4 result, out float sampleWeight) {
+    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
     vec3 T, B;
     buildBasis(n, T, B);
-
-    // Tangent-plane blue-noise jitter using PRNG rand2()
-    vec2 xi = rand2() - 0.5;
-    vec3 jitteredPos = worldPos + (T * xi.x + B * xi.y) * cellSize;
-
-    // Test jittered cell first, falling back to unjittered base cell
-    vec3 testPositions[2] = vec3[](jitteredPos, worldPos);
-    for (int c = 0; c < 2; ++c) {
-        vec3 pSample = testPositions[c];
-        vec3 biasedPos = pSample + n * (cellSize * 0.25);
+    vec3 positions[2] = vec3[](
+        worldPos + (T * jitter.x + B * jitter.y) * cellSize,
+        worldPos);
+    int positionCount = jitterEnabled ? 2 : 1;
+    for (int p = 0; p < positionCount; ++p) {
+        vec3 biasedPos = positions[p] + n * (cellSize * 0.25);
         ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
         uint cellKey = computeWorldCellKeyFromCoord(cellCoord, n, cascade);
         uint baseIndex = cellKey % CACHE_CELL_COUNT;
         for (uint probe = 0u; probe < 4u; ++probe) {
             WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-            if (cell.cellKey == cellKey && cell.irradiance.a > 0.0) {
-                vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
-                if (dot(cellN, n) > 0.65) {
-                    vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
-                    float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-                    if (excessDist <= 0.5 * cellSize) {
-                        float geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
-                        float confidence = smoothstep(1.0, 16.0, cell.irradiance.a) * geomWeight;
-                        return vec4(cell.irradiance.rgb, confidence);
-                    }
-                }
+            if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
+                continue;
+            vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
+            if (dot(cellN, n) <= 0.65)
+                continue;
+            float geomWeight = 1.0;
+            if (planeWeightEnabled) {
+                vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
+                float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
+                if (excessDist > 0.75 * cellSize)
+                    continue;
+                geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
             }
+            sampleWeight = cell.irradiance.a;
+            result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
+            return true;
         }
     }
-    return vec4(0.0);
+    return false;
 }
 
+vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
+    bool clipmapEnabled = (pc.u.z & (1u << 8)) != 0u;
+    bool jitterEnabled = (pc.u.z & (1u << 9)) != 0u;
+    bool planeWeightEnabled = (pc.u.z & (1u << 12)) != 0u;
+    float baseCellSize = (pc.f.y > 0.05) ? pc.f.y : DEFAULT_CELL_SIZE;
+    uint primaryCascade = getCascadeIndexCfg(worldPos, ubo.cameraPos.xyz, 0.0, clipmapEnabled);
+    vec3 n = normalize(worldNormal);
+    vec2 jitter = jitterEnabled ? (rand2() - 0.5) : vec2(0.0);
+    uint candidates[3];
+    int candidateCount = 1;
+    candidates[0] = primaryCascade;
+    if (clipmapEnabled && primaryCascade > 0u)
+        candidates[candidateCount++] = primaryCascade - 1u;
+    if (clipmapEnabled && primaryCascade < 3u)
+        candidates[candidateCount++] = primaryCascade + 1u;
 
-layout(push_constant) uniform PC {
-mat4 unused;
-vec4 f;
-uvec4 u; // x=samples, y=frame, z=GI/AO/cache flags, w=max bounces; f.x carries surface-cache epoch bits
-} pc;
+    vec4 bestResult = vec4(0.0);
+    float bestWeight = -1.0;
+    for (int i = 0; i < candidateCount; ++i) {
+        vec4 candidateResult = vec4(0.0);
+        float candidateWeight = 0.0;
+        if (!trySampleWorldRadianceCacheFastCascade(worldPos, n, candidates[i], baseCellSize,
+                                                    clipmapEnabled, jitter, jitterEnabled,
+                                                    planeWeightEnabled, candidateResult, candidateWeight))
+            continue;
+        float cascadePenalty = (i == 0) ? 1.0 : 0.25;
+        float candidateScore = candidateWeight * cascadePenalty;
+        if (candidateScore > bestWeight) {
+            bestResult = candidateResult;
+            bestWeight = candidateScore;
+        }
+        // A populated primary cascade (even at its initial 8-sample confidence)
+        // is more spatially accurate than a neighboring coarse fallback.
+        if (i == 0 && candidateWeight >= 8.0)
+            return candidateResult;
+    }
+    return bestWeight >= 0.0 ? bestResult : vec4(0.0);
+}
+
 
 const float AO_DISTANCE = 1.75;
 const float MAX_RAY_DIST = 200.0;
@@ -143,6 +182,8 @@ if (d >= 1.0) {
 }
 
 float zC = rtLinearDepth(d);
+// Reconstruct at the GI output pixel centre; fullPx only selects the
+// nearest full-resolution depth/normal sample for this GI pixel.
 vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
 vec3 toCam = ubo.cameraPos.xyz - P;
 
@@ -206,13 +247,19 @@ rngInit(uvec2(px), frame);
 // Pixel/frame-specific 2D rotation of the R2 low-discrepancy sequence.
 vec2 sampleOffset = hash2(uvec2(px), frame);
 const vec2 R2 = vec2(0.75487766624669276, 0.56984029099805327);
-float bias = 0.010 + 0.0006 * length(toCam);
-vec3 origin = P + N * bias;
+float distToCam = length(toCam);
+vec3 viewDir = (distToCam > 1e-4) ? (toCam / distToCam) : vec3(0.0, 1.0, 0.0);
+float nDotVPrimary = clamp(dot(N, viewDir), 0.0, 1.0);
+float bias = 0.010 + 0.0006 * distToCam;
+float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
+vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
 vec3 causticRadiance = vec3(0.0);
 float causticHitCount = 0.0;
 float occ = 0.0;
+float firstHitDistSum = 0.0;
+float firstHitCount = 0.0;
 uint diagSurfaceHits = 0u;
 uint diagMirrorHits = 0u;
 uint diagLightTests = 0u;
@@ -247,7 +294,13 @@ for (int s = 0; s < samples; ++s) {
         bool found = traceSceneSurface(rayOrigin, dir, MAX_RAY_DIST,
             hit, hitPosition, hitNormal, hitUv, hitTangent, hitDistance);
 
-        if (doAO && b == 0 && found && hitDistance < AO_DISTANCE) occ += 1.0;
+        if (b == 0) {
+            firstHitDistSum += found ? min(hitDistance, AO_DISTANCE) : AO_DISTANCE;
+            firstHitCount += 1.0;
+        }
+        // Ignore near-zero grazing self-intersections; fade AO smoothly with hit distance.
+if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
+    occ += 1.0 - smoothstep(0.02, AO_DISTANCE, hitDistance);
 
         // Environment lighting is owned exclusively by the IBL switch (skyboxMode bit 1)
         // in the PBR pass and in shadeRtHit(). A visible skybox must never light the
@@ -264,8 +317,40 @@ for (int s = 0; s < samples; ++s) {
         int singleLight = -1;
         float singleWeight = 1.0;
         if (b >= 1 && numActiveLights > 0) {
-            singleLight = clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1);
-            singleWeight = float(numActiveLights);
+            float wSumRis = 0.0;
+            float chosenPdf = 0.0;
+            vec3 evalN = normalize(hitNormal);
+            for (int li = 0; li < numActiveLights; ++li) {
+                float lInt = max(ubo.lightsCol[li].w, 0.0);
+                if (lInt <= 0.001) continue;
+                vec3 toL = ubo.lightsPos[li].xyz - hitPosition;
+                float dSq = max(dot(toL, toL), 1e-4);
+                vec3 L = toL * inversesqrt(dSq);
+                float nDotL = max(dot(evalN, L), 0.0);
+                float range = max(ubo.lightsPos[li].w, 0.1);
+                float distanceToLight = sqrt(dSq);
+                if (distanceToLight >= range) continue;
+                float rangeRatio = distanceToLight / range;
+                float rangeWindow = clamp(1.0 - pow(rangeRatio, 4.0), 0.0, 1.0);
+                float rangeAttenuation = (rangeWindow * rangeWindow) / (dSq + 1.0);
+                int lightType = int(round(ubo.lightsDir[li].w));
+                float coneAttenuation = 1.0;
+                if (lightType == 1) {
+                    float cone = dot(-L, normalize(ubo.lightsDir[li].xyz));
+                    coneAttenuation = smoothstep(ubo.lightsParams[li].y, ubo.lightsParams[li].x, cone);
+                }
+                if (nDotL <= 0.0 || coneAttenuation <= 1e-5 || rangeAttenuation <= 1e-5) continue;
+                float lLum = max(dot(ubo.lightsCol[li].rgb, vec3(0.2126, 0.7152, 0.0722)), 0.05);
+                float targetWeight = lInt * lLum * (nDotL + 0.05) *
+                                     rangeAttenuation * coneAttenuation;
+                wSumRis += targetWeight;
+                if (rand1() * wSumRis < targetWeight) {
+                    singleLight = li;
+                    chosenPdf = targetWeight;
+                }
+            }
+            if (singleLight >= 0 && chosenPdf > 1e-6)
+                singleWeight = wSumRis / chosenPdf;
         }
 
         vec3 hitAlbedo = hit.baseColor.rgb *
@@ -279,11 +364,16 @@ for (int s = 0; s < samples; ++s) {
         vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
-        if ((pc.u.z & 16u) != 0u && b == bounces - 1 && hitDistance > 0.20) {
+        bool wrcFirstBounce = (pc.u.z & (1u << 13)) != 0u;
+        float wrcBounceIntensity = max(pc.f.z, 0.0);
+        bool useWrcOnThisBounce = wrcFirstBounce ? (b == 0) : (b == bounces - 1);
+        if ((pc.u.z & 16u) != 0u && useWrcOnThisBounce && hitDistance > 0.10) {
             diagValues[10]++;
             vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
             if (cachedRadiance.a > 0.0) {
-                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb * (0.75 * cachedRadiance.a);
+                float bounceWeight = (b == bounces - 1) ? 0.85 : 0.55;
+                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
+                                (bounceWeight * wrcBounceIntensity * cachedRadiance.a);
                 diagValues[8]++;
             }
         }
@@ -296,14 +386,14 @@ for (int s = 0; s < samples; ++s) {
         // Specular caustic reflection: when ray hits a reflective surface (mirror or low roughness metal),
         // analytically evaluate the reflection of active lights (Spot & Point) bouncing off the mirror onto this path
         bool isMirrorSurface = hitReflects && (hitMetallic > 0.4 || hitRoughness < 0.12);
-        // Specular caustics are evaluated only at the first hit and only on
-        // genuinely smooth reflective surfaces; later bounces skip this extra light loop.
-        if (b == 0 && isMirrorSurface && hitRoughness < 0.15) {
+        // Evaluate the analytic mirror-light estimate only at the terminal bounce;
+        // intermediate mirror hits are handled by the sampled specular continuation.
+        if (isMirrorSurface && hitRoughness < 0.20 && b == bounces - 1) {
             diagMirrorHits++;
             vec3 hitN = normalize(hitNormal);
             vec3 reflRay = reflect(dir, hitN);
 
-            for (int li = (singleLight >= 0 ? singleLight : 0); li < (singleLight >= 0 ? singleLight + 1 : numActiveLights); ++li) {
+            for (int li = 0; li < numActiveLights; ++li) {
                 diagLightTests++;
                 float intensity = max(ubo.lightsCol[li].w, 0.0);
                 if (intensity <= 0.001) continue;
@@ -343,8 +433,8 @@ for (int s = 0; s < samples; ++s) {
                         float attenuation = (window * window) / (totalDist * totalDist + 1.0);
                         float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
-                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL * singleWeight) * F_caustic;
-                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(16.0));
+                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
+                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(32.0));
                         pathRadiance += throughput * causticContrib;
                         causticRadiance += throughput * causticContrib;
                         causticHitCount += 1.0;
@@ -421,6 +511,9 @@ float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
 
 float vis = 1.0 - occ * invSamples;
+float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount) : AO_DISTANCE;
+float initHitDistFactor = clamp(avgFirstHitDist / AO_DISTANCE, 0.15, 1.0);
+imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, packGiGeomW(0.0, initHitDistFactor)));
 imageStore(imgS, px, vec4(gi, vis));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));

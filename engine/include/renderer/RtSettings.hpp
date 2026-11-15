@@ -16,7 +16,11 @@ namespace engine::renderer {
         CausticHitDensity = 9,
         TemporalIndirect = 10,
         WorldRadianceCacheHits = 11,
-        SurfaceHistoryCacheHits = 12
+        SurfaceHistoryCacheHits = 12,
+        WorldRadianceCacheRadiance = 13,
+        WorldRadianceCacheConfidence = 14,
+        SurfaceHistoryCacheRadiance = 15,
+        SurfaceHistoryCacheAge = 16
     };
 
     struct RtSettings {
@@ -49,6 +53,16 @@ namespace engine::renderer {
         bool svgfEnabled{true};
         bool worldRadianceCacheEnabled{true};
         bool giSurfaceHistoryCacheEnabled{true};
+        bool wrcClipmapEnabled{true};
+        bool wrcTangentJitterEnabled{true};
+        bool wrcSpatialFilterEnabled{true};
+        bool wrcSubgroupStratifiedEnabled{true};
+        bool wrcPlaneDistanceWeightEnabled{true};
+        bool wrcFirstBounceEnabled{false};
+        float wrcBaseCellSize{0.35f};
+        float wrcBounceIntensity{1.0f};
+        float giSpatialReuseStrength{0.55f};
+        int wrcBatchesPerFrame{128};
         bool reflectionTemporalFilterEnabled{true};
         bool reflectionOutlierFilterEnabled{true};
         bool reflectionSpatialFilterEnabled{true};

@@ -5,9 +5,6 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
-#extension GL_KHR_shader_subgroup_basic : require
-#extension GL_KHR_shader_subgroup_arithmetic : require
-#extension GL_KHR_shader_subgroup_ballot : require
 
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
@@ -17,6 +14,11 @@ layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 layout(std430, set = 1, binding = 0) coherent buffer WorldRadianceGridBuffer {
     WorldRadianceCell cells[];
 } worldCache;
+
+shared vec3 wrcHitRadiance[32];
+shared float wrcSampleLuminance[32];
+shared float wrcFireflyThreshold;
+shared uint wrcExtremeSampleCount;
 
 layout(push_constant) uniform PC {
     vec4 cameraPosAndCellSize; // xyz = cameraPos, w = cellSize
@@ -32,7 +34,12 @@ void main() {
     uint probeLinearIdx = (cellBatchIdx + pc.frameAndSlice.y) & 32767u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x), pc.frameAndSlice.x);
 
-    float cellSize = DEFAULT_CELL_SIZE;
+    uint flags = pc.frameAndSlice.w;
+    bool clipmapEnabled = (flags & 1u) != 0u;
+    bool stratifiedEnabled = (flags & 4u) != 0u;
+    float baseCellSize = pc.cameraPosAndCellSize.w > 0.05 ? pc.cameraPosAndCellSize.w : DEFAULT_CELL_SIZE;
+    float bounceIntensity = max(pc.sunColor.a, 0.0);
+    float cellSize = baseCellSize;
     vec3 cameraPos = pc.cameraPosAndCellSize.xyz;
 
     // Uniform full-sphere ray direction shared across all 32 lanes in this cell workgroup
@@ -65,22 +72,27 @@ void main() {
     vec2 hitUv;
     vec4 hitTangent;
     float hitDistance;
-    if (!traceSceneSurface(probePos, sampleDir, 40.0,
-            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance)) {
-        // Missed scene geometry; all lanes exit together
-        return;
+    bool hitSurface = traceSceneSurface(probePos, sampleDir, 40.0,
+            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance);
+    if (!hitSurface) {
+        sampleDir = normalize(vec3(sampleDir.x, -abs(sampleDir.y) - 0.35, sampleDir.z));
+        hitSurface = traceSceneSurface(probePos, sampleDir, 40.0,
+            hit, hitPos, hitNormal, hitUv, hitTangent, hitDistance);
     }
+    if (!hitSurface) return;
 
     vec3 cellNormal = normalize(hitNormal);
     if (dot(cellNormal, -sampleDir) < 0.0) cellNormal = -cellNormal;
 
     // System #1: 32 threads in the workgroup correspond to 1 active cell.
-    // Each lane gl_SubgroupInvocationID (0..31) calculates a stratified direction in the hemisphere:
+    // Each local invocation lane (0..31) calculates a stratified direction in the hemisphere:
     // 8x4 stratified octahedral grid (8 azimuth columns, 4 elevation rings).
-    uint lane = gl_SubgroupInvocationID;
+    uint lane = gl_LocalInvocationIndex & 31u;
     rngInit(uvec2(probeLinearIdx, pc.frameAndSlice.x + lane * 1013904223u), pc.frameAndSlice.x);
     vec2 laneJitter = vec2(rand1(), rand1());
-    vec3 bounceDir = getStratifiedHemisphereDirection(cellNormal, lane, laneJitter);
+    vec3 bounceDir = stratifiedEnabled
+        ? getStratifiedHemisphereDirection(cellNormal, lane, laneJitter)
+        : sampleCosineHemisphere(cellNormal, laneJitter);
 
     RtInstanceData bounceHit;
     vec3 bouncePos, bounceNormal;
@@ -92,10 +104,55 @@ void main() {
             bounceHit, bouncePos, bounceNormal, bounceUv, bounceTangent, bounceDist)) {
         vec3 bN = normalize(bounceNormal);
         if (dot(bN, -bounceDir) < 0.0) bN = -bN;
+
+        // A mirror bounce must gather radiance from the reflected scene, not from
+        // the mirror's zero diffuse albedo. Trace one specular continuation.
+        float bRoughnessInitial = clamp(bounceHit.material.y *
+            textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).g, 0.0, 1.0);
+        bool bIsMirror = (bounceHit.material.w > 0.5) &&
+                         (bRoughnessInitial < 0.18 || bounceHit.material.x > 0.65);
+        bool mirrorSkyMiss = false;
+        vec3 mirrorTint = vec3(1.0);
+        if (bIsMirror) {
+            vec3 mirrorAlbedo = bounceHit.baseColor.rgb *
+                pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb,
+                        vec3(0.0)), vec3(2.2));
+            float mirrorMetallic = clamp(bounceHit.material.x *
+                textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b,
+                0.0, 1.0);
+            vec3 mirrorF0 = mix(vec3(0.04), mirrorAlbedo, mirrorMetallic);
+            float mirrorCosTheta = clamp(dot(bN, -bounceDir), 0.0, 1.0);
+            mirrorTint = mirrorF0 + (vec3(1.0) - mirrorF0) *
+                        pow(1.0 - mirrorCosTheta, 5.0);
+            vec3 reflDir = reflect(bounceDir, bN);
+            RtInstanceData reflHit;
+            vec3 reflPos, reflNormal;
+            vec2 reflUv;
+            vec4 reflTangent;
+            float reflDist;
+            if (traceSceneSurface(bouncePos + bN * 0.02, reflDir, 40.0,
+                    reflHit, reflPos, reflNormal, reflUv, reflTangent, reflDist)) {
+                bounceHit = reflHit;
+                bouncePos = reflPos;
+                bounceNormal = reflNormal;
+                bounceUv = reflUv;
+                bounceTangent = reflTangent;
+                bounceDir = reflDir;
+                bN = normalize(bounceNormal);
+                if (dot(bN, -bounceDir) < 0.0) bN = -bN;
+            } else {
+                hitRad = sampleRtSkyRadiance(reflDir) * mirrorTint;
+                mirrorSkyMiss = true;
+            }
+        }
+
+        if (!mirrorSkyMiss) {
+        // This is the first indirect hit from the probe. Evaluate every active light
+        // exactly so spot-cone/range-zero candidates cannot poison a one-light RIS pick.
         hitRad = shadeRtHitEx(bounceHit, bouncePos, bN, bounceUv, bounceTangent,
                               bounceDir, true, -1.0, -1, 1.0, 1.5);
-        uint bCascade = getCascadeIndex(bouncePos, cameraPos, 0.0);
-        float bCellSize = getCascadeCellSize(bCascade);
+        uint bCascade = getCascadeIndexCfg(bouncePos, cameraPos, 0.0, clipmapEnabled);
+        float bCellSize = getCascadeCellSizeCfg(bCascade, baseCellSize, clipmapEnabled);
         uint bKey = computeWorldCellKey(bouncePos, bN, bCellSize, bCascade);
         uint bBase = bKey % CACHE_CELL_COUNT;
         for (uint bp = 0u; bp < 4u; ++bp) {
@@ -106,28 +163,53 @@ void main() {
                     pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0)), vec3(2.2));
                 float bMetallic = clamp(bounceHit.material.x *
                     textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b, 0.0, 1.0);
-                float bConf = smoothstep(1.0, 16.0, bCell.irradiance.a);
-                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * bConf;
+                float bConf = smoothstep(0.0, 32.0, bCell.irradiance.a);
+                hitRad += bAlbedo * (1.0 - bMetallic) * bCell.irradiance.rgb * bConf * bounceIntensity;
                 break;
             }
+        }
+        hitRad *= mirrorTint;
         }
     } else {
         hitRad = sampleRtSkyRadiance(bounceDir);
     }
 
-    // Outlier clamp per sample before reduction
-    float hitLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
-    if (hitLum > 1.5) {
-        hitRad *= (1.5 / hitLum);
+    // A workgroup is exactly one 32-sample probe update. Use workgroup shared
+    // memory rather than subgroup reductions: subgroup width is device-dependent.
+    float sampleLum = dot(hitRad, vec3(0.2126, 0.7152, 0.0722));
+    wrcSampleLuminance[lane] = sampleLum;
+    barrier();
+
+    if (lane == 0u) {
+        float luminanceSum = 0.0;
+        uint extremeCount = 0u;
+        for (uint i = 0u; i < 32u; ++i) {
+            float laneLum = wrcSampleLuminance[i];
+            luminanceSum += laneLum;
+        }
+        float meanLum = luminanceSum / 32.0;
+        wrcFireflyThreshold = max(meanLum * 7.0, 24.0);
+        for (uint i = 0u; i < 32u; ++i) {
+            if (wrcSampleLuminance[i] > wrcFireflyThreshold) ++extremeCount;
+        }
+        wrcExtremeSampleCount = extremeCount;
     }
+    barrier();
 
-    // Hardware subgroup reduction across the 32 lanes
-    vec3 avgRad = subgroupAdd(hitRad) / 32.0;
+    if (sampleLum > wrcFireflyThreshold && wrcExtremeSampleCount <= 2u) {
+        float softenedLum = wrcFireflyThreshold + (sampleLum - wrcFireflyThreshold) * 0.25;
+        hitRad *= softenedLum / max(sampleLum, 1e-4);
+    }
+    wrcHitRadiance[lane] = hitRad;
+    barrier();
 
-    // Master lane writes the 32-sample averaged irradiance into the cell
-    if (subgroupElect()) {
-        uint cascade = getCascadeIndex(hitPos, cameraPos, 0.0);
-        cellSize = getCascadeCellSize(cascade);
+    // Master workgroup lane writes the linear 32-sample averaged irradiance.
+    if (lane == 0u) {
+        vec3 avgRad = vec3(0.0);
+        for (uint i = 0u; i < 32u; ++i) avgRad += wrcHitRadiance[i];
+        avgRad /= 32.0;
+        uint cascade = getCascadeIndexCfg(hitPos, cameraPos, 0.0, clipmapEnabled);
+        cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
         vec3 biasedPos = hitPos + cellNormal * (cellSize * 0.25);
         ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
         uint cellKey = computeWorldCellKeyFromCoord(cellCoord, cellNormal, cascade);
@@ -162,11 +244,24 @@ void main() {
             float newWeight;
             vec3 newIrr;
             if (expired) {
-                newWeight = 1.0;
+                // The first 32-ray estimate is useful immediately, but confidence
+                // ramps from 8/32 instead of being treated as fully converged.
+                newWeight = 8.0;
                 newIrr = avgRad;
             } else {
-                newWeight = min(prevWeight + 1.0, 64.0);
-                float alpha = clamp(1.0 / newWeight, 0.03, 0.15);
+                newWeight = min(prevWeight + 4.0, 64.0);
+                float alpha = clamp(4.0 / newWeight, 0.05, 0.25);
+
+                // A probe update is a noisy 32-ray estimate. A few dark updates
+                // must not erase previously observed indirect illumination.
+                // Brightening remains responsive; darkening adapts conservatively.
+                float previousLum = dot(prevCell.irradiance.rgb, vec3(0.2126, 0.7152, 0.0722));
+                float incomingLum = dot(avgRad, vec3(0.2126, 0.7152, 0.0722));
+                if (incomingLum < previousLum) {
+                    float relativeLum = incomingLum / max(previousLum, 1e-3);
+                    float darkAdaptation = mix(0.015, 0.05, smoothstep(0.35, 0.90, relativeLum));
+                    alpha = min(alpha, darkAdaptation);
+                }
                 newIrr = mix(prevCell.irradiance.rgb, avgRad, alpha);
             }
 
