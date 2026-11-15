@@ -61,7 +61,11 @@ bool trySampleWorldRadianceCacheFastCascade(vec3 worldPos, vec3 n, uint cascade,
         uint baseIndex = cellKey % CACHE_CELL_COUNT;
         for (uint probe = 0u; probe < 4u; ++probe) {
             WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
-            if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0)
+            // Cache insertion claims the first empty slot in this probe sequence.
+            // Once reached, later slots cannot contain this key.
+            if (cell.irradiance.a <= 0.0)
+                return false;
+            if (cell.cellKey != cellKey)
                 continue;
             vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
             if (dot(cellN, n) <= 0.65)
