@@ -251,6 +251,17 @@ void main() {
             } else {
                 newWeight = min(prevWeight + 4.0, 64.0);
                 float alpha = clamp(4.0 / newWeight, 0.05, 0.25);
+
+                // A probe update is a noisy 32-ray estimate. A few dark updates
+                // must not erase previously observed indirect illumination.
+                // Brightening remains responsive; darkening adapts conservatively.
+                float previousLum = dot(prevCell.irradiance.rgb, vec3(0.2126, 0.7152, 0.0722));
+                float incomingLum = dot(avgRad, vec3(0.2126, 0.7152, 0.0722));
+                if (incomingLum < previousLum) {
+                    float relativeLum = incomingLum / max(previousLum, 1e-3);
+                    float darkAdaptation = mix(0.015, 0.05, smoothstep(0.35, 0.90, relativeLum));
+                    alpha = min(alpha, darkAdaptation);
+                }
                 newIrr = mix(prevCell.irradiance.rgb, avgRad, alpha);
             }
 
