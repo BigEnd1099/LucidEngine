@@ -105,7 +105,7 @@ layout(push_constant) uniform PC {
 } pc;
 
 const float MAX_REFL_DIST = 1000.0;
-const float FIREFLY_CLAMP = 32.0;
+const float FIREFLY_CLAMP = 16.0;
 
 vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
     float a = max(roughness * roughness, 0.001);
@@ -178,10 +178,10 @@ vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hit
     // Query World Radiance Cache first (gives full 3D multi-bounce indirect GI off-screen)
     vec3 worldGI = vec3(0.0);
     vec4 cachedWRC = sampleWorldRadianceCacheFast(hitPos, Nh);
-    if (cachedWRC.a > 0.05) {
+    if (cachedWRC.a > 0.02) {
         worldGI = diffuseResponse * cachedWRC.rgb * max(ubo.rtFeatureParams.z, 0.0);
     } else if (allowTrace && pathEnergy >= 0.005) {
-        // Fallback: 1 diffuse ray with deterministic multi-light evaluation
+        // Fallback: 1 diffuse ray with tight clamping to prevent spark fireflies in mirror reflections
         vec3 gd = sampleCosineHemisphere(Nh, rand2());
         RtInstanceData h2;
         vec3 p2, n2;
@@ -189,9 +189,10 @@ vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hit
         vec4 t2;
         float dist2;
         if (traceSceneSurface(hitPos + Nh * 0.012, gd, 200.0, h2, p2, n2, uv2, t2, dist2)) {
-            // Deterministic light evaluation across all active lights (-1) eliminates 1-light stochastic fireflies in reflections!
-            vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, -1, 1.0, 2.0), 8.0);
+            vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, -1, 1.0, 2.0), 2.5);
             worldGI = diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
+        } else if ((ubo.skyboxMode & 3) != 0) {
+            worldGI = diffuseResponse * sampleRtSkyRadiance(gd) * max(ubo.rtFeatureParams.z, 0.0);
         }
     }
     return mix(worldGI, screenGI, screenWeight);
@@ -344,7 +345,7 @@ void main() {
             int singleLight = -1;
             float singleWeight = 1.0;
             const bool useSingleLightForHit = (bounce == 0)
-                ? usePrimaryStochasticLights
+                ? (usePrimaryStochasticLights && hitRough > 0.10)
                 : useStochasticLights;
             if (useSingleLightForHit && numActiveLights > 0) {
                 // Uniform one-light sampling is an unbiased estimator of the full local-light sum.

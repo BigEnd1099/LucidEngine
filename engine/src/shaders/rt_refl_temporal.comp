@@ -197,16 +197,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                     checkerCount += 1.0;
                 }
                 if (checkerCount > 0.0 && checkerMaxY.x > 0.05) {
-                    vec3 margin = max(abs(checkerMaxY - checkerMinY), vec3(0.15));
-                    vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
-                    vec3 clampedY = max(vec3(0.0), yCoCgToRgb(
+                    vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.5, vec3(0.10));
+                    vec3 upperBound = checkerMaxY + margin;
+                    checkerHistRgb = max(vec3(0.0), yCoCgToRgb(
                         clamp(checkerHistY, checkerMinY - margin, upperBound)));
-                    if (motionPixels > 1.5) {
-                        vec3 cardinalAvg = cardinalSum / checkerCount;
-                        clampedY = mix(clampedY, cardinalAvg,
-                            clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
-                    }
-                    checkerHistRgb = clampedY;
                 }
             }
             result = vec4(checkerHistRgb, 1.0);

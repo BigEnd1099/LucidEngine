@@ -347,58 +347,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     float newLen;
     float finalHitDistFactor = curHitDistFactor;
     bool isCheckerSkipped = (raw.a < -0.5);
-    float giSpatialReuseStrength = clamp(pc.f.w, 0.0, 1.0);
-
-    // Reuse compatible current-frame neighbors before temporal accumulation. This lets
-    // the temporal filter integrate the reused estimate instead of injecting fresh noise
-    // into an already converged history buffer.
-    float projectedHistoryLen = (wSum > 0.05)
-        ? min(histLen / wSum + 1.0, effectiveMaxHist) : 1.0;
-    float spatialReuseFade = 1.0 - smoothstep(4.0, 10.0, projectedHistoryLen);
-    if (!isCheckerSkipped && spatialReuseFade > 0.001 && giSpatialReuseStrength > 0.01) {
-        vec3 accumRgb = raw.rgb;
-        float accumW = 1.0;
-        float searchRadius = mix(2.0, 6.5, curHitDistFactor) * giSpatialReuseStrength;
-        float baseAngle = ignTemporal(vec2(px), pc.u.w) * 6.2831853;
-        float localDepthTol = max(0.025 * zC, 0.015);
-        for (int si = 0; si < 6; ++si) {
-            float r = sqrt((float(si) + 0.5) / 6.0) * searchRadius;
-            float ang = baseAngle + float(si) * 2.3999632;
-            ivec2 qPx = px + ivec2(round(vec2(cos(ang), sin(ang)) * r));
-            if (any(lessThan(qPx, ivec2(0))) || any(greaterThanEqual(qPx, isize)) || qPx == px)
-                continue;
-            vec4 qRaw = imageLoad(imgS, qPx);
-            if (qRaw.a < 0.0) continue;
-            vec4 qGeom = imageLoad(imgGeomCur, qPx);
-            if (qGeom.z <= 0.0 || abs(qGeom.z - zC) > localDepthTol)
-                continue;
-            vec3 qN = rtOctDecode(qGeom.xy);
-            float nSim = dot(qN, N);
-            if (nSim < 0.82) continue;
-            ivec2 qFullPx = min(ivec2(((vec2(qPx) + 0.5) / size) * vec2(fullDepthSize)), fullDepthSize - 1);
-            float qD = texelFetch(uDepth, qFullPx, 0).r;
-            // Keep neighbour reconstruction on the GI grid for consistent
-            // reprojection and spatial reuse coordinates.
-            vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
-            // Plane-distance rejection prevents reuse across curved silhouettes.
-            if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
-            float qHitDistFactor = unpackGiHitDistFactor(qGeom.w);
-            float qVirtualDist = max(qHitDistFactor * 1.75, 0.15);
-            vec3 virtualHit = qP + qN * qVirtualDist;
-            vec3 toVirtualHitP = virtualHit - P;
-            vec3 toVirtualHitQ = virtualHit - qP;
-            float distPSq = max(dot(toVirtualHitP, toVirtualHitP), 1e-3);
-            vec3 dirPToHit = toVirtualHitP * inversesqrt(distPSq);
-            float cosReceiverP = max(dot(N, dirPToHit), 0.0);
-            float cosVirtualHit = max(dot(qN, dirPToHit), 0.0);
-            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) *
-                                   cosReceiverP * cosVirtualHit, 0.0, 1.25);
-            float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * spatialReuseFade * 0.45;
-            accumRgb += qRaw.rgb * reuseWeight;
-            accumW += reuseWeight;
-        }
-        raw.rgb = accumRgb / accumW;
-    }
+    // Pre-temporal spatial jitter is disabled to prevent frame-to-frame checkerboard variance fighting.
+    // Pure temporal accumulation integrates raw rays smoothly without injecting spatial noise.
 
     float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
     vec2 curSampleMoments = vec2(rawLum, rawLum * rawLum);
@@ -528,9 +478,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 // A bright sample is not automatically a firefly: preserve it when
                 // nearby pixels show the same bright feature. Reject only a high sample
                 // that is statistically rare in a sufficiently populated neighborhood.
-                // Keep temporal rejection conservative in HDR scenes: bright indirect
-                // features must not be capped just because checkerboard leaves few neighbours.
-                float fireflyThreshold = max(8.0 * effectiveSigma.x, max(m1Y.x * 8.0, 32.0));
+                float fireflyThreshold = max(3.5 * effectiveSigma.x, max(m1Y.x * 2.5, 3.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;
@@ -599,8 +547,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                     float clampedHistY = clamp(histY.x, clampMinY.x, clampMaxY.x);
                     hist.rgb *= clampedHistY / max(histY.x, 1e-4);
                 }
-                if ((pc.u.y & 2u) != 0u && realRawFirefly)
-                    raw.rgb *= fireflyLimit / max(rawYCoCg.x, 1e-4);
+                if ((pc.u.y & 2u) != 0u && realRawFirefly) {
+                    float safeLimit = min(fireflyLimit, clampMaxY.x * 1.5 + 0.5);
+                    raw.rgb *= safeLimit / max(rawYCoCg.x, 1e-4);
+                }
             }
             raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
@@ -665,11 +615,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
         bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
         if (surfaceHistoryApplied) {
-            float blendW = isDisoccluded ? (0.85 * surfaceCoverage) : (0.25 * surfaceCoverage);
-            vec3 blendedSurf = mix(result.rgb, surfaceHistory.rgb, blendW);
-            // A world-space cache may restore missing information, but must not dim
-            // a valid screen-space reprojection that already contains brighter energy.
-            result.rgb = isDisoccluded ? blendedSurf : max(result.rgb, blendedSurf);
+            float blendW = isDisoccluded ? (0.75 * surfaceCoverage) : (0.15 * surfaceCoverage);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
             newLen = clamp(max(newLen, min(surfaceHistory.a, 6.0)), 2.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
@@ -680,10 +627,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w);
             if (cached.a > 0.0) {
                 pixelCacheDiag[0]++;
-                // WRC only seeds a disoccluded pixel. Keep its history contribution
-                // low so the next traced observation is not held back by a dark probe.
-                vec3 seeded = mix(result.rgb, cached.rgb, 0.35 * cached.a);
-                result.rgb = isCheckerSkipped ? seeded : max(result.rgb, seeded);
+                result.rgb = mix(result.rgb, cached.rgb, 0.25 * cached.a);
                 newLen = max(newLen, 2.0 * cached.a);
             }
         }

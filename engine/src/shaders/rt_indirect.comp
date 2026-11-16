@@ -128,7 +128,7 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
 
 const float AO_DISTANCE = 1.75;
 const float MAX_RAY_DIST = 200.0;
-const float FIREFLY_CLAMP = 256.0; // Emergency safety ceiling, not an artistic brightness clamp.
+const float FIREFLY_CLAMP = 24.0; // Sane physical diffuse ceiling to eliminate 1-SPP specular/light-cone fireflies.
 const int MAX_BOUNCES = 15;
 
 // Decorrelated 2D PCG scramble keyed by pixel and frame. Used as a
@@ -437,8 +437,8 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
                         float attenuation = (window * window) / (totalDist * totalDist + 1.0);
                         float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
-                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
-                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(32.0));
+                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * (0.15 / 3.14159265) * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
+                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(0.35));
                         pathRadiance += throughput * causticContrib;
                         causticRadiance += throughput * causticContrib;
                         causticHitCount += 1.0;
