@@ -146,8 +146,8 @@ void main() {
     float depthTol = 0.005 * gC.z + 0.002;
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
-    // Fixed per-pixel jitter (no frame component) avoids temporal shimmer.
-    // Signed offsets keep opposite taps symmetric; the center remains untouched.
+    // Deterministic sub-pixel pattern is only large enough to move taps on
+    // the wider step-4/8 passes. Keep the fine step-1/2 kernels exact.
     vec2 kernelJitter = vec2(
         ignTemporal(vec2(px), uint(PASS * 17 + 3)),
         ignTemporal(vec2(px.yx), uint(PASS * 31 + 7))
@@ -155,9 +155,19 @@ void main() {
 
     vec4 momC = imageLoad(imgMomentsCur, px);
     float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
+    float historyLen = unpackGiHistoryLen(gC.w);
     float hitDistFactor = unpackGiHitDistFactor(gC.w);
-    float lC = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
+
+    // Bound the absolute variance contribution relative to local signal energy.
+    // This prevents high-bounce HDR variance from making luminance edge stopping
+    // ineffective, while retaining a small floor for dark/noisy regions.
+    float rawStdDev = sqrt(max(varC, 1e-5));
+    float maxAllowedStdDev = max(lC * 0.35, 0.15);
+    float stdDev = min(rawStdDev, maxAllowedStdDev);
+    // Mature temporal history is already stable: spatial filtering should be gentler.
+    float historySharpness = mix(1.0, 0.45, smoothstep(4.0, 24.0, historyLen));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
@@ -168,8 +178,11 @@ void main() {
         for (int i = -2; i <= 2; ++i) {
             if (i == 0 && j == 0) continue;
             vec2 kernelCoord = vec2(i, j);
-            vec2 signedJitter = kernelJitter * sign(kernelCoord) * (float(step) * 0.35);
-            ivec2 offset = ivec2(round(kernelCoord * float(step) + signedJitter));
+            vec2 signedJitter = (PASS >= 2)
+                ? kernelJitter * sign(kernelCoord) * (float(step) * 0.45)
+                : vec2(0.0);
+            // Opposite taps remain symmetric around the exact center pixel.
+            ivec2 offset = ivec2(i, j) * step + ivec2(round(signedJitter));
             ivec2 q = px + offset;
             if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
             vec4 gQ = imageLoad(imgGeomCur, q);
@@ -184,11 +197,13 @@ void main() {
             if (useSvgf) {
                 float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
                 float deltaL = abs(lC - lQ);
-                float stdDev = sqrt(max(varC, 1e-4));
                 float stepScale = 1.0 / sqrt(float(step));
-                float sigmaL = 1.2 * max(pc.f.x, 0.1) * stepScale;
-                float lumaFloor = 0.03 * stepScale;
-                wl = exp(-deltaL / (sigmaL * stdDev + lumaFloor)) * mix(0.85, 1.15, hitDistFactor);
+                // Hit distance and mature history adjust the threshold, not the
+                // resulting weight. Therefore wl always remains in [0, 1].
+                float hitScale = mix(0.70, 1.05, hitDistFactor) * historySharpness;
+                float sigmaL = 1.1 * max(pc.f.x, 0.1) * stepScale * hitScale;
+                float lumaFloor = 0.02 * stepScale * max(lC, 0.25);
+                wl = exp(-deltaL / max(sigmaL * stdDev + lumaFloor, 1e-5));
             }
 
             // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
