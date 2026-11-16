@@ -52,8 +52,10 @@ void storeDst(ivec2 p, vec4 v) {
 uint giQualityLayer(vec3 radiance, float temporalVariance, float historyLen) {
     float luminance = max(dot(max(radiance, vec3(0.0)),
                               vec3(0.2126, 0.7152, 0.0722)), 0.0);
-    float relativeSigma = sqrt(max(temporalVariance, 0.0)) /
-                          max(luminance, 0.05);
+    // rt_temporal.comp enforces a 0.005 variance floor for edge stopping.
+    // It is not measured noise, so exclude it from confidence classification.
+    float measuredVariance = max(temporalVariance - 0.005, 0.0);
+    float relativeSigma = sqrt(measuredVariance) / max(luminance, 0.05);
     float historyConfidence = smoothstep(2.0, 12.0, historyLen);
     float varianceConfidence = 1.0 - smoothstep(0.18, 0.85, relativeSigma);
     float confidence = historyConfidence * varianceConfidence;
@@ -177,7 +179,10 @@ void main() {
     float historyLen = unpackGiHistoryLen(gC.w);
     float hitDistFactor = unpackGiHitDistFactor(gC.w);
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
-    uint centerLayer = giQualityLayer(center.rgb, temporalVarianceC, historyLen);
+    // Classify from immutable temporal radiance, not the progressively filtered
+    // source, so a pixel cannot change layers between A-Trous passes.
+    vec3 temporalRadianceC = imageLoad(imgHistCur, px).rgb;
+    uint centerLayer = giQualityLayer(temporalRadianceC, temporalVarianceC, historyLen);
     const bool useSvgf = (pc.f.w > 0.5);
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
@@ -207,7 +212,8 @@ void main() {
             // Hard layer isolation: high-, medium-, and low-confidence pixels
             // never contribute radiance to one another. Geometry tests below
             // still protect surfaces within each independent confidence layer.
-            uint neighborLayer = giQualityLayer(qCol.rgb, temporalVarianceQ, historyLenQ);
+            vec3 temporalRadianceQ = imageLoad(imgHistCur, q).rgb;
+            uint neighborLayer = giQualityLayer(temporalRadianceQ, temporalVarianceQ, historyLenQ);
             if (neighborLayer != centerLayer) continue;
 
             vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
