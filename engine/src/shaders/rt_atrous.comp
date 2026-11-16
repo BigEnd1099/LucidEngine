@@ -172,10 +172,10 @@ void main() {
     ) - 0.5;
 
     vec4 momC = imageLoad(imgMomentsCur, px);
-    float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
-    // Layer identity always comes from the original temporal variance (momC.z),
-    // never the variance being propagated by the spatial passes (momC.w).
+    // Diagnostic isolation: every A-Trous pass reads immutable temporal variance.
+    // This avoids cross-workgroup read/write feedback through momC.w during a pass.
     float temporalVarianceC = max(momC.z, 0.0);
+    float varC = temporalVarianceC;
     float historyLen = unpackGiHistoryLen(gC.w);
     float hitDistFactor = unpackGiHitDistFactor(gC.w);
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
@@ -222,7 +222,8 @@ void main() {
             float wn = pow(max(0.0, dot(nC, rtOctDecode(gQ.xy))), 16.0);
 
             float wl = 1.0;
-            float qVar = (PASS == 0) ? temporalVarianceQ : max(qMoments.w, 0.0);
+            // Match the center pixel: never read the concurrently written spatial variance.
+            float qVar = temporalVarianceQ;
             if (useSvgf) {
                 float lQ = max(0.0, dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722)));
                 // Relative luminance contrast and relative uncertainty are
