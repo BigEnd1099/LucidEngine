@@ -32,12 +32,38 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
     vec3 n = normalize(worldNormal);
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
-        SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
-        memoryBarrierBuffer();
+
+        // Read a stable snapshot. A writer may briefly own this slot; never
+        // consume its payload while the sequence is odd or changes around the read.
+        SurfaceHistoryCell entry;
+        bool stableSnapshot = false;
+        for (uint retry = 0u; retry < 8u; ++retry) {
+            uint sequenceBefore = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if ((sequenceBefore & 1u) != 0u)
+                continue;
+
+            SurfaceHistoryCell candidate = surfaceHistoryCache.cells[index];
+            memoryBarrierBuffer();
+            uint sequenceAfter = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if (sequenceBefore == sequenceAfter && (sequenceAfter & 1u) == 0u) {
+                entry = candidate;
+                stableSnapshot = true;
+                break;
+            }
+        }
+        if (!stableSnapshot)
+            return false;
+
         empty = entry.meta.x == 0u;
-        bool match = !empty &&
-                     entry.meta.x == lightingEpoch &&
-                     all(equal(entry.identity.xyz, cell)) &&
+        if (empty)
+            return false;
+
+        // Stale-epoch slots can precede valid entries after epoch changes and
+        // eviction. They are occupied probe slots, not chain terminators.
+        if (entry.meta.x != lightingEpoch)
+            continue;
+
+        bool match = all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
         if (match) {
             history = entry.radianceAge;
@@ -105,19 +131,17 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
-        // Fast atomic snapshot avoids contending on cells already published this frame.
-        uint observedSeq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((observedSeq & 1u) != 0u) return;
-        SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
-        memoryBarrierBuffer();
-        if (observedSeq != atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u))
+        // Do not spin on a slot another lane is updating. Nearby pixels often
+        // map to the same world cell; one failed acquisition can safely drop this
+        // redundant sample rather than extending the lock's lifetime in SIMT.
+        uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if ((seq & 1u) != 0u)
             return;
-        // One CAS attempt: no spinlock. A contended writer skips this sample;
-        // another active pixel can publish the same surface during this dispatch.
-        uint seq = observedSeq;
         if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             return;
 
+        // The slot is now exclusively owned; read its payload only after
+        // acquiring the sequence lock, avoiding a stale pre-lock snapshot.
         memoryBarrierBuffer();
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;

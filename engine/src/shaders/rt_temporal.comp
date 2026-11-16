@@ -81,7 +81,12 @@ bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, v
     for (uint probe = 0u; probe < 4u; ++probe) {
         uint idx = (baseIndex + probe) % CACHE_CELL_COUNT;
         WorldRadianceCell cell = worldRadianceCache.cells[idx];
-        if (cell.cellKey != cellKey || cell.irradiance.a <= 0.0 || currentFrame < cell.lastSeenFrame)
+        // WRC writers claim the first empty slot in this same bounded probe
+        // sequence. An empty slot therefore terminates the search; probing
+        // subsequent slots only adds random SSBO reads on cache misses.
+        if (cell.irradiance.a <= 0.0)
+            return false;
+        if (cell.cellKey != cellKey || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
         if (dot(cellNormal, n) <= 0.65)
@@ -550,7 +555,14 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 vec4 cachedSurf = vec4(0.0);
                 float cachedCov = 0.0;
                 bool cachedSurfaceValid = false;
-                if ((pc.u.x & 2u) != 0u && (wSum > 0.2 || rawYCoCg.x > fireflyLimit)) {
+                // Surface History is only needed as independent evidence for a
+                // statistically unsupported bright outlier. Querying it merely
+                // because reprojection succeeded made every mature GI pixel perform
+                // up to eight 16-probe hash searches, despite no firefly candidate.
+                bool needsCacheEvidence = unsupportedNeighborhood &&
+                    (rawYCoCg.x > fireflyLimit ||
+                     (histLen < 2.0 && histY.x > fireflyLimit));
+                if ((pc.u.x & 2u) != 0u && needsCacheEvidence) {
                     pixelCacheDiag[3]++;
                     cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
                     if (cachedSurfaceValid) pixelCacheDiag[1]++;
@@ -680,8 +692,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     bool surfaceHistoryDebug = (pc.u.y & 8u) != 0u;
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
-    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 &&
-        (writeSample && newLen >= 2.0 || surfaceHistoryDebug)) {
+    // Surface History debug views must be read-only: otherwise this dispatch
+    // races its per-pixel diagnostic reads against concurrent cache writers,
+    // making transient odd sequence values appear as false red misses.
+    if ((pc.u.x & 2u) != 0u && !surfaceHistoryDebug && !isCheckerSkipped && d < 1.0 &&
+        writeSample && newLen >= 2.0) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
 
