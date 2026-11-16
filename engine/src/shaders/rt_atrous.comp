@@ -108,6 +108,17 @@ void main() {
             float density = clamp(imageLoad(imgCaustics, px).a, 0.0, 1.0);
             storeDst(px, vec4(density, density * density, 0.0, 1.0));
             return;
+        } else if (mode == 17u) {
+            vec4 temporalMoments = imageLoad(imgMomentsCur, px);
+            vec3 temporalRadiance = imageLoad(imgHistCur, px).rgb;
+            uint layer = giQualityLayer(temporalRadiance,
+                                        max(temporalMoments.z, 0.0),
+                                        unpackGiHistoryLen(gC.w));
+            vec3 layerColor = (layer == 2u) ? vec3(0.0, 1.0, 0.0)
+                            : (layer == 1u) ? vec3(1.0, 0.8, 0.0)
+                                            : vec3(1.0, 0.0, 0.0);
+            storeDst(px, vec4(layerColor, 1.0));
+            return;
         } else if (mode >= 10u && mode <= 16u) {
             storeDst(px, imageLoad(imgHistCur, px));
             return;
