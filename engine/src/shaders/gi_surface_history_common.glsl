@@ -132,19 +132,25 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
-        // Fast atomic snapshot avoids contending on cells already published this frame.
-        uint observedSeq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-        if ((observedSeq & 1u) != 0u) return;
-        SurfaceHistoryCell existing = surfaceHistoryCache.cells[index];
-        memoryBarrierBuffer();
-        if (observedSeq != atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u))
-            return;
-        // One CAS attempt: no spinlock. A contended writer skips this sample;
-        // another active pixel can publish the same surface during this dispatch.
-        uint seq = observedSeq;
-        if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
+        // Multiple GI pixels often target the same 25 cm surface cell in one
+        // dispatch. Retry a few times when another invocation briefly owns the
+        // slot; a single failed CAS used to discard otherwise useful cache writes.
+        uint seq = 0u;
+        bool acquired = false;
+        for (uint retry = 0u; retry < 4u; ++retry) {
+            seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+            if ((seq & 1u) != 0u)
+                continue;
+            if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) == seq) {
+                acquired = true;
+                break;
+            }
+        }
+        if (!acquired)
             return;
 
+        // The slot is now exclusively owned; read its payload only after
+        // acquiring the sequence lock, avoiding a stale pre-lock snapshot.
         memoryBarrierBuffer();
         SurfaceHistoryCell entry = surfaceHistoryCache.cells[index];
         bool empty = entry.meta.x == 0u;
