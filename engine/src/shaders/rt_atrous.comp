@@ -235,7 +235,7 @@ void main() {
                                        0.025, 1.25);
                 float relativeDelta = abs(lC - lQ) / max(0.05, 0.5 * (lC + lQ));
                 float stepScale = 1.0 / sqrt(float(step));
-                float layerFloor = (centerLayer == 2u) ? 0.035
+                float layerFloor = (centerLayer == 2u) ? 0.070
                                  : (centerLayer == 1u) ? 0.055 : 0.085;
                 float hitScale = mix(0.80, 1.10, hitDistFactor);
                 float sigma = max(pc.f.x, 0.1) * stepScale *
