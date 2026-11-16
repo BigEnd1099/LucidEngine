@@ -21,7 +21,10 @@ namespace engine::renderer {
         WorldRadianceCacheConfidence = 14,
         SurfaceHistoryCacheRadiance = 15,
         SurfaceHistoryCacheAge = 16,
-        GiQualityLayers = 17
+        GiConfidence = 17,
+        GiMeanLuminance = 18,
+        GiTemporalVariance = 19,
+        GiRelativeUncertainty = 20
     };
 
     struct RtSettings {
