@@ -695,7 +695,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     // Surface History debug views must be read-only: otherwise this dispatch
     // races its per-pixel diagnostic reads against concurrent cache writers,
     // making transient odd sequence values appear as false red misses.
-    if ((pc.u.x & 2u) != 0u && (pc.u.y & 8u) == 0u && !isCheckerSkipped && d < 1.0 &&
+    if ((pc.u.x & 2u) != 0u && !surfaceHistoryDebug && !isCheckerSkipped && d < 1.0 &&
         writeSample && newLen >= 2.0) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
