@@ -172,36 +172,41 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             pixelDiag[14] += 1u;
-            // Re-use full history from previous frame when this pixel was active
-            vec3 checkerHistY = rgbToYCoCg((hist / wSum).rgb);
-            vec3 checkerMinY = vec3(1e20);
-            vec3 checkerMaxY = vec3(-1e20);
-            float checkerCount = 0.0;
-            vec3 cardinalSum = vec3(0.0);
-            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
-            for (int ci = 0; ci < 4; ++ci) {
-                ivec2 cp = px + checkerOffsets[ci];
-                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
-                vec4 cv = imageLoad(imgRefl, cp);
-                if (cv.a < 0.5) continue;
-                vec3 cy = rgbToYCoCg(cv.rgb);
-                checkerMinY = min(checkerMinY, cy);
-                checkerMaxY = max(checkerMaxY, cy);
-                cardinalSum += cv.rgb;
-                checkerCount += 1.0;
-            }
-            vec3 checkerHistRgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
-            if (checkerCount > 0.0 && motionPixels > 0.75 && checkerMaxY.x > 0.05) {
-                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.0, vec3(0.15));
-                vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
-                vec3 clampedY = max(vec3(0.0), yCoCgToRgb(
-                    clamp(checkerHistY, checkerMinY - margin, upperBound)));
-                if (motionPixels > 1.5) {
-                    vec3 cardinalAvg = cardinalSum / checkerCount;
-                    clampedY = mix(clampedY, cardinalAvg,
-                        clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
+            // Re-use full history from previous frame when this pixel was active.
+            vec3 checkerHistRgb = max(vec3(0.0), (hist / wSum).rgb);
+            // Neighborhood clamping is only useful once reprojection motion is
+            // large enough to expose disocclusion/ghosting. Avoid four raw-image
+            // reads for the common static and slow-camera case.
+            if (motionPixels > 0.75) {
+                vec3 checkerHistY = rgbToYCoCg(checkerHistRgb);
+                vec3 checkerMinY = vec3(1e20);
+                vec3 checkerMaxY = vec3(-1e20);
+                float checkerCount = 0.0;
+                vec3 cardinalSum = vec3(0.0);
+                const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+                for (int ci = 0; ci < 4; ++ci) {
+                    ivec2 cp = px + checkerOffsets[ci];
+                    if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                    vec4 cv = imageLoad(imgRefl, cp);
+                    if (cv.a < 0.5) continue;
+                    vec3 cy = rgbToYCoCg(cv.rgb);
+                    checkerMinY = min(checkerMinY, cy);
+                    checkerMaxY = max(checkerMaxY, cy);
+                    cardinalSum += cv.rgb;
+                    checkerCount += 1.0;
                 }
-                checkerHistRgb = clampedY;
+                if (checkerCount > 0.0 && checkerMaxY.x > 0.05) {
+                    vec3 margin = max(abs(checkerMaxY - checkerMinY), vec3(0.15));
+                    vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
+                    vec3 clampedY = max(vec3(0.0), yCoCgToRgb(
+                        clamp(checkerHistY, checkerMinY - margin, upperBound)));
+                    if (motionPixels > 1.5) {
+                        vec3 cardinalAvg = cardinalSum / checkerCount;
+                        clampedY = mix(clampedY, cardinalAvg,
+                            clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
+                    }
+                    checkerHistRgb = clampedY;
+                }
             }
             result = vec4(checkerHistRgb, 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
