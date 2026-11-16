@@ -89,15 +89,15 @@ bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, v
         if (cell.cellKey != cellKey || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
-        if (dot(cellNormal, n) <= 0.65)
+        float geomWeight = computeWorldCacheNormalWeight(cellNormal, n);
+        if (geomWeight <= 0.0)
             continue;
-        float geomWeight = 1.0;
         if (planeWeightEnabled) {
             vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
             float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-            if (excessDist > 0.75 * cellSize)
+            if (excessDist > 0.95 * cellSize)
                 continue;
-            geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
+            geomWeight *= computePlaneDistanceWeight(excessDist, cellSize);
         }
         sampleWeight = cell.irradiance.a;
         result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
