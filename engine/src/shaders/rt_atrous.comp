@@ -115,7 +115,7 @@ void main() {
                                       max(mu1, 0.15);
             if (mode == 17u) {
                 float confidence = giConfidence(mu1, temporalVariance, historyLen);
-                storeDst(px, vec4(confidence, 1.0 - confidence, 0.0, 1.0));
+                storeDst(px, vec4(1.0 - confidence, confidence, 0.0, 1.0));
             } else if (mode == 18u) {
                 storeDst(px, vec4(debugLogGray(mu1, 16.0, 8.0), 1.0));
             } else if (mode == 19u) {
