@@ -113,8 +113,13 @@ void main() {
         } else if (mode == 17u) {
             vec4 temporalMoments = imageLoad(imgMomentsCur, px);
             vec3 temporalRadiance = imageLoad(imgHistCur, px).rgb;
+            // Use the raw temporal moments for classification. .z is deliberately
+            // floored for SVGF edge stopping, so subtracting that floor cannot
+            // recover the true variance of low-noise / dark pixels.
+            float classificationVariance = max(
+                temporalMoments.y - temporalMoments.x * temporalMoments.x, 0.0);
             uint layer = giQualityLayer(temporalRadiance,
-                                        max(temporalMoments.z, 0.0),
+                                        classificationVariance,
                                         unpackGiHistoryLen(gC.w));
             vec3 layerColor = (layer == 2u) ? vec3(0.0, 1.0, 0.0)
                             : (layer == 1u) ? vec3(1.0, 0.8, 0.0)
