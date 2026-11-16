@@ -11,6 +11,7 @@ namespace engine::renderer {
     struct PassTelemetry {
         std::string passName;
         double durationMs{0.0};
+        double gpuDurationMs{0.0};
         uint32_t drawCount{0};
     };
 

@@ -37,6 +37,10 @@
 #include "world/PcgSystem.hpp"
 #include "network/Netcode/ReplicationGraph.hpp"
 #include "audio/SpatialAudioEngine.hpp"
+#include "world/SceneTree.hpp"
+#include "world/Prefab.hpp"
+#include "core/SystemScheduler.hpp"
+#include "renderer/RenderingServer.hpp"
 
 namespace engine::core {
     struct EnvironmentSettings {
@@ -127,6 +131,15 @@ namespace engine::core {
         ecs::Registry* getRegistry() { return m_registry.get(); }
         physics::PhysicsContext* getPhysicsContext() { return m_physicsContext.get(); }
         AssetManager* getAssetManager() { return m_assetManager.get(); }
+
+        // Architecture 2.0 Subsystems
+        world::SceneTree* getSceneTree() { return m_sceneTree.get(); }
+        core::SystemScheduler* getSystemScheduler() { return m_scheduler.get(); }
+        renderer::RenderingServer* getRenderingServer() { return m_renderingServer.get(); }
+
+        // AI & Scene Operations
+        uint32_t spawnPrefabFromJson(const nlohmann::json& prefabData, uint32_t parentId = 0xFFFFFFFF);
+        nlohmann::json getSceneHierarchyJson();
 
         // AAA Subsystems Accessors
         physics::ChemistrySystem* getChemistrySystem() { return m_chemistrySystem.get(); }
@@ -317,6 +330,11 @@ namespace engine::core {
         std::unique_ptr<renderer::VulkanContext> m_vulkanContext;
         std::unique_ptr<renderer::VulkanRenderer> m_renderer;
         std::unique_ptr<AssetManager> m_assetManager;
+
+        // Architecture 2.0 Subsystems
+        std::unique_ptr<world::SceneTree> m_sceneTree;
+        std::unique_ptr<core::SystemScheduler> m_scheduler;
+        std::unique_ptr<renderer::RenderingServer> m_renderingServer;
 
         std::jthread m_networkThread;
         std::jthread m_mcpThread;

@@ -26,6 +26,11 @@ namespace engine::ecs {
     struct HierarchyComponent {
         entt::entity parent{entt::null};
         std::vector<entt::entity> children;
+        bool transformDirty{true};
+    };
+
+    struct UUIDComponent {
+        uint64_t uuid{0};
     };
 
     struct MeshComponent {

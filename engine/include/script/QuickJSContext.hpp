@@ -38,6 +38,9 @@ namespace engine::script {
         // To handle interrupts (watchdog)
         void interrupt();
         void resetInterrupt();
+        void setExecutionDeadline(uint32_t timeoutMs);
+        void clearExecutionDeadline();
+        bool isDeadlineExceeded() const;
 
     private:
         static void bindEngineAPI(JSContext* ctx, core::Engine* engineInstance);
@@ -45,6 +48,8 @@ namespace engine::script {
         JSRuntime* m_rt{nullptr};
         JSContext* m_ctx{nullptr};
         bool m_interrupted{false};
+        bool m_hasDeadline{false};
+        std::chrono::steady_clock::time_point m_scriptDeadline;
         std::function<void(const std::string&, const std::string&, const std::string&)> m_onError;
     };
 }

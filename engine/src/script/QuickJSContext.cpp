@@ -21,8 +21,13 @@ namespace engine::script {
         m_ctx = JS_NewContext(m_rt);
 
         JS_SetInterruptHandler(m_rt, [](JSRuntime* rt, void* opaque) -> int {
+            (void)rt;
             auto* self = static_cast<QuickJSContext*>(opaque);
-            return self->m_interrupted ? 1 : 0;
+            if (self->m_interrupted) return 1;
+            if (self->m_hasDeadline && std::chrono::steady_clock::now() > self->m_scriptDeadline) {
+                return 1;
+            }
+            return 0;
         }, this);
     }
 
@@ -41,6 +46,19 @@ namespace engine::script {
 
     void QuickJSContext::resetInterrupt() {
         m_interrupted = false;
+    }
+
+    void QuickJSContext::setExecutionDeadline(uint32_t timeoutMs) {
+        m_scriptDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        m_hasDeadline = true;
+    }
+
+    void QuickJSContext::clearExecutionDeadline() {
+        m_hasDeadline = false;
+    }
+
+    bool QuickJSContext::isDeadlineExceeded() const {
+        return m_hasDeadline && (std::chrono::steady_clock::now() > m_scriptDeadline);
     }
 
     static JSValue js_log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {

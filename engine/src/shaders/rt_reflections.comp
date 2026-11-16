@@ -9,6 +9,7 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
+#include "gi_world_cache_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform readonly image2D imgGI;
@@ -17,6 +18,85 @@ layout(set = 1, binding = 7) uniform sampler2D uGNormalRoughness;
 layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 9, rgba16f) uniform image2D imgRefl;
 layout(set = 0, binding = 7) uniform sampler2D ssgiRadianceMap;
+layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
+
+bool trySampleWorldRadianceCacheFastCascade(vec3 worldPos, vec3 n, uint cascade,
+                                            float baseCellSize, bool clipmapEnabled, vec2 jitter,
+                                            bool jitterEnabled, bool planeWeightEnabled,
+                                            out vec4 result, out float sampleWeight) {
+    float cellSize = getCascadeCellSizeCfg(cascade, baseCellSize, clipmapEnabled);
+    vec3 T, B;
+    buildBasis(n, T, B);
+    vec3 positions[2] = vec3[](
+        worldPos + (T * jitter.x + B * jitter.y) * cellSize,
+        worldPos);
+    int positionCount = jitterEnabled ? 2 : 1;
+    for (int p = 0; p < positionCount; ++p) {
+        vec3 biasedPos = positions[p] + n * (cellSize * 0.25);
+        ivec3 cellCoord = ivec3(floor(biasedPos / cellSize));
+        uint cellKey = computeWorldCellKeyFromCoord(cellCoord, n, cascade);
+        uint baseIndex = cellKey % CACHE_CELL_COUNT;
+        for (uint probe = 0u; probe < 4u; ++probe) {
+            WorldRadianceCell cell = worldRadianceCache.cells[(baseIndex + probe) % CACHE_CELL_COUNT];
+            if (cell.irradiance.a <= 0.0)
+                return false;
+            if (cell.cellKey != cellKey)
+                continue;
+            vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
+            float geomWeight = computeWorldCacheNormalWeight(cellN, n);
+            if (geomWeight <= 0.0)
+                continue;
+            if (planeWeightEnabled) {
+                vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
+                float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
+                if (excessDist > 0.95 * cellSize)
+                    continue;
+                geomWeight *= computePlaneDistanceWeight(excessDist, cellSize);
+            }
+            sampleWeight = cell.irradiance.a;
+            result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
+            return true;
+        }
+    }
+    return false;
+}
+
+vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
+    bool clipmapEnabled = true;
+    bool jitterEnabled = false;
+    bool planeWeightEnabled = true;
+    float baseCellSize = 0.35;
+    uint primaryCascade = getCascadeIndexCfg(worldPos, ubo.cameraPos.xyz, 0.0, clipmapEnabled);
+    vec3 n = normalize(worldNormal);
+    vec2 jitter = vec2(0.0);
+    uint candidates[3];
+    int candidateCount = 1;
+    candidates[0] = primaryCascade;
+    if (clipmapEnabled && primaryCascade > 0u)
+        candidates[candidateCount++] = primaryCascade - 1u;
+    if (clipmapEnabled && primaryCascade < 3u)
+        candidates[candidateCount++] = primaryCascade + 1u;
+
+    vec4 bestResult = vec4(0.0);
+    float bestWeight = -1.0;
+    for (int i = 0; i < candidateCount; ++i) {
+        vec4 candidateResult = vec4(0.0);
+        float candidateWeight = 0.0;
+        if (!trySampleWorldRadianceCacheFastCascade(worldPos, n, candidates[i], baseCellSize,
+                                                    clipmapEnabled, jitter, jitterEnabled,
+                                                    planeWeightEnabled, candidateResult, candidateWeight))
+            continue;
+        float cascadePenalty = (i == 0) ? 1.0 : 0.25;
+        float candidateScore = candidateWeight * cascadePenalty;
+        if (candidateScore > bestWeight) {
+            bestResult = candidateResult;
+            bestWeight = candidateScore;
+        }
+        if (i == 0 && candidateWeight >= 8.0)
+            return candidateResult;
+    }
+    return bestWeight >= 0.0 ? bestResult : vec4(0.0);
+}
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -58,46 +138,61 @@ vec3 screenIndirectAtHit(RtInstanceData hit, vec3 hitPos, vec3 hitNorm, vec2 hit
     vec3 diffuseResponse = (1.0 - F) * (1.0 - hitMetallic) * hitAlbedo;
     if (max(diffuseResponse.r, max(diffuseResponse.g, diffuseResponse.b)) < 1e-3) return vec3(0.0);
 
-    // 1) Visible on screen: reuse the cached GI with guard-band edge fading.
+    // 1) Visible on screen: reuse the denoised A-Trous GI from imgGI
     vec4 clipPos = ubo.viewProj * vec4(hitPos, 1.0);
     vec3 screenGI = vec3(0.0);
     float screenWeight = 0.0;
     if (clipPos.w > 0.001) {
-        vec2 hitUV = clipPos.xy / clipPos.w * 0.5 + 0.5;
-        vec2 edgeFade = smoothstep(vec2(0.0), vec2(0.06), hitUV) * smoothstep(vec2(1.0), vec2(0.94), hitUV);
-        float wEdge = edgeFade.x * edgeFade.y;
-        if (wEdge > 0.001) {
-            float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
-            if (abs(clipPos.z / clipPos.w - screenDepth) < 0.03) {
-                if (useRtGI) {
-                    ivec2 giSize = imageSize(imgGI);
-                    ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
-                    screenGI += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
+        vec2 hitUV = (clipPos.xy / clipPos.w) * 0.5 + 0.5;
+        if (hitUV.x >= 0.0 && hitUV.x <= 1.0 && hitUV.y >= 0.0 && hitUV.y <= 1.0) {
+            vec2 edgeFade = smoothstep(vec2(0.0), vec2(0.05), hitUV) * smoothstep(vec2(1.0), vec2(0.95), hitUV);
+            float wEdge = edgeFade.x * edgeFade.y;
+            if (wEdge > 0.001) {
+                float screenDepth = textureLod(uDepth, hitUV, 0.0).r;
+                float zScreenLinear = rtLinearDepth(screenDepth);
+                float zHitLinear = -(ubo.view * vec4(hitPos, 1.0)).z;
+                float depthTol = 0.08 * zHitLinear + 0.10;
+
+                // Normal check against primary G-Buffer to ensure we don't sample backfaces
+                vec4 gNR = textureLod(uGNormalRoughness, hitUV, 0.0);
+                vec3 screenNorm = normalize(gNR.xyz);
+                bool geomMatch = (abs(zHitLinear - zScreenLinear) < depthTol) && (dot(screenNorm, Nh) > 0.25);
+
+                if (geomMatch) {
+                    if (useRtGI) {
+                        ivec2 giSize = imageSize(imgGI);
+                        ivec2 hitPx = clamp(ivec2(hitUV * vec2(giSize)), ivec2(0), giSize - 1);
+                        screenGI += diffuseResponse * max(imageLoad(imgGI, hitPx).rgb, vec3(0.0)) * max(ubo.rtFeatureParams.z, 0.0);
+                    }
+                    if (useSSGI) {
+                        screenGI += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
+                    }
+                    screenWeight = wEdge;
+                    if (screenWeight >= 0.95) return screenGI;
                 }
-                if (useSSGI) {
-                    screenGI += (diffuseResponse / PI) * max(textureLod(ssgiRadianceMap, hitUV, 0.0).rgb, vec3(0.0));
-                }
-                screenWeight = wEdge;
-                if (screenWeight >= 0.99) return screenGI;
             }
         }
     }
 
-    // 2) Off-screen / hidden in screen space: one diffuse ray smoothly blended with guard band.
-    if (!allowTrace || pathEnergy < 0.005) return screenGI * screenWeight;
-    vec3 gd = sampleCosineHemisphere(Nh, rand2());
-    RtInstanceData h2;
-    vec3 p2, n2;
-    vec2 uv2;
-    vec4 t2;
-    float dist2;
+    // 2) Off-screen / hidden / camera not looking at object:
+    // Query World Radiance Cache first (gives full 3D multi-bounce indirect GI off-screen)
     vec3 worldGI = vec3(0.0);
-    if (traceSceneSurface(hitPos + Nh * 0.012, gd, 200.0, h2, p2, n2, uv2, t2, dist2)) {
-        int numActiveLights = min(ubo.numLights, 8);
-        int singleLight = (numActiveLights > 0) ? clamp(int(floor(rand1() * float(numActiveLights))), 0, numActiveLights - 1) : -1;
-        float singleWeight = (numActiveLights > 0) ? float(numActiveLights) : 1.0;
-        vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, singleLight, singleWeight, 2.0), 24.0);
-        worldGI = diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
+    vec4 cachedWRC = sampleWorldRadianceCacheFast(hitPos, Nh);
+    if (cachedWRC.a > 0.05) {
+        worldGI = diffuseResponse * cachedWRC.rgb * max(ubo.rtFeatureParams.z, 0.0);
+    } else if (allowTrace && pathEnergy >= 0.005) {
+        // Fallback: 1 diffuse ray with deterministic multi-light evaluation
+        vec3 gd = sampleCosineHemisphere(Nh, rand2());
+        RtInstanceData h2;
+        vec3 p2, n2;
+        vec2 uv2;
+        vec4 t2;
+        float dist2;
+        if (traceSceneSurface(hitPos + Nh * 0.012, gd, 200.0, h2, p2, n2, uv2, t2, dist2)) {
+            // Deterministic light evaluation across all active lights (-1) eliminates 1-light stochastic fireflies in reflections!
+            vec3 L2 = clampFirefly(shadeRtHitEx(h2, p2, n2, uv2, t2, gd, true, -1.0, -1, 1.0, 2.0), 8.0);
+            worldGI = diffuseResponse * L2 * max(ubo.rtFeatureParams.z, 0.0);
+        }
     }
     return mix(worldGI, screenGI, screenWeight);
 }

@@ -328,6 +328,11 @@ namespace engine::core {
         m_worldPartition = std::make_unique<world::WorldPartition>();
         m_pcgSystem = std::make_unique<world::PcgSystem>();
         m_replicationGraph = std::make_unique<network::ReplicationGraph>();
+
+        // Architecture 2.0 Subsystems
+        m_sceneTree = std::make_unique<world::SceneTree>(m_registry.get());
+        m_scheduler = std::make_unique<core::SystemScheduler>();
+        m_renderingServer = std::make_unique<renderer::RenderingServer>();
         m_audioEngine = std::make_unique<audio::SpatialAudioEngine>();
 
         // Benchmark runs must start without the editor demonstration scene (ground, lights and dynamic props).
@@ -658,6 +663,9 @@ namespace engine::core {
                 m_physicsAccumulator += clampedDt;
                 while (m_physicsAccumulator >= FIXED_TIMESTEP) {
                     m_physicsSystem->update(m_registry.get(), FIXED_TIMESTEP);
+                    if (m_sceneTree) {
+                        m_sceneTree->physics_process(FIXED_TIMESTEP);
+                    }
                     m_physicsAccumulator -= FIXED_TIMESTEP;
                 }
             } else {
@@ -947,8 +955,32 @@ namespace engine::core {
         }
 
         {
+            LUCID_PROFILE_SCOPE("SceneTreeProcess");
+            if (m_sceneTree) {
+                m_sceneTree->process(clampedDt);
+            }
+        }
+
+        {
             // Evaluate parent-relative transforms before publishing the frame snapshot.
             if (m_registry) m_registry->updateWorldTransforms();
+
+            // Extract RenderFrame for decoupled RenderingServer
+            if (m_renderingServer && m_registry) {
+                renderer::RenderCamera cam{};
+                cam.position = m_camPos;
+                cam.fov = m_camFov;
+                float radYaw = glm::radians(m_camYaw);
+                float radPitch = glm::radians(m_camPitch);
+                glm::vec3 front(cos(radYaw) * cos(radPitch), sin(radPitch), sin(radYaw) * cos(radPitch));
+                cam.view = glm::lookAt(m_camPos, m_camPos + glm::normalize(front), glm::vec3(0.0f, 1.0f, 0.0f));
+                uint32_t rw = 1920, rh = 1080;
+                getRenderResolution(rw, rh);
+                cam.proj = glm::perspective(glm::radians(m_camFov), static_cast<float>(rw) / static_cast<float>(rh ? rh : 1), 0.1f, 1000.0f);
+                cam.proj[1][1] *= -1.0f; // Vulkan Y-flip
+                auto frame = renderer::RenderingServer::extractRenderFrame(m_registry.get(), cam, m_currentTick, clampedDt);
+                m_renderingServer->pushRenderFrame(std::move(frame));
+            }
 
             LUCID_PROFILE_SCOPE("Netcode");
             if (m_replicationGraph && m_registry) {
@@ -1429,11 +1461,7 @@ namespace engine::core {
                     m_sharedStateRing->publish(cpuMs, audioDb, flags, entCount);
                 }
 
-                if (m_headless || m_paused) {
-                    if (m_commandQueue.empty() && (!m_mpscCommandQueue || m_mpscCommandQueue->empty())) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    }
-                } else if (m_targetFps > 0) {
+                if (m_targetFps > 0) {
                     float targetFrameTime = 1.0f / static_cast<float>(m_targetFps);
                     auto frameEndTime = std::chrono::high_resolution_clock::now();
                     float elapsed = std::chrono::duration<float>(frameEndTime - current_now).count();
@@ -1443,6 +1471,10 @@ namespace engine::core {
                     }
                     while (std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - current_now).count() < targetFrameTime) {
                         std::this_thread::yield();
+                    }
+                } else if (m_headless || m_paused) {
+                    if (m_commandQueue.empty() && (!m_mpscCommandQueue || m_mpscCommandQueue->empty())) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     }
                 }
             } catch (const std::exception& e) {
@@ -3395,5 +3427,33 @@ function update(entities, dt, input, contacts) {
     }
     bool Engine::isVsyncEnabled() const {
         return m_vulkanContext ? m_vulkanContext->isVsyncEnabled() : true;
+    }
+
+    uint32_t Engine::spawnPrefabFromJson(const nlohmann::json& prefabData, uint32_t parentId) {
+        if (!m_registry) return 0xFFFFFFFF;
+        entt::entity parent = (parentId != 0xFFFFFFFF && m_registry->get().valid(static_cast<entt::entity>(parentId)))
+            ? static_cast<entt::entity>(parentId)
+            : entt::null;
+        entt::entity entity = world::PrefabSystem::instantiateHierarchy(m_registry.get(), prefabData, parent);
+        if (m_sceneTree && entity != entt::null) {
+            m_sceneTree->wrap_entity(entity);
+        }
+        return static_cast<uint32_t>(entity);
+    }
+
+    nlohmann::json Engine::getSceneHierarchyJson() {
+        if (!m_registry) return nlohmann::json::array();
+        if (m_sceneTree && m_sceneTree->get_root()) {
+            return world::PrefabSystem::serializeHierarchy(m_registry.get(), m_sceneTree->get_root()->get_entity());
+        }
+        nlohmann::json arr = nlohmann::json::array();
+        auto view = m_registry->get().view<ecs::TransformComponent>();
+        for (auto entity : view) {
+            if (!m_registry->get().all_of<ecs::HierarchyComponent>(entity) ||
+                m_registry->get().get<ecs::HierarchyComponent>(entity).parent == entt::null) {
+                arr.push_back(world::PrefabSystem::serializeHierarchy(m_registry.get(), entity));
+            }
+        }
+        return arr;
     }
 }
