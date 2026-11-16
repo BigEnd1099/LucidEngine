@@ -689,7 +689,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "13: WRC Cached Radiance (log HDR RGB)",
                             "14: WRC Confidence (sample weight + plane weight)",
                             "15: Surface History Radiance (log HDR RGB)",
-                            "16: Surface History Age (history length)"
+                            "16: Surface History Age (history length)",
+                            "17: GI Quality Layers (green=high, yellow=medium, red=low)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
