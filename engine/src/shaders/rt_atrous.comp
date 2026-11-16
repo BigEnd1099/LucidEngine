@@ -46,24 +46,19 @@ void storeDst(ivec2 p, vec4 v) {
     else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
 }
 
-// Three confidence layers are evaluated from the unfiltered temporal moments.
- // Keep this classification stable across all A-Trous passes.
-uint giQualityLayer(vec3 radiance, float temporalVariance, float historyLen) {
-    float luminance = max(dot(max(radiance, vec3(0.0)),
-                              vec3(0.2126, 0.7152, 0.0722)), 0.0);
-    // Moments track the variance of individual temporal observations, not the
-    // uncertainty of their accumulated mean. Estimate mean uncertainty using
-    // the number of valid traced observations represented by historyLen.
-    float measuredVariance = max(temporalVariance - 0.005, 0.0);
-    float effectiveSampleCount = max(historyLen, 1.0);
-    float relativeSigmaMean = sqrt(measuredVariance / effectiveSampleCount) /
-                              max(luminance, 0.05);
-    float historyConfidence = smoothstep(2.0, 12.0, historyLen);
-    float varianceConfidence = 1.0 - smoothstep(0.10, 0.45, relativeSigmaMean);
-    float confidence = historyConfidence * varianceConfidence;
-    if (confidence >= 0.68) return 2u;
-    if (confidence >= 0.30) return 1u;
-    return 0u;
+// Continuous GI confidence from the temporal luminance moments.
+// .z carries the SVGF variance floor; subtract it before estimating uncertainty.
+float giConfidence(float mu1, float variance, float historyLen) {
+    float measured = max(variance - 0.005, 0.0);
+    float relativeSigmaMean = sqrt(measured / max(historyLen, 1.0)) /
+                              max(mu1, 0.15);
+    return smoothstep(2.0, 12.0, historyLen) *
+           (1.0 - smoothstep(0.10, 0.45, relativeSigmaMean));
+}
+
+vec3 debugLogGray(float value, float scale, float range) {
+    float t = clamp(log2(1.0 + max(value, 0.0) * scale) / range, 0.0, 1.0);
+    return vec3(t);
 }
 
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
@@ -110,21 +105,24 @@ void main() {
             float density = clamp(imageLoad(imgCaustics, px).a, 0.0, 1.0);
             storeDst(px, vec4(density, density * density, 0.0, 1.0));
             return;
-        } else if (mode == 17u) {
+        } else if (mode >= 17u && mode <= 20u) {
             vec4 temporalMoments = imageLoad(imgMomentsCur, px);
-            vec3 temporalRadiance = imageLoad(imgHistCur, px).rgb;
-            // Use the raw temporal moments for classification. .z is deliberately
-            // floored for SVGF edge stopping, so subtracting that floor cannot
-            // recover the true variance of low-noise / dark pixels.
-            float classificationVariance = max(
-                temporalMoments.y - temporalMoments.x * temporalMoments.x, 0.0);
-            uint layer = giQualityLayer(temporalRadiance,
-                                        classificationVariance,
-                                        unpackGiHistoryLen(gC.w));
-            vec3 layerColor = (layer == 2u) ? vec3(0.0, 1.0, 0.0)
-                            : (layer == 1u) ? vec3(1.0, 0.8, 0.0)
-                                            : vec3(1.0, 0.0, 0.0);
-            storeDst(px, vec4(layerColor, 1.0));
+            float historyLen = unpackGiHistoryLen(gC.w);
+            float mu1 = max(temporalMoments.x, 0.0);
+            float temporalVariance = max(temporalMoments.z, 0.0);
+            float measuredVariance = max(temporalVariance - 0.005, 0.0);
+            float relativeSigmaMean = sqrt(measuredVariance / max(historyLen, 1.0)) /
+                                      max(mu1, 0.15);
+            if (mode == 17u) {
+                float confidence = giConfidence(mu1, temporalVariance, historyLen);
+                storeDst(px, vec4(confidence, 1.0 - confidence, 0.0, 1.0));
+            } else if (mode == 18u) {
+                storeDst(px, vec4(debugLogGray(mu1, 16.0, 8.0), 1.0));
+            } else if (mode == 19u) {
+                storeDst(px, vec4(debugLogGray(temporalVariance, 256.0, 8.0), 1.0));
+            } else {
+                storeDst(px, vec4(debugLogGray(relativeSigmaMean, 1.0, 2.0), 1.0));
+            }
             return;
         } else if (mode >= 10u && mode <= 16u) {
             storeDst(px, imageLoad(imgHistCur, px));
@@ -197,12 +195,8 @@ void main() {
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     float kC = lC / (1.0 + lC);
     const bool useSvgf = (pc.f.w > 0.5);
-
-    // In Karis-luminance space [0, 1), standard deviation is scale-invariant across HDR highlights and dark shadows.
-    // baseSigma ensures 1-SPP Monte Carlo noise can blend (preventing sand and blotches in bright light),
-    // while tightening down automatically as temporal history accumulates to keep indirect shadows crisp.
-    float histProgress = clamp(historyLen / 16.0, 0.0, 1.0);
-    float baseSigma = mix(0.38, 0.14, histProgress);
+    float confC = giConfidence(momC.x, temporalVarianceC, historyLen);
+    float layerFloor = mix(0.16, 0.06, confC);
     float rawSigmaC = sqrt(max(varC, 0.0));
     float kSigmaC = rawSigmaC / max((1.0 + lC) * (1.0 + lC), 1.0);
     float passScale = 1.0 / (1.0 + 0.15 * float(PASS));
@@ -224,6 +218,9 @@ void main() {
 
             vec4 qMoments = imageLoad(imgMomentsCur, q);
             float temporalVarianceQ = max(qMoments.z, 0.0);
+            float historyLenQ = unpackGiHistoryLen(gQ.w);
+            float confQ = giConfidence(qMoments.x, temporalVarianceQ, historyLenQ);
+            float wConf = exp(-max(confC - confQ, 0.0) / 0.20);
             vec4 qCol = loadSrc(q);
 
             vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
@@ -250,12 +247,12 @@ void main() {
                 float rawSigmaQ = sqrt(max(qVar, 0.0));
                 float kSigmaQ = rawSigmaQ / max((1.0 + lQ) * (1.0 + lQ), 1.0);
                 float effectiveKSigma = clamp(max(kSigmaC, kSigmaQ), 0.0, 0.35);
-                float sigmaK = max(baseSigma, effectiveKSigma * 1.5) * passScale * max(pc.f.x, 0.1);
+                float sigmaK = max(layerFloor, effectiveKSigma * 1.5) * passScale * max(pc.f.x, 0.1);
                 wl = exp(-deltaK / max(sigmaK, 1e-4));
             }
 
             // Radiance accumulation: unblocked by AO difference
-            float wRgb = wGeomBase * wl * hitDistanceWeight;
+            float wRgb = wGeomBase * wl * hitDistanceWeight * wConf;
             sumRgb += qCol.rgb * wRgb;
             wRgbTotal += wRgb;
             if (useSvgf) {
@@ -282,7 +279,7 @@ void main() {
 
     // Spatial strength directly controls filtering. SVGF edge-stopping functions
     // (depth, normal, and variance-guided luminance weight) naturally preserve true details.
-    float s = clamp(pc.f.x, 0.0, 1.0);
+    float s = clamp(pc.f.x * mix(1.0, 0.85, confC), 0.0, 1.0);
     vec4 finalValue = mix(center, filtered, s);
     storeDst(px, finalValue);
     persistFinalSurfaceHistory(px, size, gC, finalValue.rgb);
