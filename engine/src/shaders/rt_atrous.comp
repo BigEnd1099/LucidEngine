@@ -120,7 +120,7 @@ void main() {
                 storeDst(px, vec4(debugLogGray(mu1, 16.0, 8.0), 1.0));
             } else if (mode == 19u) {
                 storeDst(px, vec4(debugLogGray(temporalVariance, 256.0, 8.0), 1.0));
-            } else {
+            } else if (mode == 20u) {
                 storeDst(px, vec4(debugLogGray(relativeSigmaMean, 1.0, 2.0), 1.0));
             }
             return;
