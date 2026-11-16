@@ -33,12 +33,8 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
-        // Writers publish odd sequence values while replacing/updating a cell and
-        // advance to the next even value when the snapshot is complete. A reader
-        // must not skip an unstable slot: it may be the first empty slot currently
-        // being published, and later probes are only valid after a stable occupied
-        // slot. Retry briefly because the writer's critical section is only a few
-        // SSBO stores; unresolved contention is a cache miss, never a probe-chain gap.
+        // Read a stable snapshot. A writer may briefly own this slot; never
+        // consume its payload while the sequence is odd or changes around the read.
         SurfaceHistoryCell entry;
         bool stableSnapshot = false;
         for (uint retry = 0u; retry < 8u; ++retry) {
@@ -59,10 +55,13 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
             return false;
 
         empty = entry.meta.x == 0u;
-        // Insertions always claim the first empty or stale-epoch slot in this
-        // probe sequence, so neither can hide a later entry from this epoch.
-        if (empty || entry.meta.x != lightingEpoch)
+        if (empty)
             return false;
+
+        // Stale-epoch slots can precede valid entries after epoch changes and
+        // eviction. They are occupied probe slots, not chain terminators.
+        if (entry.meta.x != lightingEpoch)
+            continue;
 
         bool match = all(equal(entry.identity.xyz, cell)) &&
                      dot(unpackNormalOctahedral(uint(entry.identity.w)), n) > 0.50;
@@ -132,21 +131,13 @@ void storeSurfaceHistory(vec3 worldPos, vec3 worldNormal, vec3 irradiance,
     for (uint probe = 0u; probe < SURFACE_HISTORY_PROBE_COUNT; ++probe) {
         uint index = (base + probe) & (SURFACE_HISTORY_CELL_COUNT - 1u);
 
-        // Multiple GI pixels often target the same 25 cm surface cell in one
-        // dispatch. Retry a few times when another invocation briefly owns the
-        // slot; a single failed CAS used to discard otherwise useful cache writes.
-        uint seq = 0u;
-        bool acquired = false;
-        for (uint retry = 0u; retry < 4u; ++retry) {
-            seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
-            if ((seq & 1u) != 0u)
-                continue;
-            if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) == seq) {
-                acquired = true;
-                break;
-            }
-        }
-        if (!acquired)
+        // Do not spin on a slot another lane is updating. Nearby pixels often
+        // map to the same world cell; one failed acquisition can safely drop this
+        // redundant sample rather than extending the lock's lifetime in SIMT.
+        uint seq = atomicAdd(surfaceHistoryCache.cells[index].meta.y, 0u);
+        if ((seq & 1u) != 0u)
+            return;
+        if (atomicCompSwap(surfaceHistoryCache.cells[index].meta.y, seq, seq + 1u) != seq)
             return;
 
         // The slot is now exclusively owned; read its payload only after
