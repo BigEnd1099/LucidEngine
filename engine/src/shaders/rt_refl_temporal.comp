@@ -67,6 +67,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     if (any(greaterThanEqual(px, isize))) return;
     vec2 size = vec2(isize);
 
+    // Most pixels have no traced reflection (sky / roughness cutoff). Test the
+    // trace result before touching depth and G-buffer textures; keep the bypass
+    // mode's original geometry path intact.
+    vec4 raw = imageLoad(imgRefl, px);
+    bool bypassMode = (pc.u.w & (1u << 15)) != 0u;
+    if (!bypassMode && raw.a <= 0.0) {
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
+        imageStore(imgReflHistCur, px, vec4(0.0));
+        rejectedCounted = true;
+        return;
+    }
+
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0) { // Sky is not a reflection sample.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
@@ -85,9 +97,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
-    vec4 raw = imageLoad(imgRefl, px);
 
-    if ((pc.u.w & (1u << 15)) != 0u) {
+    if (bypassMode) {
         vec3 bypassP = rtWorldPos(vec2(px) + 0.5, d, size);
         float bypassViewDepth = -(ubo.view * vec4(bypassP, 1.0)).z;
         imageStore(imgReflGeomCur, px, vec4(N, bypassViewDepth));
@@ -95,17 +106,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
         ageBin = 0u;
         histogramCounted = true;
-        return;
-    }
-
-    // The trace pass already writes exact zero for sky, invalid normals and
-    // roughness-cutoff pixels. Keep their geometry invalid for reprojection,
-    // but do not reconstruct world position or rewrite two already-empty images.
-    if (raw.a <= 0.0) {
-        histogramCounted = false; // Not a traced reflection sample; never enter age Bin 00.
-        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        rejectedCounted = true;
-        imageStore(imgReflHistCur, px, vec4(0.0));
         return;
     }
 
