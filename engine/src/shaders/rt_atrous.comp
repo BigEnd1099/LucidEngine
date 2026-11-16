@@ -46,6 +46,22 @@ void storeDst(ivec2 p, vec4 v) {
     else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
 }
 
+// Three confidence layers are evaluated from the *unfiltered* temporal moments.
+// Keeping this classification stable across all four A-Trous passes prevents a
+// pixel from drifting between layers as the filtered variance is updated.
+uint giQualityLayer(vec3 radiance, float temporalVariance, float historyLen) {
+    float luminance = max(dot(max(radiance, vec3(0.0)),
+                              vec3(0.2126, 0.7152, 0.0722)), 0.0);
+    float relativeSigma = sqrt(max(temporalVariance, 0.0)) /
+                          max(luminance, 0.05);
+    float historyConfidence = smoothstep(2.0, 12.0, historyLen);
+    float varianceConfidence = 1.0 - smoothstep(0.18, 0.85, relativeSigma);
+    float confidence = historyConfidence * varianceConfidence;
+    if (confidence >= 0.68) return 2u; // high confidence
+    if (confidence >= 0.30) return 1u; // medium confidence
+    return 0u;                         // low confidence
+}
+
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
@@ -155,21 +171,14 @@ void main() {
 
     vec4 momC = imageLoad(imgMomentsCur, px);
     float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
+    // Layer identity always comes from the original temporal variance (momC.z),
+    // never the variance being propagated by the spatial passes (momC.w).
+    float temporalVarianceC = max(momC.z, 0.0);
     float historyLen = unpackGiHistoryLen(gC.w);
     float hitDistFactor = unpackGiHitDistFactor(gC.w);
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
+    uint centerLayer = giQualityLayer(center.rgb, temporalVarianceC, historyLen);
     const bool useSvgf = (pc.f.w > 0.5);
-
-    // Compare radiance in log-luminance space so HDR highlights receive the
-    // same relative edge sensitivity as dark indirect light. Convert linear
-    // luminance variance to log-space standard deviation with the delta method.
-    // A bounded relative sigma prevents noisy HDR values from disabling edge
-    // stopping, without the old center-only 35% clamp rejecting bright samples.
-    const float INV_LN2 = 1.44269504089;
-    float sigmaLogC = sqrt(max(varC, 0.0)) * INV_LN2 / (1.0 + lC);
-    // Mature history is more stable, but retain enough spatial support for HDR
-    // samples instead of collapsing their filter radius to 45%.
-    float historySharpness = mix(1.0, 0.70, smoothstep(4.0, 24.0, historyLen));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
@@ -189,33 +198,43 @@ void main() {
             if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
             vec4 gQ = imageLoad(imgGeomCur, q);
             if (gQ.z < 0.0) continue;
+
+            vec4 qMoments = imageLoad(imgMomentsCur, q);
+            float temporalVarianceQ = max(qMoments.z, 0.0);
+            float historyLenQ = unpackGiHistoryLen(gQ.w);
+            vec4 qCol = loadSrc(q);
+
+            // Hard layer isolation: high-, medium-, and low-confidence pixels
+            // never contribute radiance to one another. Geometry tests below
+            // still protect surfaces within each independent confidence layer.
+            uint neighborLayer = giQualityLayer(qCol.rgb, temporalVarianceQ, historyLenQ);
+            if (neighborLayer != centerLayer) continue;
+
             vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
             float planeDist = abs(dot(nCv, pQv - pCv));
             float wd = exp(-planeDist / max(depthTol * sqrt(float(step)), 1e-4));
             float wn = pow(max(0.0, dot(nC, rtOctDecode(gQ.xy))), 16.0);
 
-            vec4 qCol = loadSrc(q);
             float wl = 1.0;
-            float qVar = 0.0;
+            float qVar = (PASS == 0) ? temporalVarianceQ : max(qMoments.w, 0.0);
             if (useSvgf) {
                 float lQ = max(0.0, dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722)));
-                qVar = (PASS == 0)
-                    ? max(0.0, imageLoad(imgMomentsCur, q).z)
-                    : max(0.0, imageLoad(imgMomentsCur, q).w);
-                float sigmaLogQ = sqrt(qVar) * INV_LN2 / (1.0 + lQ);
-                // Symmetric center/neighbor uncertainty avoids biasing the filter
-                // against a bright center whose variance differs from its neighbor.
-                float sigmaLog = clamp(sqrt(0.5 * (sigmaLogC * sigmaLogC +
-                                                   sigmaLogQ * sigmaLogQ)),
-                                       0.015, 0.75);
-                float deltaLogL = abs(log2(1.0 + lC) - log2(1.0 + lQ));
+                // Relative luminance contrast and relative uncertainty are
+                // scale invariant: a valid HDR sample is not rejected merely
+                // because its absolute luminance is much larger than dark GI.
+                float relSigmaC = sqrt(max(varC, 0.0)) / max(lC, 0.05);
+                float relSigmaQ = sqrt(max(qVar, 0.0)) / max(lQ, 0.05);
+                float relSigma = clamp(sqrt(0.5 * (relSigmaC * relSigmaC +
+                                                   relSigmaQ * relSigmaQ)),
+                                       0.025, 1.25);
+                float relativeDelta = abs(lC - lQ) / max(0.05, 0.5 * (lC + lQ));
                 float stepScale = 1.0 / sqrt(float(step));
-                // Hit distance and history tune the log-radiance threshold, not
-                // the final weight. wl remains bounded to [0, 1].
-                float hitScale = mix(0.70, 1.05, hitDistFactor) * historySharpness;
-                float sigmaL = 1.1 * max(pc.f.x, 0.1) * stepScale * hitScale * sigmaLog;
-                float logFloor = 0.01 * stepScale;
-                wl = exp(-deltaLogL / max(sigmaL + logFloor, 1e-5));
+                float layerFloor = (centerLayer == 2u) ? 0.035
+                                 : (centerLayer == 1u) ? 0.055 : 0.085;
+                float hitScale = mix(0.80, 1.10, hitDistFactor);
+                float sigma = max(pc.f.x, 0.1) * stepScale *
+                              (1.15 * relSigma + layerFloor) * hitScale;
+                wl = exp(-relativeDelta / max(sigma, 1e-5));
             }
 
             // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
