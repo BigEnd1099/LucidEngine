@@ -530,7 +530,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 // that is statistically rare in a sufficiently populated neighborhood.
                 // Keep temporal rejection conservative in HDR scenes: bright indirect
                 // features must not be capped just because checkerboard leaves few neighbours.
-                float fireflyThreshold = max(8.0 * effectiveSigma.x, max(m1Y.x * 8.0, 64.0));
+                float fireflyThreshold = max(8.0 * effectiveSigma.x, max(m1Y.x * 8.0, 32.0));
                 float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
                 float brightNeighborCount = 0.0;
                 float maxSupportedLum = clampMaxY.x;

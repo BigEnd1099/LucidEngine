@@ -46,24 +46,6 @@ void storeDst(ivec2 p, vec4 v) {
     else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
 }
 
-// Three confidence layers are evaluated from the *unfiltered* temporal moments.
-// Keeping this classification stable across all four A-Trous passes prevents a
-// pixel from drifting between layers as the filtered variance is updated.
-uint giQualityLayer(vec3 radiance, float temporalVariance, float historyLen) {
-    float luminance = max(dot(max(radiance, vec3(0.0)),
-                              vec3(0.2126, 0.7152, 0.0722)), 0.0);
-    // rt_temporal.comp enforces a 0.005 variance floor for edge stopping.
-    // It is not measured noise, so exclude it from confidence classification.
-    float measuredVariance = max(temporalVariance - 0.005, 0.0);
-    float relativeSigma = sqrt(measuredVariance) / max(luminance, 0.05);
-    float historyConfidence = smoothstep(2.0, 12.0, historyLen);
-    float varianceConfidence = 1.0 - smoothstep(0.18, 0.85, relativeSigma);
-    float confidence = historyConfidence * varianceConfidence;
-    if (confidence >= 0.68) return 2u; // high confidence
-    if (confidence >= 0.30) return 1u; // medium confidence
-    return 0u;                         // low confidence
-}
-
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
@@ -164,41 +146,35 @@ void main() {
     float depthTol = 0.005 * gC.z + 0.002;
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
-    // Deterministic sub-pixel pattern is only large enough to move taps on
-    // the wider step-4/8 passes. Keep the fine step-1/2 kernels exact.
-    vec2 kernelJitter = vec2(
-        ignTemporal(vec2(px), uint(PASS * 17 + 3)),
-        ignTemporal(vec2(px.yx), uint(PASS * 31 + 7))
-    ) - 0.5;
 
     vec4 momC = imageLoad(imgMomentsCur, px);
     float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
-    // Layer identity always comes from the original temporal variance (momC.z),
-    // never the variance being propagated by the spatial passes (momC.w).
     float temporalVarianceC = max(momC.z, 0.0);
     float historyLen = unpackGiHistoryLen(gC.w);
     float hitDistFactor = unpackGiHitDistFactor(gC.w);
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
-    // Classify from immutable temporal radiance, not the progressively filtered
-    // source, so a pixel cannot change layers between A-Trous passes.
-    vec3 temporalRadianceC = imageLoad(imgHistCur, px).rgb;
-    uint centerLayer = giQualityLayer(temporalRadianceC, temporalVarianceC, historyLen);
+    float kC = lC / (1.0 + lC);
     const bool useSvgf = (pc.f.w > 0.5);
+
+    // In Karis-luminance space [0, 1), standard deviation is scale-invariant across HDR highlights and dark shadows.
+    // baseSigma ensures 1-SPP Monte Carlo noise can blend (preventing sand and blotches in bright light),
+    // while tightening down automatically as temporal history accumulates to keep indirect shadows crisp.
+    float histProgress = clamp(historyLen / 16.0, 0.0, 1.0);
+    float baseSigma = mix(0.38, 0.14, histProgress);
+    float rawSigmaC = sqrt(max(varC, 0.0));
+    float kSigmaC = rawSigmaC / max((1.0 + lC) * (1.0 + lC), 1.0);
+    float passScale = 1.0 / (1.0 + 0.15 * float(PASS));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
     float varSum = varC * (h[0] * h[0]);
-    float wTotal = h[0] * h[0];
+    float wRgbTotal = h[0] * h[0];
+    float wAoTotal = h[0] * h[0];
 
     for (int j = -2; j <= 2; ++j) {
         for (int i = -2; i <= 2; ++i) {
             if (i == 0 && j == 0) continue;
-            vec2 kernelCoord = vec2(i, j);
-            vec2 signedJitter = (PASS >= 2)
-                ? kernelJitter * sign(kernelCoord) * (float(step) * 0.45)
-                : vec2(0.0);
-            // Opposite taps remain symmetric around the exact center pixel.
-            ivec2 offset = ivec2(i, j) * step + ivec2(round(signedJitter));
+            ivec2 offset = ivec2(i, j) * step;
             ivec2 q = px + offset;
             if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
             vec4 gQ = imageLoad(imgGeomCur, q);
@@ -206,64 +182,57 @@ void main() {
 
             vec4 qMoments = imageLoad(imgMomentsCur, q);
             float temporalVarianceQ = max(qMoments.z, 0.0);
-            float historyLenQ = unpackGiHistoryLen(gQ.w);
             vec4 qCol = loadSrc(q);
-
-            // Hard layer isolation: high-, medium-, and low-confidence pixels
-            // never contribute radiance to one another. Geometry tests below
-            // still protect surfaces within each independent confidence layer.
-            vec3 temporalRadianceQ = imageLoad(imgHistCur, q).rgb;
-            uint neighborLayer = giQualityLayer(temporalRadianceQ, temporalVarianceQ, historyLenQ);
-            if (neighborLayer != centerLayer) continue;
 
             vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
             float planeDist = abs(dot(nCv, pQv - pCv));
             float wd = exp(-planeDist / max(depthTol * sqrt(float(step)), 1e-4));
             float wn = pow(max(0.0, dot(nC, rtOctDecode(gQ.xy))), 16.0);
+            float wGeomBase = h[abs(i)] * h[abs(j)] * wd * wn;
+            if (wGeomBase <= 1e-6) continue;
 
+            float offsetPixels = length(vec2(offset));
+            float hitRadiusPixels = mix(1.5, 5.0, hitDistFactor);
+            float hitDistanceWeight = exp(-0.10 * offsetPixels / max(hitRadiusPixels, 1.0));
+
+            // SVGF Karis-Luminance Weighting:
+            // Eliminates sand and blotches in bright light by evaluating difference in perceptual [0, 1) Karis space,
+            // while preserving true linear HDR radiance during accumulation.
             float wl = 1.0;
             float qVar = (PASS == 0) ? temporalVarianceQ : max(qMoments.w, 0.0);
             if (useSvgf) {
                 float lQ = max(0.0, dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722)));
-                // Relative luminance contrast and relative uncertainty are
-                // scale invariant: a valid HDR sample is not rejected merely
-                // because its absolute luminance is much larger than dark GI.
-                float relSigmaC = sqrt(max(varC, 0.0)) / max(lC, 0.05);
-                float relSigmaQ = sqrt(max(qVar, 0.0)) / max(lQ, 0.05);
-                float relSigma = clamp(sqrt(0.5 * (relSigmaC * relSigmaC +
-                                                   relSigmaQ * relSigmaQ)),
-                                       0.025, 1.25);
-                float relativeDelta = abs(lC - lQ) / max(0.05, 0.5 * (lC + lQ));
-                float stepScale = 1.0 / sqrt(float(step));
-                float layerFloor = (centerLayer == 2u) ? 0.070
-                                 : (centerLayer == 1u) ? 0.055 : 0.085;
-                float hitScale = mix(0.80, 1.10, hitDistFactor);
-                float sigma = max(pc.f.x, 0.1) * stepScale *
-                              (1.15 * relSigma + layerFloor) * hitScale;
-                wl = exp(-relativeDelta / max(sigma, 1e-5));
+                float kQ = lQ / (1.0 + lQ);
+                float deltaK = abs(kC - kQ);
+                float rawSigmaQ = sqrt(max(qVar, 0.0));
+                float kSigmaQ = rawSigmaQ / max((1.0 + lQ) * (1.0 + lQ), 1.0);
+                float effectiveKSigma = clamp(max(kSigmaC, kSigmaQ), 0.0, 0.35);
+                float sigmaK = max(baseSigma, effectiveKSigma * 1.5) * passScale * max(pc.f.x, 0.1);
+                wl = exp(-deltaK / max(sigmaK, 1e-4));
             }
 
-            // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
-            float deltaVis = abs(center.a - qCol.a);
-            float wVis = exp(-deltaVis / 0.18);
-
-            float offsetPixels = length(vec2(offset));
-            float hitRadiusPixels = mix(1.5, 5.0, hitDistFactor);
-            float hitDistanceWeight = exp(-0.12 * offsetPixels / max(hitRadiusPixels, 1.0));
-            float w = h[abs(i)] * h[abs(j)] * wd * wn * wl * wVis * hitDistanceWeight;
-            sumRgb += qCol.rgb * w;
-            sumAo += qCol.a * w;
+            // Radiance accumulation: unblocked by AO difference
+            float wRgb = wGeomBase * wl * hitDistanceWeight;
+            sumRgb += qCol.rgb * wRgb;
+            wRgbTotal += wRgb;
             if (useSvgf) {
-                varSum += w * qVar;
+                varSum += wRgb * qVar;
             }
-            wTotal += w;
+
+            // Contact shadow / AO preservation: deltaVis only constrains the AO channel
+            float deltaVis = abs(center.a - qCol.a);
+            float wVis = exp(-deltaVis / 0.25);
+            float wAo = wGeomBase * wVis * hitDistanceWeight;
+            sumAo += qCol.a * wAo;
+            wAoTotal += wAo;
         }
     }
-    vec4 filtered = vec4(sumRgb / max(wTotal, 1e-6),
-                         sumAo / max(wTotal, 1e-6));
+
+    vec4 filtered = vec4(sumRgb / max(wRgbTotal, 1e-6),
+                         sumAo / max(wAoTotal, 1e-6));
 
     if (useSvgf && PASS < 3) {
-        float filteredVar = varSum / max(wTotal, 1e-6);
+        float filteredVar = varSum / max(wRgbTotal, 1e-6);
         momC.w = filteredVar;
         imageStore(imgMomentsCur, px, momC);
     }
