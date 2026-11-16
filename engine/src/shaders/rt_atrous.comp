@@ -51,10 +51,15 @@ void storeDst(ivec2 p, vec4 v) {
 uint giQualityLayer(vec3 radiance, float temporalVariance, float historyLen) {
     float luminance = max(dot(max(radiance, vec3(0.0)),
                               vec3(0.2126, 0.7152, 0.0722)), 0.0);
-    float relativeSigma = sqrt(max(temporalVariance, 0.0)) /
-                          max(luminance, 0.05);
+    // Moments track the variance of individual temporal observations, not the
+    // uncertainty of their accumulated mean. Estimate mean uncertainty using
+    // the number of valid traced observations represented by historyLen.
+    float measuredVariance = max(temporalVariance - 0.005, 0.0);
+    float effectiveSampleCount = max(historyLen, 1.0);
+    float relativeSigmaMean = sqrt(measuredVariance / effectiveSampleCount) /
+                              max(luminance, 0.05);
     float historyConfidence = smoothstep(2.0, 12.0, historyLen);
-    float varianceConfidence = 1.0 - smoothstep(0.18, 0.85, relativeSigma);
+    float varianceConfidence = 1.0 - smoothstep(0.10, 0.45, relativeSigmaMean);
     float confidence = historyConfidence * varianceConfidence;
     if (confidence >= 0.68) return 2u;
     if (confidence >= 0.30) return 1u;
