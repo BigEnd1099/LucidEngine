@@ -160,14 +160,16 @@ void main() {
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
 
-    // Bound the absolute variance contribution relative to local signal energy.
-    // This prevents high-bounce HDR variance from making luminance edge stopping
-    // ineffective, while retaining a small floor for dark/noisy regions.
-    float rawStdDev = sqrt(max(varC, 1e-5));
-    float maxAllowedStdDev = max(lC * 0.35, 0.15);
-    float stdDev = min(rawStdDev, maxAllowedStdDev);
-    // Mature temporal history is already stable: spatial filtering should be gentler.
-    float historySharpness = mix(1.0, 0.45, smoothstep(4.0, 24.0, historyLen));
+    // Compare radiance in log-luminance space so HDR highlights receive the
+    // same relative edge sensitivity as dark indirect light. Convert linear
+    // luminance variance to log-space standard deviation with the delta method.
+    // A bounded relative sigma prevents noisy HDR values from disabling edge
+    // stopping, without the old center-only 35% clamp rejecting bright samples.
+    const float INV_LN2 = 1.44269504089;
+    float sigmaLogC = sqrt(max(varC, 0.0)) * INV_LN2 / (1.0 + lC);
+    // Mature history is more stable, but retain enough spatial support for HDR
+    // samples instead of collapsing their filter radius to 45%.
+    float historySharpness = mix(1.0, 0.70, smoothstep(4.0, 24.0, historyLen));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
@@ -194,16 +196,26 @@ void main() {
 
             vec4 qCol = loadSrc(q);
             float wl = 1.0;
+            float qVar = 0.0;
             if (useSvgf) {
-                float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
-                float deltaL = abs(lC - lQ);
+                float lQ = max(0.0, dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722)));
+                qVar = (PASS == 0)
+                    ? max(0.0, imageLoad(imgMomentsCur, q).z)
+                    : max(0.0, imageLoad(imgMomentsCur, q).w);
+                float sigmaLogQ = sqrt(qVar) * INV_LN2 / (1.0 + lQ);
+                // Symmetric center/neighbor uncertainty avoids biasing the filter
+                // against a bright center whose variance differs from its neighbor.
+                float sigmaLog = clamp(sqrt(0.5 * (sigmaLogC * sigmaLogC +
+                                                   sigmaLogQ * sigmaLogQ)),
+                                       0.015, 0.75);
+                float deltaLogL = abs(log2(1.0 + lC) - log2(1.0 + lQ));
                 float stepScale = 1.0 / sqrt(float(step));
-                // Hit distance and mature history adjust the threshold, not the
-                // resulting weight. Therefore wl always remains in [0, 1].
+                // Hit distance and history tune the log-radiance threshold, not
+                // the final weight. wl remains bounded to [0, 1].
                 float hitScale = mix(0.70, 1.05, hitDistFactor) * historySharpness;
-                float sigmaL = 1.1 * max(pc.f.x, 0.1) * stepScale * hitScale;
-                float lumaFloor = 0.02 * stepScale * max(lC, 0.25);
-                wl = exp(-deltaL / max(sigmaL * stdDev + lumaFloor, 1e-5));
+                float sigmaL = 1.1 * max(pc.f.x, 0.1) * stepScale * hitScale * sigmaLog;
+                float logFloor = 0.01 * stepScale;
+                wl = exp(-deltaLogL / max(sigmaL + logFloor, 1e-5));
             }
 
             // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
@@ -217,7 +229,6 @@ void main() {
             sumRgb += qCol.rgb * w;
             sumAo += qCol.a * w;
             if (useSvgf) {
-                float qVar = (PASS == 0) ? max(0.0, imageLoad(imgMomentsCur, q).z) : max(0.0, imageLoad(imgMomentsCur, q).w);
                 varSum += w * qVar;
             }
             wTotal += w;
