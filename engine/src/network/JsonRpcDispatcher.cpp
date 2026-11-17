@@ -117,8 +117,12 @@ namespace engine::network {
                     eng->sendWsMessage(client, res.dump());
                 });
             } else if (method == "engine.captureFrame") {
-                queue.push([client, id](core::Engine* eng) {
-                    std::string b64 = eng->captureFrameBase64();
+                int accumulate = 1;
+                if (json.contains("params") && json["params"].is_object()) {
+                    accumulate = json["params"].value("accumulate", 1);
+                }
+                queue.push([client, id, accumulate](core::Engine* eng) {
+                    std::string b64 = eng->captureFrameBase64(accumulate);
                     nlohmann::json res = {
                         {"jsonrpc", "2.0"},
                         {"id", id},
@@ -934,6 +938,14 @@ namespace engine::network {
                     setBool(quality, "giCheckerboard", rt.giCheckerboard);
                     setBool(quality, "reflectionInfiniteBounces", rt.reflectionInfiniteBounces);
                     setBool(quality, "denoiseEnabled", rt.denoiseEnabled);
+                    setBool(quality, "giTemporalFilterEnabled", rt.giTemporalFilterEnabled);
+                    setBool(quality, "giHistoryClampEnabled", rt.giHistoryClampEnabled);
+                    setBool(quality, "giTemporalFireflyFilterEnabled", rt.giTemporalFireflyFilterEnabled);
+                    setBool(quality, "giDominanceRatioFilterEnabled", rt.giDominanceRatioFilterEnabled);
+                    setFloat(quality, "giDarkRatio", rt.giDarkRatio, 0.0f, 1.0f);
+                    setFloat(quality, "giBrightRatio", rt.giBrightRatio, 0.0f, 1.0f);
+                    setFloat(quality, "giMidtoneSmoothness", rt.giMidtoneSmoothness, 0.0f, 1.0f);
+                    setBool(quality, "giTraceFireflyClampEnabled", rt.giTraceFireflyClampEnabled);
                     setBool(quality, "svgfEnabled", rt.svgfEnabled);
                     setBool(quality, "reflectionCheckerboard", rt.reflectionCheckerboard);
                     setBool(quality, "reflectionStochasticLights", rt.reflectionStochasticLights);
@@ -966,7 +978,16 @@ namespace engine::network {
                         {"reflectionMaxRoughness", rt.reflectionMaxRoughness},
                         {"reflectionMinThroughput", rt.reflectionMinThroughput},
                         {"maxHistory", rt.maxHistory}, {"spatialStrength", rt.spatialStrength},
-                        {"denoiseEnabled", rt.denoiseEnabled}, {"svgfEnabled", rt.svgfEnabled},
+                        {"denoiseEnabled", rt.denoiseEnabled},
+                        {"giTemporalFilterEnabled", rt.giTemporalFilterEnabled},
+                        {"giHistoryClampEnabled", rt.giHistoryClampEnabled},
+                        {"giTemporalFireflyFilterEnabled", rt.giTemporalFireflyFilterEnabled},
+                        {"giDominanceRatioFilterEnabled", rt.giDominanceRatioFilterEnabled},
+                        {"giDarkRatio", rt.giDarkRatio},
+                        {"giBrightRatio", rt.giBrightRatio},
+                        {"giMidtoneSmoothness", rt.giMidtoneSmoothness},
+                        {"giTraceFireflyClampEnabled", rt.giTraceFireflyClampEnabled},
+                        {"svgfEnabled", rt.svgfEnabled},
                         {"reflectionCheckerboard", rt.reflectionCheckerboard},
                         {"reflectionStochasticLights", rt.reflectionStochasticLights},
                         {"reflectionPrimaryStochasticLights", rt.reflectionPrimaryStochasticLights},

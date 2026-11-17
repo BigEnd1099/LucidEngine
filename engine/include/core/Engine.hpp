@@ -73,7 +73,7 @@ namespace engine::core {
         bool destroyEntity(uint32_t id);
         void resetScene(const std::string& preset = "physics");
         void applySnapshotJson(const std::string& jsonStr);
-        std::string captureFrameBase64();
+        std::string captureFrameBase64(int accumulateFrames = 1);
         std::string captureAovBase64(const std::string& aovName, nlohmann::json& outMetadata);
         void stepSimulation(int steps, float dt);
         nlohmann::json getSnapshotJson();

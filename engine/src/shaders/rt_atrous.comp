@@ -227,8 +227,8 @@ void main() {
             float centerLum = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
             float meanLum = dot(neighborMean, vec3(0.2126, 0.7152, 0.0722));
             float maxLum = dot(neighborMax, vec3(0.2126, 0.7152, 0.0722));
-            if (centerLum > meanLum * 1.8 + 0.15 && centerLum > maxLum * 1.15 + 0.05) {
-                vec3 safeClamp = neighborMean * 1.4 + vec3(0.10);
+            if (centerLum > meanLum * 6.0 + 4.0 && centerLum > maxLum * 3.0 + 1.5) {
+                vec3 safeClamp = max(neighborMax * 1.5, neighborMean * 2.5 + vec3(0.5));
                 center.rgb = min(center.rgb, safeClamp);
             }
         }
@@ -243,15 +243,17 @@ void main() {
 
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
-    const float epsL = 0.015;
-    float logLC = log(lC + epsL);
     float historyLen = unpackGiHistoryLen(gC.w);
+
     // Dynamic history boost: at low history (SPP1 / camera motion / fresh frame) widen bandwidth
     // to smooth stochastic hits and prevent energy loss. At mature history, bandwidth contracts
     // to maintain sharp shadow boundaries while dissolving low-frequency blotches across surfaces.
-    float histBoost = mix(3.5, 1.0, clamp(historyLen / 12.0, 0.0, 1.0));
-    float relSigmaC = sqrt(max(varC, 0.0)) / (lC + 0.08);
-    float sigmaLogC = clamp(relSigmaC * histBoost, 0.25, 3.5);
+    float histBoost = mix(2.5, 1.0, clamp(historyLen / 8.0, 0.0, 1.0));
+
+    // Decayed variance per pass (SVGF Schied et al. 2017 Eq. 6):
+    // As passes progress (step = 1, 2, 4, 8), prior passes have smoothed noise variance by ~2x per pass.
+    float passVarC = varC / exp2(float(PASS));
+    float sigmaC = sqrt(max(passVarC, 0.0));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
@@ -277,34 +279,26 @@ void main() {
             float wGeomBase = h[abs(i)] * h[abs(j)] * wd * wn;
             if (wGeomBase <= 1e-6) continue;
 
-            // Clamp neighbor outlier spike so an isolated 1-SPP firefly cannot corrupt the filter
-            vec3 safeQCol = min(qCol.rgb, center.rgb * 4.5 + vec3(2.5));
+            vec3 safeQCol = qCol.rgb;
+            float lQ = max(0.0, dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)));
+            float deltaL = abs(lC - lQ);
 
-            // Log-luminance Weber-Fechner SVGF weighting:
-            // 1. Smooth 1-SPP stochastic noise across surfaces without fireflies, fake texture or energy loss.
-            // 2. Dissolve low-frequency blotches across surfaces while preserving true shadow edges.
+            // True Linear SVGF Luminance Edge-Stopping (Schied et al. 2017 Eq. 6):
+            // w_l = exp(-|lC - lQ| / (k_sigma * sqrt(Var) + eps))
+            // Using LINEAR luminance (NOT log-luminance):
+            // - In dark areas: small noise |deltaL| < sigma is freely smoothed, eliminating blotchiness/coagulation.
+            // - In bright areas: noise is filtered smoothly without dark holes eating into the light.
+            // - Across true shadow boundaries: |deltaL| >> sigma, so edges remain razor-sharp.
             float wl = 1.0;
             if (useSvgf) {
                 vec4 qMoments = imageLoad(imgMomentsCur, q);
                 float qVar = (PASS == 0) ? max(qMoments.z, 0.0) : max(qMoments.w, 0.0);
-                float lQ = max(0.0, dot(safeQCol.rgb, vec3(0.2126, 0.7152, 0.0722)));
-                float logLQ = log(lQ + epsL);
-                float deltaLogL = abs(logLC - logLQ);
+                float passVarQ = qVar / exp2(float(PASS));
+                float sigmaQ = sqrt(max(passVarQ, 0.0));
+                float effectiveSigma = max(sigmaC, sigmaQ);
 
-                float relSigmaQ = sqrt(max(qVar, 0.0)) / (lQ + 0.08);
-                float sigmaLogQ = clamp(relSigmaQ * histBoost, 0.25, 3.5);
-                float effectiveSigma = max(sigmaLogC, sigmaLogQ);
-
-                bool isPlanar = (planeDist < depthTol * 0.75 && dn > 0.92);
-                float passScale = 1.0 + 0.35 * float(PASS);
-                float sigmaL_factor = (isPlanar ? 4.5 : 2.5) * passScale * max(pc.f.x, 0.1);
-                float denom = max(sigmaL_factor * effectiveSigma, isPlanar ? 0.65 : 0.25);
-                if (isPlanar) {
-                    float lumFactor = clamp(lC / 0.12, 0.0, 1.0);
-                    // In low-light / deep ambient on flat surfaces, expand luminance bandwidth to completely dissolve residual cloudiness
-                    denom = max(denom, mix(2.8, denom, lumFactor));
-                }
-                wl = exp(-deltaLogL / denom);
+                float bandwidth = max(3.5 * effectiveSigma * max(pc.f.x, 0.1) * histBoost, 0.015);
+                wl = exp(-deltaL / bandwidth);
             }
 
             float wRgb = wGeomBase * wl;

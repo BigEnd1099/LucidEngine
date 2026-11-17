@@ -1444,7 +1444,7 @@ namespace engine::core {
                         core::Logger::error(std::string("Animation/skin pose update exception: ") + e.what());
                     }
                 }
-                if (!m_headless) {
+                if (!m_headless || m_simulationSessionActive) {
                     try { render(); } catch(const std::exception& e) { core::Logger::error(std::string("Render exception: ") + e.what()); } catch(...) { core::Logger::error("Unknown render exception!"); }
                 }
 
@@ -2124,14 +2124,15 @@ function update(entities, dt, input, contacts) {
 )";
     }
 
-    std::string Engine::captureFrameBase64() {
-        if (true) { // Always render on frame capture
-            glm::vec3 front;
-            front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
-            front.y = sin(glm::radians(m_camPitch));
-            front.z = sin(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
-            front = glm::normalize(front);
-            glm::mat4 viewMatrix = glm::lookAt(m_camPos, m_camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+    std::string Engine::captureFrameBase64(int accumulateFrames) {
+        glm::vec3 front;
+        front.x = cos(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
+        front.y = sin(glm::radians(m_camPitch));
+        front.z = sin(glm::radians(m_camYaw)) * cos(glm::radians(m_camPitch));
+        front = glm::normalize(front);
+        glm::mat4 viewMatrix = glm::lookAt(m_camPos, m_camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+        int count = std::max(1, accumulateFrames);
+        for (int i = 0; i < count; ++i) {
             try {
                 m_renderer->render(*m_registry, m_assetManager.get(), viewMatrix, this);
             } catch (...) {}

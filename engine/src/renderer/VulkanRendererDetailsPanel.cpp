@@ -623,6 +623,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::BeginDisabled(!m_rtSettings.giEnabled && !m_rtSettings.aoEnabled);
                         ImGui::SliderInt("RT GI/AO Samples per Pixel", &m_rtSettings.giSamples, 1, 16, "%d");
                         ImGui::Checkbox("GI Path Firefly Clamp", &m_rtSettings.giTraceFireflyClampEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Clamps extreme single-path Monte Carlo spikes (>128 HDR) on secondary bounces to prevent fireflies, while preserving full dynamic range for bright spotlights and caustics.");
                         ImGui::SeparatorText("GI Radiance Caches");
                         ImGui::Checkbox("World Radiance Probe Cache", &m_rtSettings.worldRadianceCacheEnabled);
                         if (ImGui::IsItemHovered())
@@ -660,7 +662,25 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::BeginDisabled(!m_rtSettings.denoiseEnabled);
                         ImGui::Checkbox("GI Temporal Accumulation", &m_rtSettings.giTemporalFilterEnabled);
                         ImGui::Checkbox("GI Temporal Neighborhood Clamp", &m_rtSettings.giHistoryClampEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Prevents ghosting trails during motion by bounding history to the local neighborhood. In static scenes, protects mature history from noise truncation.");
                         ImGui::Checkbox("GI Temporal Firefly Rejection", &m_rtSettings.giTemporalFireflyFilterEnabled);
+                        ImGui::Checkbox("GI Dynamic Brightness Filter (Ciemne/Jasne)", &m_rtSettings.giDominanceRatioFilterEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Dwa progi jasności (0..1) z płynną strefą średnią: tłumi szpilki w cieniach i chroni mocne światło przed ściąganiem w dół.");
+                        if (m_rtSettings.giDominanceRatioFilterEnabled) {
+                            ImGui::Indent();
+                            ImGui::SliderFloat("Ciemne (Dark Noise/Spark Clamp)", &m_rtSettings.giDarkRatio, 0.0f, 1.0f, "%.2f");
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Czułość tłumienia w strefach ciemnych. Wyższa wartość = agresywniejsze usuwanie iskier i szumu.");
+                            ImGui::SliderFloat("Średnie (Midtone Smoothness)", &m_rtSettings.giMidtoneSmoothness, 0.0f, 1.0f, "%.2f");
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Płynność interpolacji w półcieniach/strefie przejściowej. Zapobiega powstawaniu plam na krawędziach.");
+                            ImGui::SliderFloat("Jasne (Bright Light Preservation)", &m_rtSettings.giBrightRatio, 0.0f, 1.0f, "%.2f");
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("Ochrona jasnego światła. Wyższa wartość = ciemniejsze próbki są ignorowane, snopy i odbicia zachowują 100% energii.");
+                            ImGui::Unindent();
+                        }
                         ImGui::SliderInt("Temporal History (samples)", &m_rtSettings.maxHistory, 4, 256, "%d");
                         ImGui::Checkbox(editorText("details.rt_svgf", "SVGF (Variance-Guided Filter)"), &m_rtSettings.svgfEnabled);
                         ImGui::SeparatorText("À-Trous Wavelet Passes");

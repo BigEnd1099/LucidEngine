@@ -1405,6 +1405,10 @@ namespace engine::renderer {
                 rtp.giTemporalFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFilterEnabled;
                 rtp.giHistoryClampEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giHistoryClampEnabled;
                 rtp.giTemporalFireflyFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFireflyFilterEnabled;
+                rtp.giDominanceRatioFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giDominanceRatioFilterEnabled;
+                rtp.giDarkRatio = m_rtSettings.giDarkRatio;
+                rtp.giBrightRatio = m_rtSettings.giBrightRatio;
+                rtp.giMidtoneSmoothness = m_rtSettings.giMidtoneSmoothness;
                 rtp.giTraceFireflyClampEnabled = m_rtSettings.giTraceFireflyClampEnabled;
                 rtp.giAtrousPassEnabled = {
                     m_rtSettings.denoiseEnabled && m_rtSettings.giAtrousPass1Enabled,

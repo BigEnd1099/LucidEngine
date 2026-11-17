@@ -389,8 +389,6 @@ namespace engine::renderer {
         }
         if (srcImage == VK_NULL_HANDLE) return "";
 
-        uint32_t currIdx = 0;
-
         // Ensure all prior render commands have completely finished on the GPU
         vkDeviceWaitIdle(m_context->getDevice());
         vkResetCommandBuffer(m_captureCommandBuffer, 0);
