@@ -1405,6 +1405,9 @@ namespace engine::renderer {
                 rtp.giTemporalFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFilterEnabled;
                 rtp.giHistoryClampEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giHistoryClampEnabled;
                 rtp.giTemporalFireflyFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFireflyFilterEnabled;
+                rtp.svgfFireflyFilterStrength = (m_rtSettings.denoiseEnabled && m_rtSettings.svgfFireflyFilterEnabled)
+                    ? std::clamp(m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f) : 0.0f;
+                rtp.svgfDirectionalAtrousEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalAtrousEnabled;
                 rtp.giDominanceRatioFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giDominanceRatioFilterEnabled;
                 rtp.giDarkRatio = m_rtSettings.giDarkRatio;
                 rtp.giBrightRatio = m_rtSettings.giBrightRatio;
