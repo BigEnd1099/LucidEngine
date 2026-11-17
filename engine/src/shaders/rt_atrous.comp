@@ -210,7 +210,7 @@ void main() {
                 if (qLuma >= max(centerLuma * 0.45, centerLuma - 0.02)) brightSupport++;
             }
         }
-        if (neighborCount >= 4) {
+        if (neighborCount >= 3) {
             for (int i = 1; i < neighborCount; ++i) {
                 float key = neighborLuma[i]; int j = i - 1;
                 while (j >= 0 && neighborLuma[j] > key) { neighborLuma[j + 1] = neighborLuma[j]; --j; }
@@ -398,9 +398,9 @@ void main() {
                     float directionalAgreement = dot(normalize(centerDirection.xyz), normalize(neighborDirection.xyz));
                     // A direction guide is a rejection signal, not another blur kernel: strongly
                     // disagreeing illumination directions must stop cross-surface mixing.
-                    float directionalWeight = smoothstep(0.20, 0.85, directionalAgreement);
+                    float directionalWeight = smoothstep(0.35, 0.75, directionalAgreement);
                     float neighborHistoryLen = unpackGiHistoryLen(gQ.w);
-                    float directionHistoryConfidence = smoothstep(1.0, 4.0,
+                    float directionHistoryConfidence = smoothstep(1.0, 2.0,
                         min(historyLen, neighborHistoryLen));
                     float directionalConfidence = min(centerDirection.a, neighborDirection.a) *
                                                   directionHistoryConfidence;
