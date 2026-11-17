@@ -712,6 +712,8 @@ namespace engine::renderer {
         profiler.recordMetric("rtMaxHistory", params.maxHistory);
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtSvgfFireflyFilterStrength", params.svgfFireflyFilterStrength);
+        profiler.recordMetric("rtSvgfDirectionalAtrousEnabled", params.svgfDirectionalAtrousEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtWorldRadianceCacheEnabled", params.worldRadianceCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiSurfaceHistoryCacheEnabled", params.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtWrcClipmapsEnabled", params.wrcClipmapEnabled ? 1.0 : 0.0);
