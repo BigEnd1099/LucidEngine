@@ -285,6 +285,8 @@ void main() {
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
     float historyLen = unpackGiHistoryLen(gC.w);
+    bool useDirectionalGuide = (pc.u.y & 2u) != 0u;
+    vec4 centerDirection = useDirectionalGuide ? imageLoad(imgGiDirection, px) : vec4(0.0);
 
     // Dynamic history boost: at low history (SPP1 / camera motion / fresh frame) widen bandwidth
     // to smooth stochastic hits and prevent energy loss. At mature history, bandwidth contracts
@@ -387,8 +389,7 @@ void main() {
             }
 
             float wRgb = wGeomBase * wl;
-            if ((pc.u.y & 2u) != 0u) {
-                vec4 centerDirection = imageLoad(imgGiDirection, px);
+            if (useDirectionalGuide) {
                 vec4 neighborDirection = imageLoad(imgGiDirection, q);
                 if (centerDirection.a > 0.05 && neighborDirection.a > 0.05) {
                     float directionalAgreement = dot(normalize(centerDirection.xyz), normalize(neighborDirection.xyz));
