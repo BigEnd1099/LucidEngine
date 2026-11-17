@@ -578,18 +578,29 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, 0.5);
 
         bool realRawFirefly = false;
-        float darkFloor = max(m1Y.x, 0.01);
+        // Firefly detection uses a local *relative* noise scale rather than the
+        // broad history-clamp sigma floor. The latter is intentionally generous
+        // for reprojection stability, but makes low-radiance outliers invisible.
+        float darkFloor = max(m1Y.x, 0.005);
         float baseline = max(histY.x, m1Y.x);
-        float fireflyLimit = max(m1Y.x + 3.5 * effectiveSigma.x, maxClusterLum * 2.0 + max(0.15, baseline * 0.25));
+        float localFireflyScale = max(max(m1Y.x, maxClusterLum), max(histY.x, 0.025));
+        float fireflySigma = max(sqrt(max(spatialVar, 0.0)), localFireflyScale * 0.18 + 0.008);
+        float fireflyRelativeGate = baseline * 2.75 + max(0.025, baseline * 0.20);
+        float fireflyLimit = max(m1Y.x + 3.25 * fireflySigma,
+                                 maxClusterLum * 1.75 + max(0.035, maxClusterLum * 0.12));
         if (useDominanceRatio && isBimodal) {
-            // A true firefly is an extreme isolated spike unsupported by history, neighborhood or surface cache.
-            // If neighbors or history contain light, it is legitimate illumination, NOT a firefly!
-            bool loneDarkSpike = inDarkZone && (maxClusterLum < splitLum * 0.5) && (rawYCoCg.x > max(darkFloor * 3.5, 0.15));
-            bool outlierSpike = (rawYCoCg.x > fireflyLimit) && (rawYCoCg.x > baseline * 3.5 + max(0.15, baseline * 0.5));
+            // A true firefly is an isolated spike unsupported by history, the
+            // neighborhood, or surface cache. A supported bright cluster remains intact.
+            bool loneDarkSpike = inDarkZone && (maxClusterLum < splitLum * 0.5) &&
+                                 (rawYCoCg.x > max(darkFloor * 3.0, 0.045));
+            bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
+                                (rawYCoCg.x > fireflyRelativeGate);
             realRawFirefly = (loneDarkSpike || outlierSpike) && !temporallyFrequent && !cacheSupportsBright;
         } else {
-            float fireflyThreshold = max(4.5 * effectiveSigma.x, max(m1Y.x * 3.5, 0.35));
-            realRawFirefly = (rawYCoCg.x > m1Y.x + fireflyThreshold) && (rawYCoCg.x > baseline * 3.5 + max(0.15, baseline * 0.5)) && !temporallyFrequent && !cacheSupportsBright;
+            float fireflyThreshold = max(3.75 * fireflySigma, m1Y.x * 2.75 + 0.025);
+            realRawFirefly = (rawYCoCg.x > m1Y.x + fireflyThreshold) &&
+                             (rawYCoCg.x > fireflyRelativeGate) &&
+                             !temporallyFrequent && !cacheSupportsBright;
         }
 
         // =========================================================================
@@ -597,7 +608,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Soft rational compression: eliminates fireflies BEFORE moments computation
         // =========================================================================
         if ((pc.u.y & 2u) != 0u && realRawFirefly) {
-            float allowedMax = max(maxClusterLum * 1.5 + 0.2, m1Y.x + 2.5 * effectiveSigma.x);
+            // Keep the clamp proportional in dark regions: a fixed 0.2 radiance
+            // allowance can be larger than the entire local GI signal.
+            float allowedMax = max(maxClusterLum * 1.45 + max(0.025, maxClusterLum * 0.10),
+                                   m1Y.x + 2.25 * fireflySigma);
             if (rawYCoCg.x > allowedMax) {
                 float excess = rawYCoCg.x - allowedMax;
                 float compressedY = allowedMax + excess / (1.0 + excess / (allowedMax + 1.0));

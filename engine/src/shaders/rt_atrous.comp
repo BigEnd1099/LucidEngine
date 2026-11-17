@@ -227,8 +227,15 @@ void main() {
             float centerLum = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
             float meanLum = dot(neighborMean, vec3(0.2126, 0.7152, 0.0722));
             float maxLum = dot(neighborMax, vec3(0.2126, 0.7152, 0.0722));
-            if (centerLum > meanLum * 6.0 + 4.0 && centerLum > maxLum * 3.0 + 1.5) {
-                vec3 safeClamp = max(neighborMax * 1.5, neighborMean * 2.5 + vec3(0.5));
+            // Relative Hampel gate: avoid fixed multi-unit offsets that make the
+            // pass effectively inert for ordinary low-energy indirect illumination.
+            // The second test still requires the center to exceed every neighbor,
+            // protecting coherent bright regions and small real light sources.
+            float meanGate = meanLum * 5.0 + max(0.08, meanLum * 0.35);
+            float peakGate = maxLum * 2.5 + max(0.05, maxLum * 0.20);
+            if (centerLum > meanGate && centerLum > peakGate) {
+                vec3 safeClamp = max(neighborMax * 1.5,
+                                     neighborMean * 2.5 + max(vec3(0.03), neighborMean * 0.15));
                 center.rgb = min(center.rgb, safeClamp);
             }
         }
@@ -283,23 +290,42 @@ void main() {
             float lQ = max(0.0, dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)));
             float deltaL = abs(lC - lQ);
 
-            // True Linear SVGF Luminance Edge-Stopping (Schied et al. 2017 Eq. 6):
-            // w_l = exp(-|lC - lQ| / (k_sigma * sqrt(Var) + eps))
-            // Using LINEAR luminance (NOT log-luminance):
-            // - In dark areas: small noise |deltaL| < sigma is freely smoothed, eliminating blotchiness/coagulation.
-            // - In bright areas: noise is filtered smoothly without dark holes eating into the light.
-            // - Across true shadow boundaries: |deltaL| >> sigma, so edges remain razor-sharp.
+            // Log-luminance edge stopping separates relative brightness changes:
+            // the same proportional jump is treated similarly in dark and bright GI.
+            // Variance is capped against the darker endpoint so a noisy bright sample
+            // cannot open the filter across a dark/bright boundary.
             float wl = 1.0;
             if (useSvgf) {
                 vec4 qMoments = imageLoad(imgMomentsCur, q);
                 float qVar = (PASS == 0) ? max(qMoments.z, 0.0) : max(qMoments.w, 0.0);
                 float passVarQ = qVar / exp2(float(PASS));
                 float sigmaQ = sqrt(max(passVarQ, 0.0));
-                float effectiveSigma = max(sigmaC, sigmaQ);
+                float rawEffectiveSigma = max(sigmaC, sigmaQ);
 
-                float floorBandwidth = mix(0.08, 0.025, clamp(historyLen / 16.0, 0.0, 1.0));
-                float bandwidth = max(3.5 * effectiveSigma * max(pc.f.x, 0.1) * histBoost, floorBandwidth);
-                wl = exp(-deltaL / bandwidth);
+                float darkerLum = min(lC, lQ);
+                float localLumScale = max(darkerLum, 0.025);
+                float sigmaCap = max(0.018, (localLumScale + 0.035) * 0.42);
+                float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
+
+                float logLC = log2(1.0 + lC);
+                float logLQ = log2(1.0 + lQ);
+                float deltaLogL = abs(logLC - logLQ);
+                float logSigma = effectiveSigma / max(1.0 + darkerLum, 0.1);
+
+                // Keep early history helpful without allowing large variance to
+                // wash out the separation between dark, midtone and bright clusters.
+                float stepDamping = mix(1.0, inversesqrt(float(step)), 0.35);
+                float floorBandwidth = mix(0.035, 0.012, clamp(historyLen / 16.0, 0.0, 1.0));
+                float bandwidth = clamp(3.0 * logSigma * max(pc.f.x, 0.1) *
+                                        histBoost * stepDamping,
+                                        floorBandwidth, 0.22);
+                wl = exp(-deltaLogL / max(bandwidth, 1e-4));
+
+                // Asymmetric bright-bleed guard: a bright neighbor may softly
+                // contribute to a dark center, but cannot dominate its local energy.
+                float brightRise = max(lQ - lC, 0.0);
+                float relativeBrightRise = brightRise / max(lC + 0.04, 0.04);
+                wl *= exp(-0.12 * relativeBrightRise);
             }
 
             float wRgb = wGeomBase * wl;
