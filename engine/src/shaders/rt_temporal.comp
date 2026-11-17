@@ -513,7 +513,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // inflate the robust threshold.
         float supportFloor = max(medianLum + max(2.0 * robustSigma,
                                                 medianLum * 0.75 + 0.008),
-                                 rawYCoCg.x * 0.70);
+                                 rawYCoCg.x * 0.55);
         int brightSupportCount = 0;
         for (int i = 0; i < nNeighbors; ++i) {
             if (neighborLuma[i] >= supportFloor) brightSupportCount++;
@@ -670,12 +670,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                                  (rawYCoCg.x > max(darkFloor * 3.0, 0.045));
             bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
                                 (rawYCoCg.x > fireflyRelativeGate);
+            // A pixel inside a neighborhood-dominant bright tier is part of a
+            // coherent high-energy region, not an isolated firefly. Preserve its
+            // raw radiance even when reprojection history has not converged yet.
             realRawFirefly = (loneDarkSpike || outlierSpike) &&
+                             !inBrightZone &&
                              !historySupportsCurrent && !cacheSupportsBright &&
                              !spatiallySupportedBright;
         } else {
             realRawFirefly = (rawYCoCg.x > robustFireflyLimit) &&
                              (rawYCoCg.x > fireflyRelativeGate) &&
+                             !inBrightZone &&
                              !historySupportsCurrent && !cacheSupportsBright &&
                              !spatiallySupportedBright;
         }
