@@ -238,7 +238,8 @@ if (dot(N, toCam) < 0.0) N = -N;
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
-    imageStore(imgGiDirection, px, vec4(0.0));
+    imageStore(imgGiDirectionBinsA, px, vec4(0.0));
+    imageStore(imgGiDirectionBinsB, px, vec4(0.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
