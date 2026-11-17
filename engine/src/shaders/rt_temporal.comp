@@ -507,6 +507,19 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
         float robustSigma = 1.4826 * medianAbsDeviation;
 
+        // A bright sample is spatially supported only when multiple independent
+        // neighbors carry a comparable level of radiance. This protects real
+        // bright clusters without allowing one or two isolated fireflies to
+        // inflate the robust threshold.
+        float supportFloor = max(medianLum + max(2.0 * robustSigma,
+                                                medianLum * 0.75 + 0.008),
+                                 rawYCoCg.x * 0.55);
+        int brightSupportCount = 0;
+        for (int i = 0; i < nNeighbors; ++i) {
+            if (neighborLuma[i] >= supportFloor) brightSupportCount++;
+        }
+        bool spatiallySupportedBright = brightSupportCount >= 2;
+
         float spatialVar = 0.1;
         vec3 m1Y = rawYCoCg;
         vec3 m2Y = rawYCoCg * rawYCoCg;
@@ -630,12 +643,15 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         float darkFloor = max(medianLum, 0.005);
         float historyBaseline = historySupportsCurrent ? histY.x : 0.0;
         float baseline = max(historyBaseline, medianLum);
-        float localFireflyScale = max(medianLum, 0.025);
-        float fireflySigma = max(robustSigma * 2.5, localFireflyScale * 0.18 + 0.008);
-        float fireflyRelativeGate = baseline * 2.25 + max(0.018, baseline * 0.15);
-        float robustFireflyLimit = medianLum + max(3.0 * robustSigma,
-                                                   medianLum * 1.35 + 0.025);
-        float fireflyLimit = min(m1Y.x + 3.25 * fireflySigma,
+        float localFireflyScale = max(medianLum, 0.015);
+        // Tighten the dark-surface floor while keeping the threshold proportional
+        // to the local robust spread. The old fixed offsets were large enough to
+        // leave visible low-energy fireflies on otherwise uniform walls.
+        float fireflySigma = max(robustSigma * 2.0, localFireflyScale * 0.12 + 0.005);
+        float fireflyRelativeGate = baseline * 1.9 + max(0.012, baseline * 0.12);
+        float robustFireflyLimit = medianLum + max(2.5 * robustSigma,
+                                                   medianLum * 1.10 + 0.012);
+        float fireflyLimit = min(m1Y.x + 2.75 * fireflySigma,
                                  robustFireflyLimit);
         if (useDominanceRatio && isBimodal) {
             // A true firefly is an isolated spike unsupported by history, the
@@ -645,11 +661,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
                                 (rawYCoCg.x > fireflyRelativeGate);
             realRawFirefly = (loneDarkSpike || outlierSpike) &&
-                             !historySupportsCurrent && !cacheSupportsBright;
+                             !historySupportsCurrent && !cacheSupportsBright &&
+                             !spatiallySupportedBright;
         } else {
             realRawFirefly = (rawYCoCg.x > robustFireflyLimit) &&
                              (rawYCoCg.x > fireflyRelativeGate) &&
-                             !historySupportsCurrent && !cacheSupportsBright;
+                             !historySupportsCurrent && !cacheSupportsBright &&
+                             !spatiallySupportedBright;
         }
 
         // =========================================================================
@@ -659,8 +677,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         if ((pc.u.y & 2u) != 0u && realRawFirefly) {
             // Keep the clamp proportional in dark regions: a fixed 0.2 radiance
             // allowance can be larger than the entire local GI signal.
-            float allowedMax = max(maxClusterLum * 1.45 + max(0.025, maxClusterLum * 0.10),
-                                   m1Y.x + 2.25 * fireflySigma);
+            // Clamp against the robust local population, not its maximum:
+            // the maximum can itself be another firefly and otherwise raises
+            // the allowance for every subsequent outlier.
+            float allowedMax = medianLum + max(2.0 * robustSigma,
+                                                medianLum * 1.10 + 0.010);
             if (rawYCoCg.x > allowedMax) {
                 float excess = rawYCoCg.x - allowedMax;
                 float compressedY = allowedMax + excess / (1.0 + excess / (allowedMax + 1.0));
