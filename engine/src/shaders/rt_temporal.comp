@@ -513,7 +513,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // inflate the robust threshold.
         float supportFloor = max(medianLum + max(2.0 * robustSigma,
                                                 medianLum * 0.75 + 0.008),
-                                 rawYCoCg.x * 0.55);
+                                 rawYCoCg.x * 0.70);
         int brightSupportCount = 0;
         for (int i = 0; i < nNeighbors; ++i) {
             if (neighborLuma[i] >= supportFloor) brightSupportCount++;
@@ -647,9 +647,19 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Tighten the dark-surface floor while keeping the threshold proportional
         // to the local robust spread. The old fixed offsets were large enough to
         // leave visible low-energy fireflies on otherwise uniform walls.
-        float fireflySigma = max(robustSigma * 2.0, localFireflyScale * 0.12 + 0.005);
+        // Young history cannot reliably distinguish a recurring bright surface
+        // from a one-frame Monte Carlo spike. In that regime, lean slightly more
+        // on the robust current-frame neighborhood; mature history restores the
+        // original wider tolerance so converged HDR detail is not clipped.
+        float historyConfidence = (wSum > 0.25)
+            ? smoothstep(1.0, 4.0, histLen) * smoothstep(0.25, 0.75, wSum)
+            : 0.0;
+        float fireflySigmaScale = mix(1.75, 2.0, historyConfidence);
+        float fireflySigma = max(robustSigma * fireflySigmaScale,
+                                 localFireflyScale * 0.12 + 0.005);
         float fireflyRelativeGate = baseline * 1.9 + max(0.012, baseline * 0.12);
-        float robustFireflyLimit = medianLum + max(2.5 * robustSigma,
+        float robustSigmaScale = mix(2.0, 2.5, historyConfidence);
+        float robustFireflyLimit = medianLum + max(robustSigmaScale * robustSigma,
                                                    medianLum * 1.10 + 0.012);
         float fireflyLimit = min(m1Y.x + 2.75 * fireflySigma,
                                  robustFireflyLimit);
