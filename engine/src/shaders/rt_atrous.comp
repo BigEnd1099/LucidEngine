@@ -188,10 +188,6 @@ void main() {
     if (PASS == 0) {
         float varSum = 0.0;
         float wVarTotal = 0.0;
-        vec3 colSum = vec3(0.0);
-        float wColTotal = 0.0;
-        vec3 neighborMax = vec3(0.0);
-        int validNeighborCount = 0;
 
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
@@ -211,11 +207,6 @@ void main() {
                 varSum += max(qMom.z, 0.0) * wTap;
                 wVarTotal += wTap;
 
-                vec4 qSrc = loadSrc(q);
-                colSum += qSrc.rgb * wTap;
-                wColTotal += wTap;
-                neighborMax = max(neighborMax, qSrc.rgb);
-                validNeighborCount++;
             }
         }
         if (wVarTotal > 1e-4) {
