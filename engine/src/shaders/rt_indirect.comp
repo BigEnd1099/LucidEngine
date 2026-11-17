@@ -543,6 +543,7 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         encodeGiDirection(primaryIncomingDirection, sampleBinsA, sampleBinsB);
         giDirectionBinsA += sampleBinsA * sampleEnergy;
         giDirectionBinsB += sampleBinsB * sampleEnergy;
+        giDirectionBinsB.z += 1.0;
     }
 }
 
@@ -557,7 +558,11 @@ imageStore(imgS, px, vec4(gi, vis));
 // Preserve the full coarse directional energy distribution. Unlike a single
 // averaged vector, the six lobes can represent several simultaneous light paths.
 imageStore(imgGiDirectionBinsA, px, giDirectionBinsA * invSamples);
-imageStore(imgGiDirectionBinsB, px, giDirectionBinsB * invSamples);
+// B.z stores the number of radiance-bearing paths this frame (not energy).
+// Temporal reprojection averages this value over accepted history, allowing
+// the spatial filter to estimate directional evidence at SPP=1 as well as SPP=16.
+imageStore(imgGiDirectionBinsB, px, vec4(giDirectionBinsB.xy * invSamples,
+                                           giDirectionBinsB.z, giDirectionBinsB.w));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;
