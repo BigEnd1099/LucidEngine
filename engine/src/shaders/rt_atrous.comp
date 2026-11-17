@@ -429,14 +429,23 @@ void main() {
                         centerDirectionA, neighborDirectionA, centerDirectionB, neighborDirectionB);
                     // Histogram overlap measures shared incident-light energy, not a
                     // dot product between two averaged ray directions.
-                    float directionalWeight = mix(0.04, 1.0,
-                        smoothstep(0.12, 0.72, directionalOverlap));
+                    // A lobe histogram is useful evidence even on the first SPP=1
+                    // observation. B.z carries the temporally averaged count of
+                    // radiance-bearing paths, so confidence is based on actual
+                    // directional observations rather than an arbitrary history>=2 gate.
                     float neighborHistoryLen = unpackGiHistoryLen(gQ.w);
-                    float directionHistoryConfidence = smoothstep(1.0, 2.0,
-                        min(historyLen, neighborHistoryLen));
-                    float directionalConfidence = smoothstep(0.005, 0.05,
-                        min(centerDirectionEnergy, neighborDirectionEnergy)) *
-                        directionHistoryConfidence;
+                    float centerDirectionalSamples = centerDirectionB.z * max(historyLen, 1.0);
+                    float neighborDirectionalSamples = neighborDirectionB.z * max(neighborHistoryLen, 1.0);
+                    float directionalSampleConfidence = smoothstep(0.5, 2.0,
+                        min(centerDirectionalSamples, neighborDirectionalSamples));
+                    float directionalEnergyConfidence = smoothstep(1e-5, 0.002,
+                        min(centerDirectionEnergy, neighborDirectionEnergy));
+                    // Keep a non-trivial floor: angular mismatch should reduce
+                    // cross-lobe leakage, not carve a hard edge into the image.
+                    float directionalWeight = mix(0.22, 1.0,
+                        smoothstep(0.08, 0.58, directionalOverlap));
+                    float directionalConfidence = directionalSampleConfidence *
+                                                  directionalEnergyConfidence;
                     wRgb *= mix(1.0, directionalWeight, directionalConfidence);
                 }
             }
