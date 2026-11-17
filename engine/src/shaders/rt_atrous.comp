@@ -177,12 +177,6 @@ void main() {
     }
 
     if (gC.z < 0.0) { storeDst(px, center); return; }
-    if (pc.f.x <= 0.001) {
-        storeDst(px, center);
-        persistFinalSurfaceHistory(px, size, gC, center.rgb);
-        return;
-    }
-
     vec3 nC = rtOctDecode(gC.xy);
     vec3 nCv = mat3(ubo.view) * nC;
     vec3 pCv = rtViewPosFromLinear(vec2(px) + 0.5, gC.z, size);
@@ -242,6 +236,14 @@ void main() {
     }
     if (PASS == 0 && pc.u.x == 21u)
         imageStore(imgRawGi, px, vec4(vec3(fireflyPreservation), 1.0));
+
+    // The SVGF firefly stage is independent of wavelet strength and pass toggles.
+    // A zero spatial strength bypasses only the subsequent A-Trous convolution.
+    if (pc.f.x <= 0.001) {
+        storeDst(px, center);
+        persistFinalSurfaceHistory(px, size, gC, center.rgb);
+        return;
+    }
 
     // 3x3 bilateral pre-filter of temporal variance.
     float varC = max(momC.z, 0.0);
