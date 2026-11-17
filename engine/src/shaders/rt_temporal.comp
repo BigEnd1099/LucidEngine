@@ -647,8 +647,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             realRawFirefly = (loneDarkSpike || outlierSpike) &&
                              !historySupportsCurrent && !cacheSupportsBright;
         } else {
-            float fireflyThreshold = max(3.75 * fireflySigma, m1Y.x * 2.75 + 0.025);
-            realRawFirefly = (rawYCoCg.x > m1Y.x + fireflyThreshold) &&
+            realRawFirefly = (rawYCoCg.x > robustFireflyLimit) &&
                              (rawYCoCg.x > fireflyRelativeGate) &&
                              !historySupportsCurrent && !cacheSupportsBright;
         }
