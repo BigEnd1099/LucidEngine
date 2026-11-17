@@ -226,9 +226,12 @@ void main() {
                 deviations[j + 1] = key;
             }
             float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
-            float robustLimit = medianLuma + max(3.5 * 1.4826 * mad, medianLuma * 1.25 + 0.015);
-            if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 2.5 + 0.02) {
-                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.45;
+            float robustLimit = medianLuma + max(2.25 * 1.4826 * mad, medianLuma * 0.90 + 0.010);
+            // SPP=1 has no reliable per-pixel estimate: reject stronger isolated
+            // spatial outliers, while the neighbor-support exemption protects real
+            // compact light clusters and coherent bright surfaces.
+            if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 1.8 + 0.015) {
+                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.15;
                 fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
                 center.rgb *= fireflyPreservation;
             }
@@ -393,7 +396,9 @@ void main() {
                 vec4 neighborDirection = imageLoad(imgGiDirection, q);
                 if (centerDirection.a > 0.05 && neighborDirection.a > 0.05) {
                     float directionalAgreement = dot(normalize(centerDirection.xyz), normalize(neighborDirection.xyz));
-                    float directionalWeight = smoothstep(-0.10, 0.80, directionalAgreement);
+                    // A direction guide is a rejection signal, not another blur kernel: strongly
+                    // disagreeing illumination directions must stop cross-surface mixing.
+                    float directionalWeight = smoothstep(0.20, 0.85, directionalAgreement);
                     float neighborHistoryLen = unpackGiHistoryLen(gQ.w);
                     float directionHistoryConfidence = smoothstep(1.0, 4.0,
                         min(historyLen, neighborHistoryLen));
