@@ -293,11 +293,15 @@ void main() {
                 // This lets bright-with-bright samples denoise together without
                 // allowing bright samples to wash into midtones or dark GI.
                 float brightnessRatio = (brighterLum + 0.04) / (darkerLum + 0.04);
-                float tierSeparation = smoothstep(1.45, 2.35, brightnessRatio);
+                // Do not classify ordinary bright-cluster variation as a hard
+                // tier boundary. The conservative cross-tier cap is still
+                // bounded, but references the brighter endpoint so valid HDR
+                // samples are not assigned an almost-zero bandwidth.
+                float tierSeparation = smoothstep(1.8, 3.2, brightnessRatio);
                 float withinTierScale = max(brighterLum, 0.025);
-                float crossTierScale = max(darkerLum, 0.025);
+                float crossTierScale = max(brighterLum, 0.025);
                 float withinTierSigmaCap = max(0.018, (withinTierScale + 0.035) * 0.42);
-                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.42);
+                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.30);
                 float sigmaCap = mix(withinTierSigmaCap, crossTierSigmaCap, tierSeparation);
                 float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
                 float logSigma = effectiveSigma / max(1.0 + darkerLum, 0.1);
@@ -314,9 +318,10 @@ void main() {
                                         floorBandwidth, 0.22);
                 wl = exp(-deltaLogL / max(bandwidth, 1e-4));
 
-                // A smooth hard separation between brightness populations. The
-                // small residual avoids discontinuous flicker at the class boundary.
-                wl *= mix(1.0, 0.02, tierSeparation);
+                // Preserve a meaningful contribution from the brighter population.
+                // 0.02 effectively discarded isolated high-energy taps, preventing
+                // bright regions from denoising together and leaving a sandy result.
+                wl *= mix(1.0, 0.10, tierSeparation);
             }
 
             float wRgb = wGeomBase * wl;
