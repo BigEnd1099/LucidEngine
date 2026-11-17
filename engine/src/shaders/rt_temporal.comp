@@ -443,6 +443,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
         vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
         vec3 neighborY[8];
+        float neighborLuma[8];
         int nNeighbors = 0;
         float aoMin = raw.a;
         float aoMax = raw.a;
@@ -458,6 +459,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 if (sVal.a < 0.0) continue; // Skip checkerboard-skipped neighbors
                 vec3 sY = rgbToYCoCg(sVal.rgb);
                 neighborY[nNeighbors] = sY;
+                neighborLuma[nNeighbors] = sY.x;
                 aoMin = min(aoMin, sVal.a);
                 aoMax = max(aoMax, sVal.a);
                 minLum = min(minLum, sY.x);
@@ -465,6 +467,45 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                 nNeighbors++;
             }
         }
+
+        // Robust neighborhood luminance statistics. The maximum is deliberately
+        // not used as the firefly reference: several isolated bright samples must
+        // not raise one another's rejection threshold.
+        float sortedLuma[8];
+        for (int i = 0; i < nNeighbors; ++i) sortedLuma[i] = neighborLuma[i];
+        for (int i = 1; i < nNeighbors; ++i) {
+            float key = sortedLuma[i];
+            int j = i - 1;
+            while (j >= 0 && sortedLuma[j] > key) {
+                sortedLuma[j + 1] = sortedLuma[j];
+                --j;
+            }
+            sortedLuma[j + 1] = key;
+        }
+        float medianLum = rawYCoCg.x;
+        if (nNeighbors > 0) {
+            int mid = nNeighbors / 2;
+            medianLum = (nNeighbors & 1) != 0 ? sortedLuma[mid]
+                                               : 0.5 * (sortedLuma[mid - 1] + sortedLuma[mid]);
+        }
+        float absDeviation[8];
+        for (int i = 0; i < nNeighbors; ++i) absDeviation[i] = abs(neighborLuma[i] - medianLum);
+        for (int i = 1; i < nNeighbors; ++i) {
+            float key = absDeviation[i];
+            int j = i - 1;
+            while (j >= 0 && absDeviation[j] > key) {
+                absDeviation[j + 1] = absDeviation[j];
+                --j;
+            }
+            absDeviation[j + 1] = key;
+        }
+        float medianAbsDeviation = 0.0;
+        if (nNeighbors > 0) {
+            int mid = nNeighbors / 2;
+            medianAbsDeviation = (nNeighbors & 1) != 0 ? absDeviation[mid]
+                                                        : 0.5 * (absDeviation[mid - 1] + absDeviation[mid]);
+        }
+        float robustSigma = 1.4826 * medianAbsDeviation;
 
         float spatialVar = 0.1;
         vec3 m1Y = rawYCoCg;
@@ -563,7 +604,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // A firefly is a non-recurring 1-frame Monte Carlo spike.
         // Legitimate lighting recurs consistently across frames.
         vec3 histY = rgbToYCoCg(hist.rgb);
-        bool temporallyFrequent = (wSum > 0.25) && (histLen >= 2.0);
+        // History only supports a bright current sample when its own radiance
+        // is in the same brightness range. A dark history must not bless a
+        // one-frame bright spike merely because the pixel has accumulated age.
+        bool historySupportsCurrent = (wSum > 0.25) && (histLen >= 2.0) &&
+                                      (histY.x >= rawYCoCg.x * 0.35);
+        bool temporallyFrequent = historySupportsCurrent;
 
         vec4 cachedSurf = vec4(0.0);
         float cachedCov = 0.0;
@@ -581,13 +627,16 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Firefly detection uses a local *relative* noise scale rather than the
         // broad history-clamp sigma floor. The latter is intentionally generous
         // for reprojection stability, but makes low-radiance outliers invisible.
-        float darkFloor = max(m1Y.x, 0.005);
-        float baseline = max(histY.x, m1Y.x);
-        float localFireflyScale = max(max(m1Y.x, maxClusterLum), max(histY.x, 0.025));
-        float fireflySigma = max(sqrt(max(spatialVar, 0.0)), localFireflyScale * 0.18 + 0.008);
-        float fireflyRelativeGate = baseline * 2.75 + max(0.025, baseline * 0.20);
-        float fireflyLimit = max(m1Y.x + 3.25 * fireflySigma,
-                                 maxClusterLum * 1.75 + max(0.035, maxClusterLum * 0.12));
+        float darkFloor = max(medianLum, 0.005);
+        float historyBaseline = historySupportsCurrent ? histY.x : 0.0;
+        float baseline = max(historyBaseline, medianLum);
+        float localFireflyScale = max(medianLum, 0.025);
+        float fireflySigma = max(robustSigma * 2.5, localFireflyScale * 0.18 + 0.008);
+        float fireflyRelativeGate = baseline * 2.25 + max(0.018, baseline * 0.15);
+        float robustFireflyLimit = medianLum + max(3.0 * robustSigma,
+                                                   medianLum * 1.35 + 0.025);
+        float fireflyLimit = min(m1Y.x + 3.25 * fireflySigma,
+                                 robustFireflyLimit);
         if (useDominanceRatio && isBimodal) {
             // A true firefly is an isolated spike unsupported by history, the
             // neighborhood, or surface cache. A supported bright cluster remains intact.
@@ -595,12 +644,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                                  (rawYCoCg.x > max(darkFloor * 3.0, 0.045));
             bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
                                 (rawYCoCg.x > fireflyRelativeGate);
-            realRawFirefly = (loneDarkSpike || outlierSpike) && !temporallyFrequent && !cacheSupportsBright;
+            realRawFirefly = (loneDarkSpike || outlierSpike) &&
+                             !historySupportsCurrent && !cacheSupportsBright;
         } else {
             float fireflyThreshold = max(3.75 * fireflySigma, m1Y.x * 2.75 + 0.025);
             realRawFirefly = (rawYCoCg.x > m1Y.x + fireflyThreshold) &&
                              (rawYCoCg.x > fireflyRelativeGate) &&
-                             !temporallyFrequent && !cacheSupportsBright;
+                             !historySupportsCurrent && !cacheSupportsBright;
         }
 
         // =========================================================================
