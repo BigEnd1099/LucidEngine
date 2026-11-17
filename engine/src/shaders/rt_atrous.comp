@@ -228,7 +228,7 @@ void main() {
             float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
             float robustLimit = medianLuma + max(3.5 * 1.4826 * mad, medianLuma * 1.25 + 0.015);
             if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 2.5 + 0.02) {
-                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.20;
+                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.45;
                 fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
                 center.rgb *= fireflyPreservation;
             }
