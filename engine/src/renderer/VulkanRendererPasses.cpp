@@ -1471,6 +1471,11 @@ namespace engine::renderer {
                     ? static_cast<double>(m_rtSettings.spatialStrength) : 0.0);
                 rtProfiler.recordMetric("rtSvgfEnabled",
                     m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtSvgfFireflyFilterStrength",
+                    (m_rtSettings.denoiseEnabled && m_rtSettings.svgfFireflyFilterEnabled)
+                        ? std::clamp(m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f) : 0.0f);
+                rtProfiler.recordMetric("rtSvgfDirectionalAtrousEnabled",
+                    (m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalAtrousEnabled) ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
                 rtProfiler.recordMetric("rtReflectionHistoryValid", 0.0);
