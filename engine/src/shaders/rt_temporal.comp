@@ -801,20 +801,32 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     }
 
     // Reproject the first-bounce illumination direction with the same accepted
-    // geometric taps as radiance. Checkerboard pixels retain the reprojected guide.
+    // geometric taps as radiance. Normalize the weighted guide and fold vector
+    // cancellation into confidence so opposing directions never produce NaNs.
     vec4 currentDirection = imageLoad(imgGiDirection, px);
+    float currentDirectionLength = length(currentDirection.xyz);
+    currentDirection = (currentDirectionLength > 1e-4)
+        ? vec4(currentDirection.xyz / currentDirectionLength,
+               clamp(currentDirection.a * currentDirectionLength, 0.0, 1.0))
+        : vec4(0.0);
+    vec4 previousDirection = (wSum > 0.05) ? (histDirection / wSum) : vec4(0.0);
+    float previousDirectionLength = length(previousDirection.xyz);
+    previousDirection = (previousDirectionLength > 1e-4)
+        ? vec4(previousDirection.xyz / previousDirectionLength,
+               clamp(previousDirection.a * previousDirectionLength, 0.0, 1.0))
+        : vec4(0.0);
     vec4 resolvedDirection = currentDirection;
     if (isCheckerSkipped) {
-        resolvedDirection = (wSum > 0.05) ? (histDirection / wSum) : vec4(0.0);
-    } else if (wSum > 0.05 && histDirection.a > 1e-4 && currentDirection.a > 1e-4) {
-        vec4 previousDirection = histDirection / wSum;
+        resolvedDirection = previousDirection;
+    } else if (previousDirection.a > 1e-4 && currentDirection.a > 1e-4) {
         float directionAlpha = 1.0 / max(newLen, 1.0);
-        vec3 blendedDirection = mix(normalize(previousDirection.xyz), normalize(currentDirection.xyz), directionAlpha);
+        vec3 blendedDirection = mix(previousDirection.xyz, currentDirection.xyz, directionAlpha);
         float blendedLength = length(blendedDirection);
         resolvedDirection = vec4(blendedLength > 1e-4 ? blendedDirection / blendedLength : currentDirection.xyz,
-                                 mix(previousDirection.a, currentDirection.a, directionAlpha));
-    } else if (!isCheckerSkipped && wSum > 0.05 && histDirection.a > 1e-4 && currentDirection.a <= 1e-4) {
-        resolvedDirection = histDirection / wSum;
+                                 mix(previousDirection.a, currentDirection.a, directionAlpha) *
+                                 clamp(blendedLength, 0.0, 1.0));
+    } else if (!isCheckerSkipped && previousDirection.a > 1e-4 && currentDirection.a <= 1e-4) {
+        resolvedDirection = previousDirection;
     }
     imageStore(imgGiDirection, px, resolvedDirection);
 
