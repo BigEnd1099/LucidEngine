@@ -665,6 +665,13 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Prevents ghosting trails during motion by bounding history to the local neighborhood. In static scenes, protects mature history from noise truncation.");
                         ImGui::Checkbox("GI Temporal Firefly Rejection", &m_rtSettings.giTemporalFireflyFilterEnabled);
+                        ImGui::Checkbox("SVGF Spatial Firefly Filter", &m_rtSettings.svgfFireflyFilterEnabled);
+                        ImGui::BeginDisabled(!m_rtSettings.svgfFireflyFilterEnabled);
+                        ImGui::SliderFloat("SVGF Firefly Filter Strength", &m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::EndDisabled();
+                        ImGui::Checkbox("SVGF Directional À-Trous", &m_rtSettings.svgfDirectionalAtrousEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Uses the temporally stabilized first-bounce incoming-light direction to stop spatial filtering across different illumination directions.");
                         ImGui::Checkbox("GI Dynamic Brightness Filter (Ciemne/Jasne)", &m_rtSettings.giDominanceRatioFilterEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Dwa progi jasności (0..1) z płynną strefą średnią: tłumi szpilki w cieniach i chroni mocne światło przed ściąganiem w dół.");
@@ -713,7 +720,9 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "17: GI Confidence (continuous red=low, green=high)",
                             "18: GI Mean Luminance (log)",
                             "19: GI Temporal Variance (log)",
-                            "20: GI Relative Uncertainty (log)"
+                            "20: GI Relative Uncertainty (log)",
+                            "21: SVGF Firefly Rejection (white=preserved)",
+                            "22: SVGF Incoming Light Direction"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
