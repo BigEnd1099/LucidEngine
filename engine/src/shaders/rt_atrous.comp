@@ -299,9 +299,9 @@ void main() {
                 // samples are not assigned an almost-zero bandwidth.
                 float tierSeparation = smoothstep(1.8, 3.2, brightnessRatio);
                 float withinTierScale = max(brighterLum, 0.025);
-                float crossTierScale = max(mix(darkerLum, brighterLum, 0.80), 0.025);
+                float crossTierScale = max(mix(darkerLum, brighterLum, 0.65), 0.025);
                 float withinTierSigmaCap = max(0.018, (withinTierScale + 0.035) * 0.42);
-                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.38);
+                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.30);
                 float sigmaCap = mix(withinTierSigmaCap, crossTierSigmaCap, tierSeparation);
                 float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
                 float logSigma = effectiveSigma / max(1.0 + darkerLum, 0.1);
@@ -309,7 +309,7 @@ void main() {
                 // Keep early history helpful, but give a coherent bright cluster
                 // enough bandwidth to filter its own samples at mature history.
                 float stepDamping = mix(1.0, inversesqrt(float(step)), 0.35);
-                float crossTierFloor = mix(0.040, 0.020, clamp(historyLen / 16.0, 0.0, 1.0));
+                float crossTierFloor = mix(0.035, 0.012, clamp(historyLen / 16.0, 0.0, 1.0));
                 float withinTierFloor = mix(0.045, 0.070,
                                             smoothstep(0.25, 4.0, brighterLum));
                 float floorBandwidth = mix(withinTierFloor, crossTierFloor, tierSeparation);
@@ -321,7 +321,7 @@ void main() {
                 // Preserve a meaningful contribution from the brighter population.
                 // 0.02 effectively discarded isolated high-energy taps, preventing
                 // bright regions from denoising together and leaving a sandy result.
-                wl *= mix(1.0, 0.25, tierSeparation);
+                wl *= mix(1.0, 0.10, tierSeparation);
             }
 
             float wRgb = wGeomBase * wl;
