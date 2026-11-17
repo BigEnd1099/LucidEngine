@@ -13,8 +13,6 @@
 // (demodulated from albedo/BRDF) so temporal and à-trous filtering preserve texture detail.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-shared float s_workgroupLum[8][8];
-
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
@@ -261,8 +259,6 @@ float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
 vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
-vec3 sampleRadiance[16];
-float sampleLum[16];
 vec3 causticRadiance = vec3(0.0);
 float causticHitCount = 0.0;
 float occ = 0.0;
@@ -358,7 +354,7 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
                 }
             }
             if (singleLight >= 0 && chosenPdf > 1e-6)
-                singleWeight = clampPathFireflies ? min(wSumRis / chosenPdf, 32.0) : (wSumRis / chosenPdf);
+                singleWeight = clampPathFireflies ? min(wSumRis / chosenPdf, 128.0) : (wSumRis / chosenPdf);
         }
 
         vec3 hitAlbedo = hit.baseColor.rgb *
@@ -514,95 +510,11 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
             throughput /= p;
         }
     }
-        sampleRadiance[s] = pathRadiance;
-        sampleLum[s] = dot(pathRadiance, vec3(0.2126, 0.7152, 0.0722));
-    }
+    gi += clampPathFireflies ? clampFirefly(pathRadiance, 256.0) : pathRadiance;
+}
 
-    float darkRatio = clamp(pc.unused[0].x, 0.0, 1.0);
-    float brightRatio = clamp(pc.unused[0].y, 0.0, 1.0);
-    if (darkRatio < 1e-4) darkRatio = 0.15;
-    if (brightRatio < 1e-4) brightRatio = 0.85;
-
-    if (clampPathFireflies) {
-        if (samples > 1) {
-            float minL = sampleLum[0];
-            float maxL = sampleLum[0];
-            for (int i = 1; i < samples; ++i) {
-                minL = min(minL, sampleLum[i]);
-                maxL = max(maxL, sampleLum[i]);
-            }
-
-            // Bimodal or outlier spread: only clamp if max is significantly above min
-            if (maxL > minL * 1.5 + 0.10) {
-                float splitL = sqrt(max(minL, 1e-4) * max(maxL, 1e-4));
-                int numBright = 0;
-                float darkSum = 0.0;
-                for (int i = 0; i < samples; ++i) {
-                    if (sampleLum[i] >= splitL) {
-                        numBright++;
-                    } else {
-                        darkSum += sampleLum[i];
-                    }
-                }
-                int numDark = samples - numBright;
-                float brightFrac = float(numBright) / float(samples);
-
-                // If bright samples are an isolated minority (<= darkRatio fraction of rays):
-                // It is an isolated Monte Carlo firefly spike!
-                float darkCutoff = max(darkRatio, 1.5 / float(samples));
-                if (brightFrac <= darkCutoff) {
-                    float darkAvg = (numDark > 0) ? (darkSum / float(numDark)) : minL;
-                    // Clamp isolated firefly rays to dark cluster consensus + headroom
-                    float allowedCeiling = max(darkAvg * 3.5 + 0.4, 0.25);
-                    for (int i = 0; i < samples; ++i) {
-                        if (sampleLum[i] > allowedCeiling) {
-                            sampleRadiance[i] *= allowedCeiling / sampleLum[i];
-                        }
-                    }
-                }
-                // If brightFrac > darkCutoff, MULTIPLE rays hit bright light:
-                // It is legitimate illumination! DO NOT CLAMP IT!
-            }
-        }
-    }
-
-    for (int s = 0; s < samples; ++s) {
-        gi += sampleRadiance[s];
-    }
-
-    float invSamples = 1.0 / float(samples);
-    gi = sanitizeHDR(gi * invSamples);
-
-    // Single-sample mode (samples == 1): spatial consensus across the 8x8 workgroup
-    if (clampPathFireflies && samples == 1) {
-        int lx = int(gl_LocalInvocationID.x);
-        int ly = int(gl_LocalInvocationID.y);
-        float myLum = dot(gi, vec3(0.2126, 0.7152, 0.0722));
-        s_workgroupLum[ly][lx] = myLum;
-        barrier();
-
-        float nMax = 0.0;
-        int nBright = 0;
-        float nDarkSum = 0.0;
-        int nDarkCount = 0;
-        const ivec2 crossOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
-        for (int i = 0; i < 4; ++i) {
-            int nx = clamp(lx + crossOffsets[i].x, 0, 7);
-            int ny = clamp(ly + crossOffsets[i].y, 0, 7);
-            float nl = s_workgroupLum[ny][nx];
-            nMax = max(nMax, nl);
-            if (nl > 0.4) nBright++;
-            else { nDarkSum += nl; nDarkCount++; }
-        }
-
-        if (myLum > 0.4 && nBright == 0) {
-            float nDarkAvg = (nDarkCount > 0) ? (nDarkSum / float(nDarkCount)) : 0.05;
-            float allowed = max(nDarkAvg * 3.5 + 0.4, 0.25);
-            if (myLum > allowed) {
-                gi *= allowed / myLum;
-            }
-        }
-    }
+float invSamples = 1.0 / float(samples);
+gi = sanitizeHDR(gi * invSamples);
 
 float vis = 1.0 - occ * invSamples;
 float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount) : AO_DISTANCE;

@@ -297,7 +297,8 @@ void main() {
                 float sigmaQ = sqrt(max(passVarQ, 0.0));
                 float effectiveSigma = max(sigmaC, sigmaQ);
 
-                float bandwidth = max(3.5 * effectiveSigma * max(pc.f.x, 0.1) * histBoost, 0.015);
+                float floorBandwidth = mix(0.08, 0.025, clamp(historyLen / 16.0, 0.0, 1.0));
+                float bandwidth = max(3.5 * effectiveSigma * max(pc.f.x, 0.1) * histBoost, floorBandwidth);
                 wl = exp(-deltaL / bandwidth);
             }
 
