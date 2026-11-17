@@ -20,7 +20,11 @@ namespace engine::renderer {
         WorldRadianceCacheRadiance = 13,
         WorldRadianceCacheConfidence = 14,
         SurfaceHistoryCacheRadiance = 15,
-        SurfaceHistoryCacheAge = 16
+        SurfaceHistoryCacheAge = 16,
+        GiConfidence = 17,
+        GiMeanLuminance = 18,
+        GiTemporalVariance = 19,
+        GiRelativeUncertainty = 20
     };
 
     struct RtSettings {
@@ -45,6 +49,10 @@ namespace engine::renderer {
         bool giTemporalFilterEnabled{true};
         bool giHistoryClampEnabled{true};
         bool giTemporalFireflyFilterEnabled{true};
+        bool giDominanceRatioFilterEnabled{true};
+        float giDarkRatio{0.15f};
+        float giBrightRatio{0.80f};
+        float giMidtoneSmoothness{0.50f};
         bool giTraceFireflyClampEnabled{true};
         bool giAtrousPass1Enabled{true};
         bool giAtrousPass2Enabled{true};

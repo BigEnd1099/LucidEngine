@@ -701,6 +701,10 @@ namespace engine::renderer {
         profiler.recordMetric("rtReflectionOutlierFilterEnabled", params.reflectionOutlierFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiHistoryClampEnabled", params.giHistoryClampEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiTemporalFireflyFilterEnabled", params.giTemporalFireflyFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiDominanceRatioFilterEnabled", params.giDominanceRatioFilterEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtGiDarkRatio", params.giDarkRatio);
+        profiler.recordMetric("rtGiBrightRatio", params.giBrightRatio);
+        profiler.recordMetric("rtGiMidtoneSmoothness", params.giMidtoneSmoothness);
         profiler.recordMetric("rtGiTraceFireflyClampEnabled", params.giTraceFireflyClampEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtReflectionSpatialFilterEnabled", params.reflectionSpatialFilterEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiHistoryValid",
@@ -801,27 +805,38 @@ namespace engine::renderer {
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 0);
 
+            pd.m[0] = glm::vec4(
+                std::clamp(params.giDarkRatio, 0.0f, 1.0f),
+                std::clamp(params.giBrightRatio, 0.0f, 1.0f),
+                std::clamp(params.giMidtoneSmoothness, 0.0f, 1.0f),
+                params.giDominanceRatioFilterEnabled ? 1.0f : 0.0f
+            );
             pd.f.x = std::bit_cast<float>(m_surfaceHistoryLightingEpoch);
             pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
             pd.f.z = std::clamp(params.wrcBounceIntensity, 0.0f, 4.0f);
             pd.f.w = std::clamp(params.giSpatialReuseStrength, 0.0f, 1.0f);
             bindGI(m_tracePipelineHandle, pd); // 1. trace
+            pd.m = m_prevViewProj;
             pd.f.x = std::max(params.maxHistory, 1.0f);
             pd.f.y = std::clamp(params.wrcBaseCellSize, 0.10f, 2.0f);
-            pd.f.z = m_giHistoryValid ? 1.0f : 0.0f;
-            pd.f.w = std::clamp(params.giSpatialReuseStrength, 0.0f, 1.0f);
+            pd.f.z = std::clamp(params.giDarkRatio, 0.0f, 1.0f);
+            pd.f.w = std::clamp(params.giBrightRatio, 0.0f, 1.0f);
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 1);
             sync();
             if (m_timestampsSupported && m_queryPool)
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 2);
 
+            uint32_t midtoneByte = static_cast<uint32_t>(std::clamp(params.giMidtoneSmoothness, 0.0f, 1.0f) * 255.0f);
             pd.u[0] = (params.giTemporalFilterEnabled ? 0u : 1u) |
                       (params.giSurfaceHistoryCacheEnabled ? 2u : 0u) |
                       (params.worldRadianceCacheEnabled ? 4u : 0u) |
                       wrcFlags; // bit 0 bypass, bit 1 surface cache, bit 2 world cache, bits 8..13 WRC features
             pd.u[1] = (params.giHistoryClampEnabled ? 1u : 0u) |
                       (params.giTemporalFireflyFilterEnabled ? 2u : 0u) |
+                      (params.giDominanceRatioFilterEnabled ? 128u : 0u) |
+                      (m_giHistoryValid ? 256u : 0u) |
+                      (midtoneByte << 16) |
                       ((params.debugMode == RtDebugMode::WorldRadianceCacheHits ||
                         params.debugMode == RtDebugMode::WorldRadianceCacheRadiance ||
                         params.debugMode == RtDebugMode::WorldRadianceCacheConfidence) ? 4u : 0u) |

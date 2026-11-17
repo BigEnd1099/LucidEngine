@@ -350,4 +350,52 @@ if(LUCID_BUILD_ALGORITHM_TESTS)
         target_link_libraries(lucid_renderer_algorithm_tests PRIVATE Threads::Threads)
     endif()
     add_test(NAME lucid_renderer_algorithm_tests COMMAND lucid_renderer_algorithm_tests)
+
+    add_executable(lucid_architecture_roadmap_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_architecture_roadmap.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/Profiler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/VFS.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/SystemScheduler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/world/Node3D.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/world/SceneTree.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/world/Prefab.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/RenderGraph.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/RenderingServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/script/ModContext.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/physics/PhysicsContext.cpp
+    )
+    target_include_directories(lucid_architecture_roadmap_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${vma_SOURCE_DIR}/include
+        ${jolt_SOURCE_DIR}
+        ${qjs_SOURCE_DIR}
+        ${asio_SOURCE_DIR}/asio/include
+        ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
+    )
+    target_include_directories(lucid_architecture_roadmap_tests SYSTEM PRIVATE ${fastgltf_SOURCE_DIR}/include)
+    target_compile_definitions(lucid_architecture_roadmap_tests PRIVATE ASIO_STANDALONE USE_GLFW)
+    if(MSVC)
+        target_compile_options(lucid_architecture_roadmap_tests PRIVATE /W4 /permissive- /EHa)
+        target_compile_definitions(lucid_architecture_roadmap_tests PRIVATE NOMINMAX ${LUCID_GLM_COMPILE_DEFINITIONS})
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(lucid_architecture_roadmap_tests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_definitions(lucid_architecture_roadmap_tests PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+    else()
+        target_compile_definitions(lucid_architecture_roadmap_tests PRIVATE ${LUCID_GLM_COMPILE_DEFINITIONS})
+    endif()
+    target_link_libraries(lucid_architecture_roadmap_tests PRIVATE
+        EnTT::EnTT
+        glm::glm
+        nlohmann_json::nlohmann_json
+        qjs
+        Jolt
+        fastgltf::fastgltf
+        glfw
+        ixwebsocket
+        Vulkan::Vulkan
+    )
+    if(NOT WIN32)
+        target_link_libraries(lucid_architecture_roadmap_tests PRIVATE Threads::Threads)
+    endif()
+    add_test(NAME lucid_architecture_roadmap_tests COMMAND lucid_architecture_roadmap_tests)
 endif()

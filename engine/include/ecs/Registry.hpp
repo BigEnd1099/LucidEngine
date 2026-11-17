@@ -15,6 +15,17 @@ namespace engine::ecs {
 
         entt::entity createEntity() { return m_registry.create(); }
 
+        void markTransformDirty(entt::entity entity) {
+            if (!m_registry.valid(entity)) return;
+            if (m_registry.all_of<HierarchyComponent>(entity)) {
+                auto& h = m_registry.get<HierarchyComponent>(entity);
+                h.transformDirty = true;
+                for (entt::entity child : h.children) {
+                    markTransformDirty(child);
+                }
+            }
+        }
+
         // Establish a real parent-child relation. TransformComponent stores the
         // evaluated world transform; LocalTransformComponent stores the authored
         // transform relative to the parent.
@@ -31,11 +42,14 @@ namespace engine::ecs {
             detachFromParent(child);
             auto& childHierarchy = m_registry.get_or_emplace<HierarchyComponent>(child);
             childHierarchy.parent = parent;
+            childHierarchy.transformDirty = true;
             if (parent != entt::null) {
                 auto& parentHierarchy = m_registry.get_or_emplace<HierarchyComponent>(parent);
                 if (std::find(parentHierarchy.children.begin(), parentHierarchy.children.end(), child) == parentHierarchy.children.end())
                     parentHierarchy.children.push_back(child);
+                parentHierarchy.transformDirty = true;
             }
+            markTransformDirty(child);
             return true;
         }
 
@@ -57,6 +71,7 @@ namespace engine::ecs {
             }
             m_registry.get<TransformComponent>(child) = worldBefore;
             syncLocalTransformFromWorld(child);
+            markTransformDirty(child);
             return true;
         }
 
@@ -65,6 +80,7 @@ namespace engine::ecs {
             detachFromParent(child);
             if (m_registry.all_of<LocalTransformComponent, TransformComponent>(child))
                 syncLocalTransformFromWorld(child);
+            markTransformDirty(child);
             return true;
         }
 
@@ -102,6 +118,7 @@ namespace engine::ecs {
                 localTransform.scale = scale;
                 localTransform.orientation = glm::normalize(orientation);
                 localTransform.rotation = glm::degrees(glm::eulerAngles(localTransform.orientation));
+                markTransformDirty(entity);
             }
         }
 
@@ -164,15 +181,25 @@ namespace engine::ecs {
         }
 
         void updateWorldRecursive(entt::entity entity, const glm::mat4& parentWorld,
-                                  std::unordered_set<entt::entity>& visited) {
+                                  std::unordered_set<entt::entity>& visited,
+                                  bool parentChanged = false) {
             if (!m_registry.valid(entity) || !visited.insert(entity).second) return;
             glm::mat4 world = parentWorld;
-            if (m_registry.all_of<LocalTransformComponent, TransformComponent, RigidBodyComponent>(entity) &&
-                m_registry.get<RigidBodyComponent>(entity).bodyId != 0xFFFFFFFF) {
+            const bool hasRigidBody = m_registry.all_of<LocalTransformComponent, TransformComponent, RigidBodyComponent>(entity) &&
+                m_registry.get<RigidBodyComponent>(entity).bodyId != 0xFFFFFFFF;
+            if (hasRigidBody) {
                 // Physics writes world-space transforms; fold those changes back into
                 // local space before evaluating the hierarchy for this frame.
                 syncLocalTransformFromWorld(entity);
             }
+
+            bool isDirty = parentChanged || hasRigidBody;
+            if (m_registry.all_of<HierarchyComponent>(entity)) {
+                if (m_registry.get<HierarchyComponent>(entity).transformDirty) {
+                    isDirty = true;
+                }
+            }
+
             if (m_registry.all_of<LocalTransformComponent, TransformComponent>(entity)) {
                 const auto& local = m_registry.get<LocalTransformComponent>(entity);
                 const glm::quat rotation = glm::length(local.orientation) > 1e-6f
@@ -181,15 +208,17 @@ namespace engine::ecs {
                     glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), local.scale);
                 world = parentWorld * localMatrix;
 
-                glm::vec3 skew(0.0f), translation(0.0f), scale(1.0f);
-                glm::vec4 perspective(0.0f);
-                glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
-                if (glm::decompose(world, scale, orientation, translation, skew, perspective)) {
-                    auto& evaluated = m_registry.get<TransformComponent>(entity);
-                    evaluated.position = translation;
-                    evaluated.scale = scale;
-                    evaluated.orientation = glm::normalize(orientation);
-                    evaluated.rotation = glm::degrees(glm::eulerAngles(evaluated.orientation));
+                if (isDirty) {
+                    glm::vec3 skew(0.0f), translation(0.0f), scale(1.0f);
+                    glm::vec4 perspective(0.0f);
+                    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+                    if (glm::decompose(world, scale, orientation, translation, skew, perspective)) {
+                        auto& evaluated = m_registry.get<TransformComponent>(entity);
+                        evaluated.position = translation;
+                        evaluated.scale = scale;
+                        evaluated.orientation = glm::normalize(orientation);
+                        evaluated.rotation = glm::degrees(glm::eulerAngles(evaluated.orientation));
+                    }
                 }
             } else if (m_registry.all_of<TransformComponent>(entity)) {
                 // A detached child keeps its last evaluated world transform after
@@ -200,12 +229,15 @@ namespace engine::ecs {
                 world = glm::translate(glm::mat4(1.0f), transform.position) *
                     glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), transform.scale);
             }
+
             if (m_registry.all_of<HierarchyComponent>(entity)) {
+                auto& hierarchy = m_registry.get<HierarchyComponent>(entity);
+                hierarchy.transformDirty = false;
                 // Recursive propagation never edits hierarchy links, so avoid
                 // copying the child list on every traversal.
-                const auto& children = m_registry.get<HierarchyComponent>(entity).children;
+                const auto& children = hierarchy.children;
                 for (entt::entity child : children)
-                    updateWorldRecursive(child, world, visited);
+                    updateWorldRecursive(child, world, visited, isDirty);
             }
         }
 

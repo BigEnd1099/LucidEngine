@@ -50,8 +50,16 @@ void main() {
                           dirRadius * sin(dirPhi));
 
     vec3 probePos;
-    if ((cellBatchIdx & 3u) != 0u) {
-        // 75% of rays originate near the player/camera with tiny spherical jitter
+    if ((cellBatchIdx & 1u) == 0u) {
+        // 50% camera-frustum injection: distribute probes over the actual view
+        // instead of wasting the primary update budget on directions behind walls.
+        vec2 screenNdc = rand2() * 2.0 - 1.0;
+        vec4 farPointH = ubo.invViewProj * vec4(screenNdc, 1.0, 1.0);
+        vec3 farPoint = farPointH.xyz / max(abs(farPointH.w), 1e-6) * sign(farPointH.w);
+        probePos = cameraPos;
+        sampleDir = normalize(farPoint - cameraPos);
+    } else if ((cellBatchIdx & 3u) != 3u) {
+        // 25% retain local omnidirectional coverage around the camera.
         float offsetY = 1.0 - 2.0 * rand1();
         float offsetPhi = 6.28318530718 * rand1();
         float offsetRadius = sqrt(max(0.0, 1.0 - offsetY * offsetY));
@@ -59,7 +67,7 @@ void main() {
                               offsetRadius * sin(offsetPhi));
         probePos = cameraPos + offsetDir * (0.35 * rand1());
     } else {
-        // 25% maintain broad spatial coverage in structured grid around camera
+        // 25% preserve broad spatial coverage in a structured grid around camera.
         int gz = int(probeLinearIdx / 1024u) - 16;
         uint rem = probeLinearIdx % 1024u;
         int gy = int(round(float(rem / 32u) * (16.0 / 31.0))) - 2;

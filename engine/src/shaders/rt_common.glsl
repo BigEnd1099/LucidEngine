@@ -300,6 +300,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
         vec3 spec = (D * Vis * F) * hitReflectsLight;
+        if (isDiffuseGI) spec = min(spec, vec3(2.0));
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.sunColor.rgb * (sunIntensity * sunNdotL);
     }
@@ -346,6 +347,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 
         vec3 spec = (D * Vis * F) * hitReflectsLight;
+        if (isDiffuseGI) spec = min(spec, vec3(2.0));
         vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
         radiance += (kd * diffuse + spec) * ubo.lightsCol[i].rgb *
                     (intensity * 4.0 * attenuation * ndotl * lightMultiplier);

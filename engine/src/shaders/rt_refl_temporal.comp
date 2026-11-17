@@ -67,6 +67,18 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     if (any(greaterThanEqual(px, isize))) return;
     vec2 size = vec2(isize);
 
+    // Most pixels have no traced reflection (sky / roughness cutoff). Test the
+    // trace result before touching depth and G-buffer textures; keep the bypass
+    // mode's original geometry path intact.
+    vec4 raw = imageLoad(imgRefl, px);
+    bool bypassMode = (pc.u.w & (1u << 15)) != 0u;
+    if (!bypassMode && raw.a <= 0.0) {
+        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
+        imageStore(imgReflHistCur, px, vec4(0.0));
+        rejectedCounted = true;
+        return;
+    }
+
     float d = texelFetch(uDepth, px, 0).r;
     if (d >= 1.0) { // Sky is not a reflection sample.
         imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
@@ -85,9 +97,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     }
     N = normalize(N);
     float roughness = clamp(gNR.w, 0.0, 1.0);
-    vec4 raw = imageLoad(imgRefl, px);
 
-    if ((pc.u.w & (1u << 15)) != 0u) {
+    if (bypassMode) {
         vec3 bypassP = rtWorldPos(vec2(px) + 0.5, d, size);
         float bypassViewDepth = -(ubo.view * vec4(bypassP, 1.0)).z;
         imageStore(imgReflGeomCur, px, vec4(N, bypassViewDepth));
@@ -95,17 +106,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
         imageStore(imgReflHistCur, px, vec4(raw.rgb, valid));
         ageBin = 0u;
         histogramCounted = true;
-        return;
-    }
-
-    // The trace pass already writes exact zero for sky, invalid normals and
-    // roughness-cutoff pixels. Keep their geometry invalid for reprojection,
-    // but do not reconstruct world position or rewrite two already-empty images.
-    if (raw.a <= 0.0) {
-        histogramCounted = false; // Not a traced reflection sample; never enter age Bin 00.
-        imageStore(imgReflGeomCur, px, vec4(0.0, 0.0, 0.0, -1.0));
-        rejectedCounted = true;
-        imageStore(imgReflHistCur, px, vec4(0.0));
         return;
     }
 
@@ -163,45 +163,45 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
     float historyAge = 0.0;
         float maxHistory = max(pc.f.x, 1.0);
     bool denoiseMirrors = (pc.u.w & (1u << 14)) != 0u;
+    bool outlierFilterEnabled = (pc.u.w & (1u << 16)) != 0u;
     bool mirrorTemporalOnly = roughness < 0.08 && !denoiseMirrors;
     float motionPixels = length((curUV - effectivePrevUV) * size);
     float effectiveMaxHistory = mirrorTemporalOnly
-        ? mix(8.0, 1.0, clamp(motionPixels * 0.5, 0.0, 1.0))
+        ? mix(maxHistory * 0.5, 4.0, clamp(motionPixels * 0.20, 0.0, 1.0))
         : mix(maxHistory, 2.0, clamp(motionPixels * 0.25, 0.0, 1.0));
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
             pixelDiag[14] += 1u;
-            // Re-use full history from previous frame when this pixel was active
-            vec3 checkerHistY = rgbToYCoCg((hist / wSum).rgb);
-            vec3 checkerMinY = vec3(1e20);
-            vec3 checkerMaxY = vec3(-1e20);
-            float checkerCount = 0.0;
-            vec3 cardinalSum = vec3(0.0);
-            const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
-            for (int ci = 0; ci < 4; ++ci) {
-                ivec2 cp = px + checkerOffsets[ci];
-                if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
-                vec4 cv = imageLoad(imgRefl, cp);
-                if (cv.a < 0.5) continue;
-                vec3 cy = rgbToYCoCg(cv.rgb);
-                checkerMinY = min(checkerMinY, cy);
-                checkerMaxY = max(checkerMaxY, cy);
-                cardinalSum += cv.rgb;
-                checkerCount += 1.0;
-            }
-            vec3 checkerHistRgb = max(vec3(0.0), yCoCgToRgb(checkerHistY));
-            if (checkerCount > 0.0 && motionPixels > 0.75 && checkerMaxY.x > 0.05) {
-                vec3 margin = max(abs(checkerMaxY - checkerMinY) * 1.0, vec3(0.15));
-                vec3 upperBound = max(checkerMaxY + margin, checkerHistY * 0.85);
-                vec3 clampedY = max(vec3(0.0), yCoCgToRgb(
-                    clamp(checkerHistY, checkerMinY - margin, upperBound)));
-                if (motionPixels > 1.5) {
-                    vec3 cardinalAvg = cardinalSum / checkerCount;
-                    clampedY = mix(clampedY, cardinalAvg,
-                        clamp((motionPixels - 1.5) * 0.20, 0.0, 0.50));
+            // Re-use full history from previous frame when this pixel was active.
+            vec3 checkerHistRgb = max(vec3(0.0), (hist / wSum).rgb);
+            // Neighborhood clamping is only useful once reprojection motion is
+            // large enough to expose disocclusion/ghosting. Avoid four raw-image
+            // reads for the common static and slow-camera case.
+            if (motionPixels > 0.75) {
+                vec3 checkerHistY = rgbToYCoCg(checkerHistRgb);
+                vec3 checkerMinY = vec3(1e20);
+                vec3 checkerMaxY = vec3(-1e20);
+                float checkerCount = 0.0;
+                vec3 cardinalSum = vec3(0.0);
+                const ivec2 checkerOffsets[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+                for (int ci = 0; ci < 4; ++ci) {
+                    ivec2 cp = px + checkerOffsets[ci];
+                    if (any(lessThan(cp, ivec2(0))) || any(greaterThanEqual(cp, isize))) continue;
+                    vec4 cv = imageLoad(imgRefl, cp);
+                    if (cv.a < 0.5) continue;
+                    vec3 cy = rgbToYCoCg(cv.rgb);
+                    checkerMinY = min(checkerMinY, cy);
+                    checkerMaxY = max(checkerMaxY, cy);
+                    cardinalSum += cv.rgb;
+                    checkerCount += 1.0;
                 }
-                checkerHistRgb = clampedY;
+                if (checkerCount > 0.0 && checkerMaxY.x > 0.05) {
+                    vec3 margin = max(abs(checkerMaxY - checkerMinY) * 0.5, vec3(0.10));
+                    vec3 upperBound = checkerMaxY + margin;
+                    checkerHistRgb = max(vec3(0.0), yCoCgToRgb(
+                        clamp(checkerHistY, checkerMinY - margin, upperBound)));
+                }
             }
             result = vec4(checkerHistRgb, 1.0);
             historyAge = min(hist.a / wSum, effectiveMaxHistory);
@@ -303,8 +303,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
 
                     // Preserve bright features that have spatial support. A single high
                     // sample is rejected only when it is a rare outlier in a populated patch.
-                    float floorThreshold = (roughness < 0.08) ? 64.0 : 12.0;
-                    float fireflyThreshold = max(6.0 * effectiveSigma.x, max(m1Y.x * 5.0, floorThreshold));
+                    float floorThreshold = (roughness < 0.08) ? 12.0 : 8.0;
+                    float fireflyThreshold = max(4.0 * effectiveSigma.x, max(m1Y.x * 3.5, floorThreshold));
                     float supportThreshold = max(m1Y.x + sigmaY.x, rawY.x * 0.5);
                     float brightNeighborCount = 0.0;
                     float maxSupportedLum = clampMaxY.x;
@@ -337,15 +337,19 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted, out bool
                         raw.rgb *= fireflyLimit / max(rawY.x, 1e-4);
                 }
 
-                raw.rgb = max(raw.rgb, vec3(0.0)); // Do not impose a fixed ceiling on legitimate specular energy.
+                raw.rgb = max(raw.rgb, vec3(0.0));
+                vec3 safeRaw = (outlierFilterEnabled) ? clampFirefly(raw.rgb, 20.0) : raw.rgb;
                 historyAge = min(hist.a + 1.0, maxHistory);
                 float minAlpha = 1.0 / maxHistory;
                 float alpha = (pc.f.z > 0.5) ? clamp(1.0 / historyAge, minAlpha, 1.0) : 1.0;
-                result = vec4(mix(hist.rgb, raw.rgb, alpha), 1.0);
+                float velocityWeight = clamp(motionPixels * 0.06, 0.0, 0.18);
+                float effectiveAlpha = max(alpha, velocityWeight);
+                result = vec4(mix(hist.rgb, safeRaw, effectiveAlpha), 1.0);
             }
         } else {
             rejectedCounted = true;
-            result = raw;
+            vec3 rawSafe = (outlierFilterEnabled) ? clampFirefly(raw.rgb, 16.0) : raw.rgb;
+            result = vec4(rawSafe, 1.0);
             historyAge = 1.0;
         }
     }

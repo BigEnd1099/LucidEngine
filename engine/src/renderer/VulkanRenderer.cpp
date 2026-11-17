@@ -389,23 +389,8 @@ namespace engine::renderer {
         }
         if (srcImage == VK_NULL_HANDLE) return "";
 
-        uint32_t currIdx = m_captureRingIndex;
-        uint32_t prevIdx = (currIdx + 1) % CAPTURE_RING_COUNT;
-
-        // Non-blocking check on previous ring slot: if ready, we encode immediately (< 0.5 ms)
-        std::string resultBase64;
-        VkResult prevStatus = vkGetFenceStatus(m_context->getDevice(), m_captureFenceRing[prevIdx]);
-        if (prevStatus == VK_SUCCESS && m_captureMappedPtrRing[prevIdx]) {
-            const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[prevIdx]);
-            std::vector<uint8_t> jpegBytes;
-            jpegBytes.reserve(256 * 1024);
-            stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
-            resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
-        }
-
-        // Wait with a small bounded timeout on curr fence if in flight, then record next copy
-        vkWaitForFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx], VK_TRUE, 2000000ULL);
-        vkResetFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx]);
+        // Ensure all prior render commands have completely finished on the GPU
+        vkDeviceWaitIdle(m_context->getDevice());
         vkResetCommandBuffer(m_captureCommandBuffer, 0);
 
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -421,7 +406,7 @@ namespace engine::renderer {
         VkBufferImageCopy region{};
         region.imageSubresource = { aspect, 0, 0, 1 };
         region.imageExtent = { srcWidth, srcHeight, 1 };
-        vkCmdCopyImageToBuffer(m_captureCommandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_captureStagingRing[currIdx], 1, &region);
+        vkCmdCopyImageToBuffer(m_captureCommandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_captureStagingRing[0], 1, &region);
 
         transitionImage(m_captureCommandBuffer, srcImage,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -434,19 +419,18 @@ namespace engine::renderer {
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &m_captureCommandBuffer;
-        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, m_captureFenceRing[currIdx]);
+        vkQueueSubmit(m_context->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
 
-        m_captureRingIndex = prevIdx;
+        // Synchronously wait for the transfer copy to finish into staging buffer
+        vkDeviceWaitIdle(m_context->getDevice());
 
-        // If result was not ready from previous ring slot (e.g. bootstrap/first call), wait on curr and return
-        if (resultBase64.empty()) {
-            vkWaitForFences(m_context->getDevice(), 1, &m_captureFenceRing[currIdx], VK_TRUE, UINT64_MAX);
-            const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[currIdx]);
-            std::vector<uint8_t> jpegBytes;
-            jpegBytes.reserve(256 * 1024);
-            stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
-            resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
-        }
+        const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[0]);
+        std::vector<uint8_t> jpegBytes;
+        jpegBytes.reserve(256 * 1024);
+        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+        std::string resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
+
+        return resultBase64;
 
         return resultBase64;
     }

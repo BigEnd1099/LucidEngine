@@ -198,6 +198,7 @@ namespace engine::renderer {
             m_passTelemetry.push_back({
                 pass.name,
                 ms,
+                0.0, // GPU duration populated when GPU query pool timestamp is retrieved
                 1 // Recorded dispatch item
             });
         }
@@ -209,6 +210,7 @@ namespace engine::renderer {
             arr.push_back({
                 {"pass", item.passName},
                 {"durationMs", item.durationMs},
+                {"gpuDurationMs", item.gpuDurationMs},
                 {"drawCount", item.drawCount}
             });
         }

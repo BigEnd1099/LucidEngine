@@ -89,15 +89,15 @@ bool trySampleWorldRadianceCache(uint cellKey, ivec3 cellCoord, vec3 worldPos, v
         if (cell.cellKey != cellKey || currentFrame < cell.lastSeenFrame)
             continue;
         vec3 cellNormal = unpackNormalOctahedral(cell.packedNormal);
-        if (dot(cellNormal, n) <= 0.65)
+        float geomWeight = computeWorldCacheNormalWeight(cellNormal, n);
+        if (geomWeight <= 0.0)
             continue;
-        float geomWeight = 1.0;
         if (planeWeightEnabled) {
             vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
             float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-            if (excessDist > 0.75 * cellSize)
+            if (excessDist > 0.95 * cellSize)
                 continue;
-            geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
+            geomWeight *= computePlaneDistanceWeight(excessDist, cellSize);
         }
         sampleWeight = cell.irradiance.a;
         result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
@@ -306,7 +306,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec2 cameraPrevUV = (pClip.w > 0.0001) ? ((pClip.xy / pClip.w) * 0.5 + 0.5) : curUV;
     vec2 effectivePrevUV = (dot(motion, motion) >= 0.000000001) ? (curUV - motion) : cameraPrevUV;
     float motionPixels = length((curUV - effectivePrevUV) * size);
-    if (pc.f.z > 0.5) {
+    bool isHistValid = (pc.u.y & 256u) != 0u;
+    if (isHistValid) {
         vec2 prevUV = effectivePrevUV;
 
         vec2 prevPx = prevUV * size - 0.5;
@@ -347,62 +348,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     float newLen;
     float finalHitDistFactor = curHitDistFactor;
     bool isCheckerSkipped = (raw.a < -0.5);
-    float giSpatialReuseStrength = clamp(pc.f.w, 0.0, 1.0);
+    // Pre-temporal spatial jitter is disabled to prevent frame-to-frame checkerboard variance fighting.
+    // Pure temporal accumulation integrates raw rays smoothly without injecting spatial noise.
 
-    // Reuse compatible current-frame neighbors before temporal accumulation. This lets
-    // the temporal filter integrate the reused estimate instead of injecting fresh noise
-    // into an already converged history buffer.
-    float projectedHistoryLen = (wSum > 0.05)
-        ? min(histLen / wSum + 1.0, effectiveMaxHist) : 1.0;
-    float spatialReuseFade = 1.0 - smoothstep(4.0, 10.0, projectedHistoryLen);
-    if (!isCheckerSkipped && spatialReuseFade > 0.001 && giSpatialReuseStrength > 0.01) {
-        vec3 accumRgb = raw.rgb;
-        float accumW = 1.0;
-        float searchRadius = mix(2.0, 6.5, curHitDistFactor) * giSpatialReuseStrength;
-        float baseAngle = ignTemporal(vec2(px), pc.u.w) * 6.2831853;
-        float localDepthTol = max(0.025 * zC, 0.015);
-        for (int si = 0; si < 6; ++si) {
-            float r = sqrt((float(si) + 0.5) / 6.0) * searchRadius;
-            float ang = baseAngle + float(si) * 2.3999632;
-            ivec2 qPx = px + ivec2(round(vec2(cos(ang), sin(ang)) * r));
-            if (any(lessThan(qPx, ivec2(0))) || any(greaterThanEqual(qPx, isize)) || qPx == px)
-                continue;
-            vec4 qRaw = imageLoad(imgS, qPx);
-            if (qRaw.a < 0.0) continue;
-            vec4 qGeom = imageLoad(imgGeomCur, qPx);
-            if (qGeom.z <= 0.0 || abs(qGeom.z - zC) > localDepthTol)
-                continue;
-            vec3 qN = rtOctDecode(qGeom.xy);
-            float nSim = dot(qN, N);
-            if (nSim < 0.82) continue;
-            ivec2 qFullPx = min(ivec2(((vec2(qPx) + 0.5) / size) * vec2(fullDepthSize)), fullDepthSize - 1);
-            float qD = texelFetch(uDepth, qFullPx, 0).r;
-            // Keep neighbour reconstruction on the GI grid for consistent
-            // reprojection and spatial reuse coordinates.
-            vec3 qP = rtWorldPos(vec2(qPx) + 0.5, qD, size);
-            // Plane-distance rejection prevents reuse across curved silhouettes.
-            if (abs(dot(qP - P, N)) > 0.08 * zC + 0.02) continue;
-            float qHitDistFactor = unpackGiHitDistFactor(qGeom.w);
-            float qVirtualDist = max(qHitDistFactor * 1.75, 0.15);
-            vec3 virtualHit = qP + qN * qVirtualDist;
-            vec3 toVirtualHitP = virtualHit - P;
-            vec3 toVirtualHitQ = virtualHit - qP;
-            float distPSq = max(dot(toVirtualHitP, toVirtualHitP), 1e-3);
-            vec3 dirPToHit = toVirtualHitP * inversesqrt(distPSq);
-            float cosReceiverP = max(dot(N, dirPToHit), 0.0);
-            float cosVirtualHit = max(dot(qN, dirPToHit), 0.0);
-            float jacobian = clamp((qVirtualDist * qVirtualDist / distPSq) *
-                                   cosReceiverP * cosVirtualHit, 0.0, 1.25);
-            float reuseWeight = pow(nSim, 6.0) * jacobian * giSpatialReuseStrength * spatialReuseFade * 0.45;
-            accumRgb += qRaw.rgb * reuseWeight;
-            accumW += reuseWeight;
-        }
-        raw.rgb = accumRgb / accumW;
-    }
-
-    float rawLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
-    vec2 curSampleMoments = vec2(rawLum, rawLum * rawLum);
     vec4 outMoments = vec4(0.0);
+    vec2 curSampleMoments = vec2(0.0);
 
     if (isCheckerSkipped) {
         if (wSum > 0.05) {
@@ -481,132 +431,335 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histMoments /= wSum;
             histLen /= wSum;
             histHitDist /= wSum;
-            float prevHitDistFactor = histHitDist;
+        } else {
+            pixelDiag[2]++;
+            hist = raw;
+            histMoments = vec4(0.0);
+            histLen = 0.0;
+            histHitDist = curHitDistFactor;
+        }
+        float prevHitDistFactor = histHitDist;
 
-            // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
-            vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
-            vec3 m1Y = vec3(0.0);
-            vec3 m2Y = vec3(0.0);
-            float count = 0.0;
-            float aoMin = raw.a;
-            float aoMax = raw.a;
+        // 3x3 Neighborhood Hampel Outlier & Variance Clamping in YCoCg space
+        vec3 rawYCoCg = rgbToYCoCg(raw.rgb);
+        vec3 neighborY[8];
+        float neighborLuma[8];
+        int nNeighbors = 0;
+        float aoMin = raw.a;
+        float aoMax = raw.a;
+        float minLum = rawYCoCg.x;
+        float maxLum = rawYCoCg.x;
 
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    if (dx == 0 && dy == 0) continue; // Exclude center pixel to prevent outlier self-contamination
-                    ivec2 sp = px + ivec2(dx, dy);
-                    if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
-                    vec4 sVal = imageLoad(imgS, sp);
-                    if (sVal.a < 0.0) continue; // Skip checkerboard-skipped neighbors
-                    vec3 sY = rgbToYCoCg(sVal.rgb);
-                    m1Y += sY;
-                    m2Y += sY * sY;
-                    aoMin = min(aoMin, sVal.a);
-                    aoMax = max(aoMax, sVal.a);
-                    count += 1.0;
-                }
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue; // Exclude center pixel to prevent outlier self-contamination
+                ivec2 sp = px + ivec2(dx, dy);
+                if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
+                vec4 sVal = imageLoad(imgS, sp);
+                if (sVal.a < 0.0) continue; // Skip checkerboard-skipped neighbors
+                vec3 sY = rgbToYCoCg(sVal.rgb);
+                neighborY[nNeighbors] = sY;
+                neighborLuma[nNeighbors] = sY.x;
+                aoMin = min(aoMin, sVal.a);
+                aoMax = max(aoMax, sVal.a);
+                minLum = min(minLum, sY.x);
+                maxLum = max(maxLum, sY.x);
+                nNeighbors++;
             }
-            float spatialVar = 0.1;
-            if (count >= 2.0) {
-                m1Y /= count;
-                m2Y /= count;
-                vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
-                spatialVar = max(0.0, m2Y.x - m1Y.x * m1Y.x);
-                float gamma = 1.5 + 1.5 * clamp(histLen / 16.0, 0.0, 1.0);
+        }
 
-                // Variance floor: prevent zero-clipping of weak indirect light in dark areas
-                vec3 effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
-                float clampGamma = mix(3.25, 2.0, clamp(motionPixels * 0.15, 0.0, 1.0));
-                vec3 clampMinY = m1Y - effectiveSigma * clampGamma;
-                vec3 clampMaxY = m1Y + effectiveSigma * (clampGamma + 0.75);
-                clampMinY.x = max(0.0, clampMinY.x);
-                clampMaxY.x = max(clampMinY.x, clampMaxY.x);
+        // Robust neighborhood luminance statistics. The maximum is deliberately
+        // not used as the firefly reference: several isolated bright samples must
+        // not raise one another's rejection threshold.
+        float sortedLuma[8];
+        for (int i = 0; i < nNeighbors; ++i) sortedLuma[i] = neighborLuma[i];
+        for (int i = 1; i < nNeighbors; ++i) {
+            float key = sortedLuma[i];
+            int j = i - 1;
+            while (j >= 0 && sortedLuma[j] > key) {
+                sortedLuma[j + 1] = sortedLuma[j];
+                --j;
+            }
+            sortedLuma[j + 1] = key;
+        }
+        float medianLum = rawYCoCg.x;
+        if (nNeighbors > 0) {
+            int mid = nNeighbors / 2;
+            medianLum = (nNeighbors & 1) != 0 ? sortedLuma[mid]
+                                               : 0.5 * (sortedLuma[mid - 1] + sortedLuma[mid]);
+        }
+        float absDeviation[8];
+        for (int i = 0; i < nNeighbors; ++i) absDeviation[i] = abs(neighborLuma[i] - medianLum);
+        for (int i = 1; i < nNeighbors; ++i) {
+            float key = absDeviation[i];
+            int j = i - 1;
+            while (j >= 0 && absDeviation[j] > key) {
+                absDeviation[j + 1] = absDeviation[j];
+                --j;
+            }
+            absDeviation[j + 1] = key;
+        }
+        float medianAbsDeviation = 0.0;
+        if (nNeighbors > 0) {
+            int mid = nNeighbors / 2;
+            medianAbsDeviation = (nNeighbors & 1) != 0 ? absDeviation[mid]
+                                                        : 0.5 * (absDeviation[mid - 1] + absDeviation[mid]);
+        }
+        float robustSigma = 1.4826 * medianAbsDeviation;
 
-                vec3 histY = rgbToYCoCg(hist.rgb);
-                hist.a = clamp(hist.a, aoMin, aoMax);
+        // A bright sample is spatially supported only when multiple independent
+        // neighbors carry a comparable level of radiance. This protects real
+        // bright clusters without allowing one or two isolated fireflies to
+        // inflate the robust threshold.
+        float supportFloor = max(medianLum + max(2.0 * robustSigma,
+                                                medianLum * 0.75 + 0.008),
+                                 rawYCoCg.x * 0.55);
+        int brightSupportCount = 0;
+        for (int i = 0; i < nNeighbors; ++i) {
+            if (neighborLuma[i] >= supportFloor) brightSupportCount++;
+        }
+        bool spatiallySupportedBright = brightSupportCount >= 2;
 
-                // A bright sample is not automatically a firefly: preserve it when
-                // nearby pixels show the same bright feature. Reject only a high sample
-                // that is statistically rare in a sufficiently populated neighborhood.
-                // Keep temporal rejection conservative in HDR scenes: bright indirect
-                // features must not be capped just because checkerboard leaves few neighbours.
-                float fireflyThreshold = max(8.0 * effectiveSigma.x, max(m1Y.x * 8.0, 64.0));
-                float supportThreshold = max(m1Y.x + sigmaY.x, rawYCoCg.x * 0.5);
-                float brightNeighborCount = 0.0;
-                float maxSupportedLum = clampMaxY.x;
-                for (int fy = -1; fy <= 1; ++fy) {
-                    for (int fx = -1; fx <= 1; ++fx) {
-                        if (fx == 0 && fy == 0) continue;
-                        ivec2 fp = px + ivec2(fx, fy);
-                        if (any(lessThan(fp, ivec2(0))) || any(greaterThanEqual(fp, isize))) continue;
-                        vec4 fVal = imageLoad(imgS, fp);
-                        if (fVal.a < 0.0) continue;
-                        float neighborLumY = rgbToYCoCg(fVal.rgb).x;
-                        if (neighborLumY >= supportThreshold) {
-                            brightNeighborCount += 1.0;
-                            maxSupportedLum = max(maxSupportedLum, neighborLumY);
-                        }
+        float spatialVar = 0.1;
+        vec3 m1Y = rawYCoCg;
+        vec3 m2Y = rawYCoCg * rawYCoCg;
+        vec3 effectiveSigma = vec3(0.08, 0.04, 0.04);
+        float maxClusterLum = rawYCoCg.x;
+        bool inDarkZone = false;
+        bool inBrightZone = false;
+        float splitLum = rawYCoCg.x;
+        float tBlend = 0.5;
+        bool isBimodal = false;
+        bool useDominanceRatio = (pc.u.y & 128u) != 0u;
+
+        if (nNeighbors >= 2) {
+            // =========================================================================
+            // STAGE 1: 3-Tier Dynamic Brightness Classification (Ciemne / Średnie / Jasne)
+            // =========================================================================
+            float darkRatio = clamp(pc.f.z, 0.0, 1.0);
+            float brightRatio = clamp(pc.f.w, 0.0, 1.0);
+            float midtoneSmooth = float((pc.u.y >> 16u) & 0xFFu) / 255.0;
+
+            isBimodal = useDominanceRatio && (maxLum > minLum * 1.5 + 0.10);
+            splitLum = sqrt(max(minLum, 1e-4) * max(maxLum, 1e-4));
+
+            int numBright = (rawYCoCg.x >= splitLum) ? 1 : 0;
+            int numDark = (rawYCoCg.x < splitLum) ? 1 : 0;
+            for (int i = 0; i < nNeighbors; ++i) {
+                if (neighborY[i].x >= splitLum) numBright++;
+                else numDark++;
+            }
+            int totalCount = numBright + numDark;
+            float brightFraction = float(numBright) / max(float(totalCount), 1.0);
+
+            // Continuous tier blend factor t in [0, 1]:
+            // 0 = purely dark zone (dominance of dark samples)
+            // 1 = purely bright zone (dominance of bright samples)
+            // (0..1) = midtones / penumbra transition zone
+            float brightThreshold = max(darkRatio + 0.05, 1.0 - brightRatio * 0.75);
+            float tRaw = clamp((brightFraction - darkRatio) / max(brightThreshold - darkRatio, 0.05), 0.0, 1.0);
+            tBlend = mix(tRaw, smoothstep(0.0, 1.0, tRaw), midtoneSmooth);
+
+            inDarkZone = (tBlend < 0.05) && (brightFraction <= darkRatio);
+            inBrightZone = (tBlend > 0.95);
+
+            m1Y = vec3(0.0);
+            m2Y = vec3(0.0);
+            float statsCount = 0.0;
+            float maxDarkClusterLum = 0.0;
+            float maxBrightClusterLum = 0.0;
+
+            for (int i = 0; i < nNeighbors; ++i) {
+                bool isSampleBright = (neighborY[i].x >= splitLum);
+                float w = 1.0;
+                if (useDominanceRatio && isBimodal) {
+                    if (isSampleBright) {
+                        // In dark zone (tBlend -> 0), bright outliers are downweighted.
+                        // In bright zone (tBlend -> 1), bright samples have full weight 1.0.
+                        w = mix(max(0.02, darkRatio), 1.0, tBlend);
+                        maxBrightClusterLum = max(maxBrightClusterLum, neighborY[i].x);
+                    } else {
+                        // In bright zone (tBlend -> 1), dark misses are downweighted by brightRatio.
+                        // In dark zone (tBlend -> 0), dark samples have full weight 1.0.
+                        w = mix(1.0, max(0.02, 1.0 - brightRatio), tBlend);
+                        maxDarkClusterLum = max(maxDarkClusterLum, neighborY[i].x);
                     }
+                } else {
+                    maxBrightClusterLum = max(maxBrightClusterLum, neighborY[i].x);
+                    maxDarkClusterLum = max(maxDarkClusterLum, neighborY[i].x);
                 }
-                // count excludes the center; only test patches with enough valid neighbors.
-                bool unsupportedNeighborhood = count >= 3.0 &&
-                    brightNeighborCount <= floor(count * 0.125);
-                float fireflyLimit = m1Y.x + fireflyThreshold;
-                vec4 cachedSurf = vec4(0.0);
-                float cachedCov = 0.0;
-                bool cachedSurfaceValid = false;
-                // Surface History is only needed as independent evidence for a
-                // statistically unsupported bright outlier. Querying it merely
-                // because reprojection succeeded made every mature GI pixel perform
-                // up to eight 16-probe hash searches, despite no firefly candidate.
-                bool needsCacheEvidence = unsupportedNeighborhood &&
-                    (rawYCoCg.x > fireflyLimit ||
-                     (histLen < 2.0 && histY.x > fireflyLimit));
-                if ((pc.u.x & 2u) != 0u && needsCacheEvidence) {
-                    pixelCacheDiag[3]++;
-                    cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
-                    if (cachedSurfaceValid) pixelCacheDiag[1]++;
-                }
-                bool cacheSupportsBright = cachedSurfaceValid &&
-                    rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, fireflyLimit * 0.35);
-                // In checkerboard mode history receives a new traced observation every
-                // other frame. Two accumulated observations are already four real frames.
-                // Do not reject mature, reprojected HDR energy because the current sparse
-                // 1-SPP neighborhood happened to miss the bright path.
-                bool historySupportsBright = (wSum > 0.25) && (histLen >= 2.0) &&
-                    (histY.x > m1Y.x + 1.5 * effectiveSigma.x);
-                bool realHistFirefly = unsupportedNeighborhood && (histLen < 2.0) &&
-                    (histY.x > fireflyLimit) && !cacheSupportsBright;
-                bool realRawFirefly = unsupportedNeighborhood &&
-                    rawYCoCg.x > fireflyLimit && !historySupportsBright && !cacheSupportsBright;
-                // Reprojected history and persistent surface radiance are independent
-                // evidence that a bright feature is real, not a transient firefly.
-                if (!realHistFirefly && wSum > 0.2) {
-                    clampMaxY = max(clampMaxY, histY);
-                    clampMinY.x = min(clampMinY.x, histY.x * 0.5);
-                }
-                if (cachedSurfaceValid && !realHistFirefly) {
-                    vec3 cachedY = rgbToYCoCg(cachedSurf.rgb);
-                    clampMaxY = max(clampMaxY, cachedY * 1.15 + effectiveSigma);
-                }
-                if (realHistFirefly)
-                    clampMaxY.x = min(clampMaxY.x, fireflyLimit);
-                if (!realRawFirefly && !realHistFirefly)
-                    clampMaxY.x = max(clampMaxY.x, maxSupportedLum);
-                if ((pc.u.y & 1u) != 0u) {
-                    // Clamp luminance only. Independent Co/Cg clipping changes warm
-                    // cream bounce-light chroma and can make it appear yellow-green.
-                    float clampedHistY = clamp(histY.x, clampMinY.x, clampMaxY.x);
-                    hist.rgb *= clampedHistY / max(histY.x, 1e-4);
-                }
-                if ((pc.u.y & 2u) != 0u && realRawFirefly)
-                    raw.rgb *= fireflyLimit / max(rawYCoCg.x, 1e-4);
+                m1Y += neighborY[i] * w;
+                m2Y += neighborY[i] * neighborY[i] * w;
+                statsCount += w;
             }
-            raw.rgb = max(raw.rgb, vec3(0.0)); // No fixed radiance ceiling: preserve legitimate bright indirect light.
 
-            // History length is measured in valid frames, not accumulated rays.
-            // Each raw frame is already the average of its SPP samples, so SPP must
-            // not change the temporal response speed or make 1 SPP freeze the image.
+            if (statsCount > 1e-4) {
+                m1Y /= statsCount;
+                m2Y /= statsCount;
+            } else {
+                m1Y = rawYCoCg;
+                m2Y = rawYCoCg * rawYCoCg;
+            }
+
+            if (isBimodal) {
+                maxClusterLum = mix((maxDarkClusterLum > 0.0 ? maxDarkClusterLum : m1Y.x),
+                                    max(maxBrightClusterLum, m1Y.x), tBlend);
+            } else {
+                maxClusterLum = max(maxBrightClusterLum, rawYCoCg.x);
+            }
+
+            vec3 sigmaY = sqrt(max(vec3(0.0), m2Y - m1Y * m1Y));
+            spatialVar = max(0.0, m2Y.x - m1Y.x * m1Y.x);
+            effectiveSigma = max(sigmaY, vec3(0.08, 0.04, 0.04));
+        }
+
+        // Temporal Frequency & Consistency:
+        // A firefly is a non-recurring 1-frame Monte Carlo spike.
+        // Legitimate lighting recurs consistently across frames.
+        vec3 histY = rgbToYCoCg(hist.rgb);
+        // History only supports a bright current sample when its own radiance
+        // is in the same brightness range. A dark history must not bless a
+        // one-frame bright spike merely because the pixel has accumulated age.
+        bool historySupportsCurrent = (wSum > 0.25) && (histLen >= 2.0) &&
+                                      (histY.x >= rawYCoCg.x * 0.35);
+        bool temporallyFrequent = historySupportsCurrent;
+
+        vec4 cachedSurf = vec4(0.0);
+        float cachedCov = 0.0;
+        bool cachedSurfaceValid = false;
+        bool needsCacheEvidence = inDarkZone && (rawYCoCg.x >= splitLum) && !temporallyFrequent;
+        if ((pc.u.x & 2u) != 0u && needsCacheEvidence) {
+            pixelCacheDiag[3]++;
+            cachedSurfaceValid = loadSurfaceHistory(P, N, pc.u.z, pc.u.w, cachedSurf, cachedCov) && cachedCov > 0.25;
+            if (cachedSurfaceValid) pixelCacheDiag[1]++;
+        }
+        bool cacheSupportsBright = cachedSurfaceValid &&
+            rgbToYCoCg(cachedSurf.rgb).x > max(m1Y.x + effectiveSigma.x, 0.5);
+
+        bool realRawFirefly = false;
+        // Firefly detection uses a local *relative* noise scale rather than the
+        // broad history-clamp sigma floor. The latter is intentionally generous
+        // for reprojection stability, but makes low-radiance outliers invisible.
+        float darkFloor = max(medianLum, 0.005);
+        float historyBaseline = historySupportsCurrent ? histY.x : 0.0;
+        float baseline = max(historyBaseline, medianLum);
+        float localFireflyScale = max(medianLum, 0.015);
+        // Tighten the dark-surface floor while keeping the threshold proportional
+        // to the local robust spread. The old fixed offsets were large enough to
+        // leave visible low-energy fireflies on otherwise uniform walls.
+        float fireflySigma = max(robustSigma * 2.0, localFireflyScale * 0.12 + 0.005);
+        float fireflyRelativeGate = baseline * 1.9 + max(0.012, baseline * 0.12);
+        float robustFireflyLimit = medianLum + max(2.5 * robustSigma,
+                                                   medianLum * 1.10 + 0.012);
+        float fireflyLimit = min(m1Y.x + 2.75 * fireflySigma,
+                                 robustFireflyLimit);
+        if (useDominanceRatio && isBimodal) {
+            // A true firefly is an isolated spike unsupported by history, the
+            // neighborhood, or surface cache. A supported bright cluster remains intact.
+            bool loneDarkSpike = inDarkZone && (maxClusterLum < splitLum * 0.5) &&
+                                 (rawYCoCg.x > max(darkFloor * 3.0, 0.045));
+            bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
+                                (rawYCoCg.x > fireflyRelativeGate);
+            realRawFirefly = (loneDarkSpike || outlierSpike) &&
+                             !historySupportsCurrent && !cacheSupportsBright &&
+                             !spatiallySupportedBright;
+        } else {
+            realRawFirefly = (rawYCoCg.x > robustFireflyLimit) &&
+                             (rawYCoCg.x > fireflyRelativeGate) &&
+                             !historySupportsCurrent && !cacheSupportsBright &&
+                             !spatiallySupportedBright;
+        }
+
+        // =========================================================================
+        // STAGE 2: Pre-filter Raw Sample (GI Temporal Firefly Rejection)
+        // Soft rational compression: eliminates fireflies BEFORE moments computation
+        // =========================================================================
+        if ((pc.u.y & 2u) != 0u && realRawFirefly) {
+            // Keep the clamp proportional in dark regions: a fixed 0.2 radiance
+            // allowance can be larger than the entire local GI signal.
+            // Clamp against the robust local population, not its maximum:
+            // the maximum can itself be another firefly and otherwise raises
+            // the allowance for every subsequent outlier.
+            float allowedMax = medianLum + max(2.0 * robustSigma,
+                                                medianLum * 1.10 + 0.010);
+            if (rawYCoCg.x > allowedMax) {
+                float excess = rawYCoCg.x - allowedMax;
+                float compressedY = allowedMax + excess / (1.0 + excess / (allowedMax + 1.0));
+                raw.rgb *= compressedY / max(rawYCoCg.x, 1e-4);
+                rawYCoCg.x = compressedY;
+            }
+        }
+        raw.rgb = max(raw.rgb, vec3(0.0)); // Preserve non-negative radiance
+
+        // =========================================================================
+        // STAGE 3: Compute Current Sample Moments from CLEANED raw sample
+        // =========================================================================
+        float cleanLum = dot(raw.rgb, vec3(0.2126, 0.7152, 0.0722));
+        curSampleMoments = vec2(cleanLum, cleanLum * cleanLum);
+
+        // =========================================================================
+        // STAGE 4: History Clamping & Temporal Accumulation
+        // =========================================================================
+        if (wSum > 0.05) {
+            float clampGamma = mix(3.5, 2.2, clamp(motionPixels * 0.15, 0.0, 1.0));
+            vec3 clampMinY = m1Y - effectiveSigma * clampGamma;
+            vec3 clampMaxY = m1Y + effectiveSigma * (clampGamma + 1.0);
+            clampMinY.x = max(0.0, clampMinY.x);
+            clampMaxY.x = max(clampMinY.x, clampMaxY.x);
+
+            hist.a = clamp(hist.a, aoMin, aoMax);
+
+            // =====================================================================
+            // 3-Tier History Clamp Bounds (Ciemne / Średnie / Jasne):
+            // - Ciemne (darkRatio): tight clamp ceiling in dark areas to kill noise
+            // - Jasne (brightRatio): generous ceiling to NEVER truncate bright light
+            // - Średnie (midtoneSmooth): smooth continuous transition in penumbra
+            // =====================================================================
+            float darkRatio = clamp(pc.f.z, 0.0, 1.0);
+            float brightRatio = clamp(pc.f.w, 0.0, 1.0);
+            float midtoneSmooth = float((pc.u.y >> 16u) & 0xFFu) / 255.0;
+
+            float maxObserved = max(histY.x, max(rawYCoCg.x, maxClusterLum));
+            float headroom = mix(4.0, 16.0, brightRatio);
+            float brightCeiling = maxObserved * (1.0 + brightRatio * 5.0) + headroom;
+            float darkCeiling = m1Y.x + effectiveSigma.x * mix(3.5, 1.2, darkRatio);
+            if (temporallyFrequent) darkCeiling = max(darkCeiling, histY.x);
+
+            float targetCeiling;
+            if (useDominanceRatio) {
+                // In purely dark zone without any bright light, targetCeiling is darkCeiling.
+                // As soon as either raw ray or history exhibits light (maxObserved > 0.05),
+                // targetCeiling smoothly lifts to brightCeiling so bright light is NEVER truncated!
+                float hasLight = smoothstep(0.02, 0.15, maxObserved);
+                float effectiveT = max(tBlend, hasLight);
+                targetCeiling = mix(darkCeiling, brightCeiling, effectiveT);
+            } else {
+                targetCeiling = max(clampMaxY.x, brightCeiling);
+            }
+
+            if (temporallyFrequent || cacheSupportsBright) {
+                targetCeiling = max(targetCeiling, histY.x * (1.0 + brightRatio * 2.0) + 1.0);
+                clampMinY.x = min(clampMinY.x, histY.x * 0.5);
+            }
+            if (inBrightZone || histY.x > 0.15) {
+                clampMinY.x = min(clampMinY.x, histY.x * max(0.05, 1.0 - brightRatio * 0.75));
+            }
+            if (motionPixels < 0.25 && temporallyFrequent) {
+                // Static camera & mature history: protect converged history from single-frame noise truncation
+                clampMinY.x = min(clampMinY.x, histY.x * 0.85);
+                targetCeiling = max(targetCeiling, histY.x * 1.5 + 1.0);
+            }
+
+            clampMaxY.x = max(clampMaxY.x, targetCeiling);
+
+            // Bit 0: "GI Patch Firefly Clamp" (GI Temporal Neighborhood Clamp)
+            if ((pc.u.y & 1u) != 0u) {
+                // In static scenes, never clamp converged history downward due to single-frame ray misses
+                float lowerBound = (motionPixels > 0.5 || histLen < 2.0) ? clampMinY.x : min(clampMinY.x, histY.x * 0.5);
+                float clampedHistY = clamp(histY.x, lowerBound, clampMaxY.x);
+                hist.rgb *= clampedHistY / max(histY.x, 1e-4);
+            }
+
             newLen = min(histLen + 1.0, effectiveMaxHist);
             float alpha = 1.0 / newLen;
             finalHitDistFactor = mix(prevHitDistFactor, curHitDistFactor, max(alpha, 0.25));
@@ -616,36 +769,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             // to prevent variance starvation, edge-stopping collapse, and noisy boiling on disocclusions.
             vec2 accumulatedMoments = mix(histMoments.xy, curSampleMoments, alpha);
             float temporalVar = max(0.0, accumulatedMoments.y - accumulatedMoments.x * accumulatedMoments.x);
-            // Keep a spatial variance floor while the temporal history is still young.
-            // Surface-cache restoration must not starve SVGF of the variance signal
-            // needed by the a-trous edge-stopping weights.
             float variance = (newLen < 8.0) ? max(spatialVar, temporalVar) : temporalVar;
             variance = max(variance, 0.005);
             outMoments = vec4(accumulatedMoments, variance, variance);
         } else {
-            pixelDiag[2]++;
             newLen = 1.0;
             finalHitDistFactor = curHitDistFactor;
             result = raw;
-
-            // Disocclusion / rejected history: compute spatial variance over local 3x3 footprint
-            float sumLum = 0.0;
-            float sumLum2 = 0.0;
-            float count = 0.0;
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    ivec2 sp = px + ivec2(dx, dy);
-                    if (any(lessThan(sp, ivec2(0))) || any(greaterThanEqual(sp, isize))) continue;
-                    vec4 sampleCol = imageLoad(imgS, sp);
-                    if (sampleCol.a < 0.0) continue;
-                    float l = dot(sampleCol.rgb, vec3(0.2126, 0.7152, 0.0722));
-                    sumLum += l;
-                    sumLum2 += l * l;
-                    count += 1.0;
-                }
-            }
-            float meanLum = sumLum / max(count, 1.0);
-            float spatialVar = max(0.0, (sumLum2 / max(count, 1.0)) - meanLum * meanLum);
             outMoments = vec4(curSampleMoments, spatialVar, spatialVar);
         }
     }
@@ -665,11 +795,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
         bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
         if (surfaceHistoryApplied) {
-            float blendW = isDisoccluded ? (0.85 * surfaceCoverage) : (0.25 * surfaceCoverage);
-            vec3 blendedSurf = mix(result.rgb, surfaceHistory.rgb, blendW);
-            // A world-space cache may restore missing information, but must not dim
-            // a valid screen-space reprojection that already contains brighter energy.
-            result.rgb = isDisoccluded ? blendedSurf : max(result.rgb, blendedSurf);
+            float blendW = isDisoccluded ? (0.75 * surfaceCoverage) : (0.15 * surfaceCoverage);
+            result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
             newLen = clamp(max(newLen, min(surfaceHistory.a, 6.0)), 2.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
@@ -680,10 +807,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             vec4 cached = sampleWorldRadianceCacheTangentJitter(P, N, px, pc.u.w);
             if (cached.a > 0.0) {
                 pixelCacheDiag[0]++;
-                // WRC only seeds a disoccluded pixel. Keep its history contribution
-                // low so the next traced observation is not held back by a dark probe.
-                vec3 seeded = mix(result.rgb, cached.rgb, 0.35 * cached.a);
-                result.rgb = isCheckerSkipped ? seeded : max(result.rgb, seeded);
+                result.rgb = mix(result.rgb, cached.rgb, 0.25 * cached.a);
                 newLen = max(newLen, 2.0 * cached.a);
             }
         }
@@ -716,11 +840,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                                          : vec3(0.85, 0.02, 0.02);
         if (cacheDebugEnabled && cacheDebugHit) {
             if ((pc.u.y & 32u) != 0u) {
-                // Log-compressed linear HDR radiance for readable cache inspection.
-                // Lift ordinary diffuse radiance into a visible range without losing
-                // relative HDR structure; channels remain independently encoded.
-                debugColor = clamp(log2(vec3(1.0) + max(cacheDebugValue.rgb, vec3(0.0)) * 8.0) /
-                                   log2(9.0), vec3(0.0), vec3(1.0));
+                // Hue-preserving log compression: map the peak channel, then
+                // scale RGB uniformly. Independent channel clipping would turn
+                // saturated warm HDR radiance artificially yellow.
+                vec3 hdr = max(cacheDebugValue.rgb, vec3(0.0));
+                float peak = max(max(hdr.r, hdr.g), hdr.b);
+                if (peak > 1e-5) {
+                    float mappedPeak = clamp(log2(1.0 + peak * 6.0) / log2(25.0), 0.0, 1.0);
+                    debugColor = hdr * (mappedPeak / peak);
+                } else {
+                    debugColor = vec3(0.0);
+                }
             } else if ((pc.u.y & 64u) != 0u) {
                 if ((pc.u.y & 4u) != 0u) {
                     // Show the raw probe sample weight, not the already saturated

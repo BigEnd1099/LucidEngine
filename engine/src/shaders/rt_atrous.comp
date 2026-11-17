@@ -46,6 +46,21 @@ void storeDst(ivec2 p, vec4 v) {
     else imageStore(imgS, p, v); // PASS == 1 or PASS == 3
 }
 
+// Continuous GI confidence from the temporal luminance moments.
+// .z carries the SVGF variance floor; subtract it before estimating uncertainty.
+float giConfidence(float mu1, float variance, float historyLen) {
+    float measured = max(variance - 0.005, 0.0);
+    float relativeSigmaMean = sqrt(measured / max(historyLen, 1.0)) /
+                              max(mu1, 0.15);
+    return smoothstep(2.0, 12.0, historyLen) *
+           (1.0 - smoothstep(0.10, 0.45, relativeSigmaMean));
+}
+
+vec3 debugLogGray(float value, float scale, float range) {
+    float t = clamp(log2(1.0 + max(value, 0.0) * scale) / range, 0.0, 1.0);
+    return vec3(t);
+}
+
 void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRadiance) {
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
@@ -89,6 +104,25 @@ void main() {
         } else if (mode == 9u) {
             float density = clamp(imageLoad(imgCaustics, px).a, 0.0, 1.0);
             storeDst(px, vec4(density, density * density, 0.0, 1.0));
+            return;
+        } else if (mode >= 17u && mode <= 20u) {
+            vec4 temporalMoments = imageLoad(imgMomentsCur, px);
+            float historyLen = unpackGiHistoryLen(gC.w);
+            float mu1 = max(temporalMoments.x, 0.0);
+            float temporalVariance = max(temporalMoments.z, 0.0);
+            float measuredVariance = max(temporalVariance - 0.005, 0.0);
+            float relativeSigmaMean = sqrt(measuredVariance / max(historyLen, 1.0)) /
+                                      max(mu1, 0.15);
+            if (mode == 17u) {
+                float confidence = giConfidence(mu1, temporalVariance, historyLen);
+                storeDst(px, vec4(1.0 - confidence, confidence, 0.0, 1.0));
+            } else if (mode == 18u) {
+                storeDst(px, vec4(debugLogGray(mu1, 16.0, 8.0), 1.0));
+            } else if (mode == 19u) {
+                storeDst(px, vec4(debugLogGray(temporalVariance, 256.0, 8.0), 1.0));
+            } else if (mode == 20u) {
+                storeDst(px, vec4(debugLogGray(relativeSigmaMean, 1.0, 2.0), 1.0));
+            }
             return;
         } else if (mode >= 10u && mode <= 16u) {
             storeDst(px, imageLoad(imgHistCur, px));
@@ -148,70 +182,171 @@ void main() {
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
 
     vec4 momC = imageLoad(imgMomentsCur, px);
-    float varC = (PASS == 0) ? max(0.0, momC.z) : max(0.0, momC.w);
-    float hitDistFactor = unpackGiHitDistFactor(gC.w);
-    float lC = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
+
+    // 3x3 bilateral pre-filter of temporal variance and Hampel firefly suppression in Pass 0
+    float varC = max(momC.z, 0.0);
+    if (PASS == 0) {
+        float varSum = 0.0;
+        float wVarTotal = 0.0;
+
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                ivec2 q = px + ivec2(dx, dy);
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+
+                float dn = dot(nC, rtOctDecode(gQ.xy));
+                if (dn < 0.707) continue;
+                float dz = abs(gC.z - gQ.z);
+                if (dz > depthTol * 3.0) continue;
+
+                float wTap = (abs(dx) + abs(dy) == 2) ? 0.0625 : 0.125;
+                vec4 qMom = imageLoad(imgMomentsCur, q);
+                varSum += max(qMom.z, 0.0) * wTap;
+                wVarTotal += wTap;
+
+            }
+        }
+        if (wVarTotal > 1e-4) {
+            varC = (varC * 0.25 + varSum) / (0.25 + wVarTotal);
+        }
+        // Do not clamp radiance in the spatial pass. Temporal firefly rejection
+        // already classifies unsupported one-frame spikes. A second per-pixel
+        // Hampel clamp here destroys legitimate isolated bright samples before
+        // the edge-aware filter can combine them with the rest of the bright cluster.
+        // Keep this neighborhood pass exclusively for variance pre-filtering.
+
+        // Store smoothed variance into momC.w for downstream passes 1, 2, 3 to read immutably
+        momC.w = varC;
+        imageStore(imgMomentsCur, px, momC);
+    } else {
+        // Downstream passes read the pre-filtered variance from momC.w
+        varC = max(momC.w, 0.0);
+    }
+
+    float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
+    float historyLen = unpackGiHistoryLen(gC.w);
+
+    // Dynamic history boost: at low history (SPP1 / camera motion / fresh frame) widen bandwidth
+    // to smooth stochastic hits and prevent energy loss. At mature history, bandwidth contracts
+    // to maintain sharp shadow boundaries while dissolving low-frequency blotches across surfaces.
+    float histBoost = mix(2.5, 1.0, clamp(historyLen / 8.0, 0.0, 1.0));
+
+    // Decayed variance per pass (SVGF Schied et al. 2017 Eq. 6):
+    // As passes progress (step = 1, 2, 4, 8), prior passes have smoothed noise variance by ~2x per pass.
+    float passVarC = varC / exp2(float(PASS));
+    float sigmaC = sqrt(max(passVarC, 0.0));
 
     vec3 sumRgb = center.rgb * (h[0] * h[0]);
     float sumAo = center.a * (h[0] * h[0]);
-    float varSum = varC * (h[0] * h[0]);
-    float wTotal = h[0] * h[0];
+    float wRgbTotal = h[0] * h[0];
+    float wAoTotal = h[0] * h[0];
 
     for (int j = -2; j <= 2; ++j) {
         for (int i = -2; i <= 2; ++i) {
             if (i == 0 && j == 0) continue;
-            ivec2 q = px + ivec2(i, j) * step;
+            ivec2 offset = ivec2(i, j) * step;
+            ivec2 q = px + offset;
             if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
             vec4 gQ = imageLoad(imgGeomCur, q);
             if (gQ.z < 0.0) continue;
-            vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
-            float planeDist = abs(dot(nCv, pQv - pCv));
-            float wd = exp(-planeDist / max(depthTol * sqrt(float(step)), 1e-4));
-            float wn = pow(max(0.0, dot(nC, rtOctDecode(gQ.xy))), 16.0);
 
             vec4 qCol = loadSrc(q);
+
+            vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
+            float planeDist = abs(dot(nCv, pQv - pCv));
+            float wd = exp(-planeDist / max(depthTol * float(step), 1e-4));
+            float dn = max(0.0, dot(nC, rtOctDecode(gQ.xy)));
+            float wn = dn * dn * dn * dn; // pow(dn, 4.0): sharp 90-deg edges preserved, smooth curvature on spheres
+            float wGeomBase = h[abs(i)] * h[abs(j)] * wd * wn;
+            if (wGeomBase <= 1e-6) continue;
+
+            vec3 safeQCol = qCol.rgb;
+            float lQ = max(0.0, dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)));
+            float deltaL = abs(lC - lQ);
+
+            // Log-luminance edge stopping separates relative brightness changes:
+            // the same proportional jump is treated similarly in dark and bright GI.
+            // Variance is capped against the darker endpoint so a noisy bright sample
+            // cannot open the filter across a dark/bright boundary.
             float wl = 1.0;
             if (useSvgf) {
-                float lQ = dot(qCol.rgb, vec3(0.2126, 0.7152, 0.0722));
-                float deltaL = abs(lC - lQ);
-                float stdDev = sqrt(max(varC, 1e-4));
-                float stepScale = 1.0 / sqrt(float(step));
-                float sigmaL = 1.2 * max(pc.f.x, 0.1) * stepScale;
-                float lumaFloor = 0.03 * stepScale;
-                wl = exp(-deltaL / (sigmaL * stdDev + lumaFloor)) * mix(0.85, 1.15, hitDistFactor);
+                vec4 qMoments = imageLoad(imgMomentsCur, q);
+                float qVar = (PASS == 0) ? max(qMoments.z, 0.0) : max(qMoments.w, 0.0);
+                float passVarQ = qVar / exp2(float(PASS));
+                float sigmaQ = sqrt(max(passVarQ, 0.0));
+                float rawEffectiveSigma = max(sigmaC, sigmaQ);
+
+                float darkerLum = min(lC, lQ);
+                float brighterLum = max(lC, lQ);
+                float logLC = log2(1.0 + lC);
+                float logLQ = log2(1.0 + lQ);
+                float deltaLogL = abs(logLC - logLQ);
+
+                // Treat the three practical brightness populations as pairwise
+                // clusters: samples close in relative luminance share a variance
+                // scale based on the brighter endpoint; samples far apart retain
+                // the conservative darker-endpoint scale and are edge-stopped.
+                // This lets bright-with-bright samples denoise together without
+                // allowing bright samples to wash into midtones or dark GI.
+                float brightnessRatio = (brighterLum + 0.04) / (darkerLum + 0.04);
+                // Do not classify ordinary bright-cluster variation as a hard
+                // tier boundary. The conservative cross-tier cap is still
+                // bounded, but references the brighter endpoint so valid HDR
+                // samples are not assigned an almost-zero bandwidth.
+                float tierSeparation = smoothstep(1.8, 3.2, brightnessRatio);
+                float withinTierScale = max(brighterLum, 0.025);
+                float crossTierScale = max(mix(darkerLum, brighterLum, 0.65), 0.025);
+                float withinTierSigmaCap = max(0.018, (withinTierScale + 0.035) * 0.42);
+                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.30);
+                float sigmaCap = mix(withinTierSigmaCap, crossTierSigmaCap, tierSeparation);
+                float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
+                float logSigma = effectiveSigma / max(1.0 + darkerLum, 0.1);
+
+                // Keep early history helpful, but give a coherent bright cluster
+                // enough bandwidth to filter its own samples at mature history.
+                float stepDamping = mix(1.0, inversesqrt(float(step)), 0.35);
+                float crossTierFloor = mix(0.035, 0.012, clamp(historyLen / 16.0, 0.0, 1.0));
+                float withinTierFloor = mix(0.045, 0.070,
+                                            smoothstep(0.25, 4.0, brighterLum));
+                float floorBandwidth = mix(withinTierFloor, crossTierFloor, tierSeparation);
+                float bandwidth = clamp(3.0 * logSigma * max(pc.f.x, 0.1) *
+                                        histBoost * stepDamping,
+                                        floorBandwidth, 0.22);
+                wl = exp(-deltaLogL / max(bandwidth, 1e-4));
+
+                // Preserve a meaningful contribution from the brighter population.
+                // 0.02 effectively discarded isolated high-energy taps, preventing
+                // bright regions from denoising together and leaving a sandy result.
+                wl *= mix(1.0, 0.10, tierSeparation);
             }
 
-            // Contact shadow / AO preservation: prevents bright floor light from leaking into contact shadows
+            float wRgb = wGeomBase * wl;
+            sumRgb += safeQCol.rgb * wRgb;
+            wRgbTotal += wRgb;
+
+            // Contact shadow / AO preservation: deltaVis only constrains the AO channel
             float deltaVis = abs(center.a - qCol.a);
-            float wVis = exp(-deltaVis / 0.18);
-
-            float offsetPixels = length(vec2(i, j)) * float(step);
-            float hitRadiusPixels = mix(1.5, 5.0, hitDistFactor);
-            float hitDistanceWeight = exp(-0.12 * offsetPixels / max(hitRadiusPixels, 1.0));
-            float w = h[abs(i)] * h[abs(j)] * wd * wn * wl * wVis * hitDistanceWeight;
-            sumRgb += qCol.rgb * w;
-            sumAo += qCol.a * w;
-            if (useSvgf) {
-                float qVar = (PASS == 0) ? max(0.0, imageLoad(imgMomentsCur, q).z) : max(0.0, imageLoad(imgMomentsCur, q).w);
-                varSum += w * qVar;
-            }
-            wTotal += w;
+            float wVis = exp(-deltaVis / 0.25);
+            float wAo = wGeomBase * wVis;
+            sumAo += qCol.a * wAo;
+            wAoTotal += wAo;
         }
     }
-    vec4 filtered = vec4(sumRgb / max(wTotal, 1e-6),
-                         sumAo / max(wTotal, 1e-6));
 
-    if (useSvgf && PASS < 3) {
-        float filteredVar = varSum / max(wTotal, 1e-6);
-        momC.w = filteredVar;
-        imageStore(imgMomentsCur, px, momC);
+    vec4 filtered = vec4(sumRgb / max(wRgbTotal, 1e-6),
+                         sumAo / max(wAoTotal, 1e-6));
+
+    if (PASS < 3) {
+        storeDst(px, filtered);
+    } else {
+        // Final pass: apply spatial strength cleanly
+        float s = clamp(pc.f.x, 0.0, 1.0);
+        vec4 finalValue = mix(center, filtered, s);
+        storeDst(px, finalValue);
+        persistFinalSurfaceHistory(px, size, gC, finalValue.rgb);
     }
-
-    // Spatial strength directly controls filtering. SVGF edge-stopping functions
-    // (depth, normal, and variance-guided luminance weight) naturally preserve true details.
-    float s = clamp(pc.f.x, 0.0, 1.0);
-    vec4 finalValue = mix(center, filtered, s);
-    storeDst(px, finalValue);
-    persistFinalSurfaceHistory(px, size, gC, finalValue.rgb);
 }

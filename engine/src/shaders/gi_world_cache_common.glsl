@@ -172,6 +172,14 @@ float computePlaneDistanceWeight(float excessDist, float cellSize) {
     return exp(-excessDist / (cellSize * 0.15));
 }
 
+// Smooth normal compatibility for sparse voxels on curved surfaces.
+// Reject back-facing cells, but fade the edge of a curved surface instead of
+// turning a small normal change into a binary cache miss.
+float computeWorldCacheNormalWeight(vec3 cellNormal, vec3 sampleNormal) {
+    float normalDot = dot(normalize(cellNormal), normalize(sampleNormal));
+    return smoothstep(0.50, 0.85, normalDot);
+}
+
 #ifndef BUILD_BASIS_DEFINED
 #define BUILD_BASIS_DEFINED
 // Orthonormal basis without singularity (Duff et al. 2017).

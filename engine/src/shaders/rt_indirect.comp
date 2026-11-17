@@ -68,15 +68,15 @@ bool trySampleWorldRadianceCacheFastCascade(vec3 worldPos, vec3 n, uint cascade,
             if (cell.cellKey != cellKey)
                 continue;
             vec3 cellN = unpackNormalOctahedral(cell.packedNormal);
-            if (dot(cellN, n) <= 0.65)
+            float geomWeight = computeWorldCacheNormalWeight(cellN, n);
+            if (geomWeight <= 0.0)
                 continue;
-            float geomWeight = 1.0;
             if (planeWeightEnabled) {
                 vec3 cellCenter = computeWorldCellCenter(cellCoord, n, cellSize);
                 float excessDist = computeWorldCellPlaneDistanceExcess(cellCenter, worldPos, n, cellSize);
-                if (excessDist > 0.75 * cellSize)
+                if (excessDist > 0.95 * cellSize)
                     continue;
-                geomWeight = computePlaneDistanceWeight(excessDist, cellSize);
+                geomWeight *= computePlaneDistanceWeight(excessDist, cellSize);
             }
             sampleWeight = cell.irradiance.a;
             result = vec4(cell.irradiance.rgb, smoothstep(0.0, 32.0, sampleWeight) * geomWeight);
@@ -128,7 +128,7 @@ vec4 sampleWorldRadianceCacheFast(vec3 worldPos, vec3 worldNormal) {
 
 const float AO_DISTANCE = 1.75;
 const float MAX_RAY_DIST = 200.0;
-const float FIREFLY_CLAMP = 256.0; // Emergency safety ceiling, not an artistic brightness clamp.
+const float FIREFLY_CLAMP = 256.0; // Full HDR headroom preserves legitimate bright spotlights and caustics.
 const int MAX_BOUNCES = 15;
 
 // Decorrelated 2D PCG scramble keyed by pixel and frame. Used as a
@@ -354,7 +354,7 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
                 }
             }
             if (singleLight >= 0 && chosenPdf > 1e-6)
-                singleWeight = wSumRis / chosenPdf;
+                singleWeight = clampPathFireflies ? min(wSumRis / chosenPdf, 128.0) : (wSumRis / chosenPdf);
         }
 
         vec3 hitAlbedo = hit.baseColor.rgb *
@@ -437,8 +437,8 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
                         float attenuation = (window * window) / (totalDist * totalDist + 1.0);
                         float lobeFade = smoothstep(cosThreshold, mix(cosThreshold, 1.0, 0.35), cosAngle);
                         vec3 F_caustic = hitF0 + (vec3(1.0) - hitF0) * pow(clamp(1.0 - max(dot(hitN, L), 0.0), 0.0, 1.0), 5.0);
-                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * 4.0 * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
-                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(32.0));
+                        vec3 causticContrib = ubo.lightsCol[li].rgb * (intensity * (0.15 / 3.14159265) * attenuation * coneFade * lobeFade * nDotL) * F_caustic;
+                        if (clampPathFireflies) causticContrib = min(causticContrib, vec3(128.0));
                         pathRadiance += throughput * causticContrib;
                         causticRadiance += throughput * causticContrib;
                         causticHitCount += 1.0;
@@ -491,9 +491,11 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
                 specWeight = (G1V * G1L * vDotH) / max(hitNdotV * nDotH, 1e-5);
             }
             throughput *= F * (specWeight / hitSpecProbability);
+            if (clampPathFireflies) throughput = min(throughput, vec3(64.0));
             nextDir = nextSpecDir;
         } else {
             throughput *= hitDiffuseWeight / (1.0 - hitSpecProbability);
+            if (clampPathFireflies) throughput = min(throughput, vec3(64.0));
             nextDir = sampleCosineHemisphere(rayNormal, rand2());
         }
 
@@ -508,7 +510,7 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
             throughput /= p;
         }
     }
-    gi += clampPathFireflies ? clampFirefly(pathRadiance, FIREFLY_CLAMP) : pathRadiance;
+    gi += clampPathFireflies ? clampFirefly(pathRadiance, 256.0) : pathRadiance;
 }
 
 float invSamples = 1.0 / float(samples);

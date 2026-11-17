@@ -1,6 +1,8 @@
 #include "network/JsonRpcDispatcher.hpp"
 #include "network/McpToolsetRegistry.hpp"
 #include "network/McpKnowledgeBase.hpp"
+#include "core/VFS.hpp"
+#include "world/SceneTree.hpp"
 #include <algorithm>
 #include "core/Engine.hpp"
 #include "core/Logger.hpp"
@@ -115,8 +117,12 @@ namespace engine::network {
                     eng->sendWsMessage(client, res.dump());
                 });
             } else if (method == "engine.captureFrame") {
-                queue.push([client, id](core::Engine* eng) {
-                    std::string b64 = eng->captureFrameBase64();
+                int accumulate = 1;
+                if (json.contains("params") && json["params"].is_object()) {
+                    accumulate = json["params"].value("accumulate", 1);
+                }
+                queue.push([client, id, accumulate](core::Engine* eng) {
+                    std::string b64 = eng->captureFrameBase64(accumulate);
                     nlohmann::json res = {
                         {"jsonrpc", "2.0"},
                         {"id", id},
@@ -932,6 +938,14 @@ namespace engine::network {
                     setBool(quality, "giCheckerboard", rt.giCheckerboard);
                     setBool(quality, "reflectionInfiniteBounces", rt.reflectionInfiniteBounces);
                     setBool(quality, "denoiseEnabled", rt.denoiseEnabled);
+                    setBool(quality, "giTemporalFilterEnabled", rt.giTemporalFilterEnabled);
+                    setBool(quality, "giHistoryClampEnabled", rt.giHistoryClampEnabled);
+                    setBool(quality, "giTemporalFireflyFilterEnabled", rt.giTemporalFireflyFilterEnabled);
+                    setBool(quality, "giDominanceRatioFilterEnabled", rt.giDominanceRatioFilterEnabled);
+                    setFloat(quality, "giDarkRatio", rt.giDarkRatio, 0.0f, 1.0f);
+                    setFloat(quality, "giBrightRatio", rt.giBrightRatio, 0.0f, 1.0f);
+                    setFloat(quality, "giMidtoneSmoothness", rt.giMidtoneSmoothness, 0.0f, 1.0f);
+                    setBool(quality, "giTraceFireflyClampEnabled", rt.giTraceFireflyClampEnabled);
                     setBool(quality, "svgfEnabled", rt.svgfEnabled);
                     setBool(quality, "reflectionCheckerboard", rt.reflectionCheckerboard);
                     setBool(quality, "reflectionStochasticLights", rt.reflectionStochasticLights);
@@ -964,7 +978,16 @@ namespace engine::network {
                         {"reflectionMaxRoughness", rt.reflectionMaxRoughness},
                         {"reflectionMinThroughput", rt.reflectionMinThroughput},
                         {"maxHistory", rt.maxHistory}, {"spatialStrength", rt.spatialStrength},
-                        {"denoiseEnabled", rt.denoiseEnabled}, {"svgfEnabled", rt.svgfEnabled},
+                        {"denoiseEnabled", rt.denoiseEnabled},
+                        {"giTemporalFilterEnabled", rt.giTemporalFilterEnabled},
+                        {"giHistoryClampEnabled", rt.giHistoryClampEnabled},
+                        {"giTemporalFireflyFilterEnabled", rt.giTemporalFireflyFilterEnabled},
+                        {"giDominanceRatioFilterEnabled", rt.giDominanceRatioFilterEnabled},
+                        {"giDarkRatio", rt.giDarkRatio},
+                        {"giBrightRatio", rt.giBrightRatio},
+                        {"giMidtoneSmoothness", rt.giMidtoneSmoothness},
+                        {"giTraceFireflyClampEnabled", rt.giTraceFireflyClampEnabled},
+                        {"svgfEnabled", rt.svgfEnabled},
                         {"reflectionCheckerboard", rt.reflectionCheckerboard},
                         {"reflectionStochasticLights", rt.reflectionStochasticLights},
                         {"reflectionPrimaryStochasticLights", rt.reflectionPrimaryStochasticLights},
@@ -992,6 +1015,74 @@ namespace engine::network {
                         {"jsonrpc", "2.0"}, {"id", id}, {"result", result}
                     };
                     eng->sendWsMessage(client, response.dump());
+                });
+            } else if (method == "engine.spawnPrefab") {
+                nlohmann::json prefabData = json.value("params", nlohmann::json::object());
+                uint32_t parentId = 0xFFFFFFFF;
+                if (prefabData.contains("parentId") && prefabData["parentId"].is_number()) {
+                    parentId = prefabData["parentId"].get<uint32_t>();
+                }
+                queue.push([prefabData, parentId, client, id](core::Engine* eng) {
+                    uint32_t entId = eng->spawnPrefabFromJson(prefabData, parentId);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"entityId", entId}, {"success", entId != 0xFFFFFFFF}}}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.getSceneHierarchy") {
+                queue.push([client, id](core::Engine* eng) {
+                    nlohmann::json hierarchy = eng->getSceneHierarchyJson();
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", hierarchy}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.findSceneNode") {
+                std::string path = "";
+                uint64_t uuid = 0;
+                if (json.contains("params") && json["params"].is_object()) {
+                    path = json["params"].value("path", "");
+                    uuid = json["params"].value("uuid", 0ULL);
+                }
+                queue.push([path, uuid, client, id](core::Engine* eng) {
+                    world::Node3D* node = nullptr;
+                    if (eng->getSceneTree()) {
+                        if (uuid != 0) node = eng->getSceneTree()->find_by_uuid(uuid);
+                        else if (!path.empty()) node = eng->getSceneTree()->find_node(path);
+                    }
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {
+                            {"found", node != nullptr},
+                            {"entityId", node ? static_cast<uint32_t>(node->get_entity()) : 0xFFFFFFFF},
+                            {"name", node ? node->get_name() : ""},
+                            {"position", node ? nlohmann::json::array({node->get_position().x, node->get_position().y, node->get_position().z}) : nlohmann::json::array()}
+                        }}
+                    };
+                    eng->sendWsMessage(client, res.dump());
+                });
+            } else if (method == "engine.vfsReadFile") {
+                std::string path = "";
+                if (json.contains("params")) {
+                    if (json["params"].is_string()) path = json["params"].get<std::string>();
+                    else if (json["params"].is_object()) path = json["params"].value("path", "");
+                }
+                queue.push([path, client, id](core::Engine* eng) {
+                    auto textOpt = core::VirtualFileSystem::get().read_text(path);
+                    nlohmann::json res = {
+                        {"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {
+                            {"exists", textOpt.has_value()},
+                            {"content", textOpt.value_or("")}
+                        }}
+                    };
+                    eng->sendWsMessage(client, res.dump());
                 });
             } else {
                 core::Logger::warn("Unknown JSON-RPC method: " + method);
