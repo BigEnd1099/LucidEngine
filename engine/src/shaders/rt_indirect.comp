@@ -26,7 +26,22 @@ layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
-layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirection;
+layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBinsA;
+layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBinsB;
+
+// Six fixed world-space directional lobes. Each ray contributes to all positive
+// cardinal projections, with a fourth-power response preserving directional peaks.
+void encodeGiDirection(vec3 direction, out vec4 binsA, out vec4 binsB) {
+    vec3 d = normalize(direction);
+    vec4 rawA = vec4(pow(max(d.x, 0.0), 4.0), pow(max(-d.x, 0.0), 4.0),
+                     pow(max(d.y, 0.0), 4.0), pow(max(-d.y, 0.0), 4.0));
+    vec2 rawB = vec2(pow(max(d.z, 0.0), 4.0), pow(max(-d.z, 0.0), 4.0));
+    float total = dot(rawA, vec4(1.0)) + rawB.x + rawB.y;
+    float invTotal = 1.0 / max(total, 1e-6);
+    binsA = rawA * invTotal;
+    binsB = vec4(rawB * invTotal, 0.0, 0.0);
+}
+
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
 void addDiagCounter(uint counterIdx, uint value) {
@@ -181,7 +196,8 @@ float d = texelFetch(uDepth, fullPx, 0).r;
 if (d >= 1.0) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
-    imageStore(imgGiDirection, px, vec4(0.0));
+    imageStore(imgGiDirectionBinsA, px, vec4(0.0));
+    imageStore(imgGiDirectionBinsB, px, vec4(0.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
@@ -241,7 +257,8 @@ bool checkerSkip = useCheckerboard && (((px.x + px.y + int(frame)) & 1) != 0);
 if (checkerSkip) {
     // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
-    imageStore(imgGiDirection, px, vec4(0.0, 0.0, 0.0, -1.0));
+    imageStore(imgGiDirectionBinsA, px, vec4(0.0));
+    imageStore(imgGiDirectionBinsB, px, vec4(0.0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
@@ -263,8 +280,8 @@ float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
 vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
-vec3 giDirectionSum = vec3(0.0);
-float giDirectionEnergy = 0.0;
+vec4 giDirectionBinsA = vec4(0.0);
+vec4 giDirectionBinsB = vec4(0.0);
 vec3 causticRadiance = vec3(0.0);
 float causticHitCount = 0.0;
 float occ = 0.0;
@@ -521,8 +538,10 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
     gi += sampleRadiance;
     float sampleEnergy = max(dot(sampleRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0);
     if (sampleEnergy > 1e-5) {
-        giDirectionSum += primaryIncomingDirection * sampleEnergy;
-        giDirectionEnergy += sampleEnergy;
+        vec4 sampleBinsA, sampleBinsB;
+        encodeGiDirection(primaryIncomingDirection, sampleBinsA, sampleBinsB);
+        giDirectionBinsA += sampleBinsA * sampleEnergy;
+        giDirectionBinsB += sampleBinsB * sampleEnergy;
     }
 }
 
@@ -534,13 +553,10 @@ float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount
 float initHitDistFactor = clamp(avgFirstHitDist / AO_DISTANCE, 0.15, 1.0);
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, packGiGeomW(0.0, initHitDistFactor)));
 imageStore(imgS, px, vec4(gi, vis));
-float directionCoherence = (giDirectionEnergy > 1e-5)
-    ? clamp(length(giDirectionSum) / giDirectionEnergy, 0.0, 1.0) : 0.0;
-vec3 giDirection = (directionCoherence > 1e-4) ? normalize(giDirectionSum) : vec3(0.0);
-// A single path has coherence=1 by definition, but its direction is not a
-// statistically reliable lighting guide. Keep the vector for temporal
-// accumulation; A-Trous separately gates it by accumulated history length.
-imageStore(imgGiDirection, px, vec4(giDirection, directionCoherence));
+// Preserve the full coarse directional energy distribution. Unlike a single
+// averaged vector, the six lobes can represent several simultaneous light paths.
+imageStore(imgGiDirectionBinsA, px, giDirectionBinsA * invSamples);
+imageStore(imgGiDirectionBinsB, px, giDirectionBinsB * invSamples);
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;
