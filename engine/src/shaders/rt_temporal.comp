@@ -518,7 +518,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         for (int i = 0; i < nNeighbors; ++i) {
             if (neighborLuma[i] >= supportFloor) brightSupportCount++;
         }
-        bool spatiallySupportedBright = brightSupportCount >= 2;
+        bool spatiallySupportedBright = brightSupportCount >= 1;
 
         float spatialVar = 0.1;
         vec3 m1Y = rawYCoCg;
@@ -621,7 +621,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // is in the same brightness range. A dark history must not bless a
         // one-frame bright spike merely because the pixel has accumulated age.
         bool historySupportsCurrent = (wSum > 0.25) && (histLen >= 2.0) &&
-                                      (histY.x >= rawYCoCg.x * 0.35);
+                                      (histY.x >= rawYCoCg.x * 0.22);
         bool temporallyFrequent = historySupportsCurrent;
 
         vec4 cachedSurf = vec4(0.0);
@@ -647,11 +647,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Tighten the dark-surface floor while keeping the threshold proportional
         // to the local robust spread. The old fixed offsets were large enough to
         // leave visible low-energy fireflies on otherwise uniform walls.
-        float fireflySigma = max(robustSigma * 2.0, localFireflyScale * 0.12 + 0.005);
-        float fireflyRelativeGate = baseline * 1.9 + max(0.012, baseline * 0.12);
-        float robustFireflyLimit = medianLum + max(2.5 * robustSigma,
-                                                   medianLum * 1.10 + 0.012);
-        float fireflyLimit = min(m1Y.x + 2.75 * fireflySigma,
+        float fireflySigma = max(robustSigma * 2.35, localFireflyScale * 0.16 + 0.007);
+        float fireflyRelativeGate = baseline * 2.15 + max(0.016, baseline * 0.14);
+        float robustFireflyLimit = medianLum + max(3.0 * robustSigma,
+                                                   medianLum * 1.25 + 0.018);
+        float fireflyLimit = min(m1Y.x + 3.0 * fireflySigma,
                                  robustFireflyLimit);
         if (useDominanceRatio && isBimodal) {
             // A true firefly is an isolated spike unsupported by history, the
@@ -680,8 +680,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             // Clamp against the robust local population, not its maximum:
             // the maximum can itself be another firefly and otherwise raises
             // the allowance for every subsequent outlier.
-            float allowedMax = medianLum + max(2.0 * robustSigma,
-                                                medianLum * 1.10 + 0.010);
+            float allowedMax = medianLum + max(2.5 * robustSigma,
+                                                medianLum * 1.25 + 0.016);
             if (rawYCoCg.x > allowedMax) {
                 float excess = rawYCoCg.x - allowedMax;
                 float compressedY = allowedMax + excess / (1.0 + excess / (allowedMax + 1.0));
