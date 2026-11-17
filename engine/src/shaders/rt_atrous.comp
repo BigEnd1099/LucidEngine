@@ -221,24 +221,11 @@ void main() {
         if (wVarTotal > 1e-4) {
             varC = (varC * 0.25 + varSum) / (0.25 + wVarTotal);
         }
-        // Hampel outlier suppression: clamp isolated firefly sparks in input radiance
-        if (validNeighborCount >= 3 && wColTotal > 1e-4) {
-            vec3 neighborMean = colSum / wColTotal;
-            float centerLum = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));
-            float meanLum = dot(neighborMean, vec3(0.2126, 0.7152, 0.0722));
-            float maxLum = dot(neighborMax, vec3(0.2126, 0.7152, 0.0722));
-            // Relative Hampel gate: avoid fixed multi-unit offsets that make the
-            // pass effectively inert for ordinary low-energy indirect illumination.
-            // The second test still requires the center to exceed every neighbor,
-            // protecting coherent bright regions and small real light sources.
-            float meanGate = meanLum * 5.0 + max(0.08, meanLum * 0.35);
-            float peakGate = maxLum * 2.5 + max(0.05, maxLum * 0.20);
-            if (centerLum > meanGate && centerLum > peakGate) {
-                vec3 safeClamp = max(neighborMax * 1.5,
-                                     neighborMean * 2.5 + max(vec3(0.03), neighborMean * 0.15));
-                center.rgb = min(center.rgb, safeClamp);
-            }
-        }
+        // Do not clamp radiance in the spatial pass. Temporal firefly rejection
+        // already classifies unsupported one-frame spikes. A second per-pixel
+        // Hampel clamp here destroys legitimate isolated bright samples before
+        // the edge-aware filter can combine them with the rest of the bright cluster.
+        // Keep this neighborhood pass exclusively for variance pre-filtering.
 
         // Store smoothed variance into momC.w for downstream passes 1, 2, 3 to read immutably
         momC.w = varC;
@@ -303,29 +290,42 @@ void main() {
                 float rawEffectiveSigma = max(sigmaC, sigmaQ);
 
                 float darkerLum = min(lC, lQ);
-                float localLumScale = max(darkerLum, 0.025);
-                float sigmaCap = max(0.018, (localLumScale + 0.035) * 0.42);
-                float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
-
+                float brighterLum = max(lC, lQ);
                 float logLC = log2(1.0 + lC);
                 float logLQ = log2(1.0 + lQ);
                 float deltaLogL = abs(logLC - logLQ);
+
+                // Treat the three practical brightness populations as pairwise
+                // clusters: samples close in relative luminance share a variance
+                // scale based on the brighter endpoint; samples far apart retain
+                // the conservative darker-endpoint scale and are edge-stopped.
+                // This lets bright-with-bright samples denoise together without
+                // allowing bright samples to wash into midtones or dark GI.
+                float brightnessRatio = (brighterLum + 0.04) / (darkerLum + 0.04);
+                float tierSeparation = smoothstep(1.45, 2.35, brightnessRatio);
+                float withinTierScale = max(brighterLum, 0.025);
+                float crossTierScale = max(darkerLum, 0.025);
+                float withinTierSigmaCap = max(0.018, (withinTierScale + 0.035) * 0.42);
+                float crossTierSigmaCap = max(0.018, (crossTierScale + 0.035) * 0.42);
+                float sigmaCap = mix(withinTierSigmaCap, crossTierSigmaCap, tierSeparation);
+                float effectiveSigma = min(rawEffectiveSigma, sigmaCap);
                 float logSigma = effectiveSigma / max(1.0 + darkerLum, 0.1);
 
-                // Keep early history helpful without allowing large variance to
-                // wash out the separation between dark, midtone and bright clusters.
+                // Keep early history helpful, but give a coherent bright cluster
+                // enough bandwidth to filter its own samples at mature history.
                 float stepDamping = mix(1.0, inversesqrt(float(step)), 0.35);
-                float floorBandwidth = mix(0.035, 0.012, clamp(historyLen / 16.0, 0.0, 1.0));
+                float crossTierFloor = mix(0.035, 0.012, clamp(historyLen / 16.0, 0.0, 1.0));
+                float withinTierFloor = mix(0.045, 0.070,
+                                            smoothstep(0.25, 4.0, brighterLum));
+                float floorBandwidth = mix(withinTierFloor, crossTierFloor, tierSeparation);
                 float bandwidth = clamp(3.0 * logSigma * max(pc.f.x, 0.1) *
                                         histBoost * stepDamping,
                                         floorBandwidth, 0.22);
                 wl = exp(-deltaLogL / max(bandwidth, 1e-4));
 
-                // Asymmetric bright-bleed guard: a bright neighbor may softly
-                // contribute to a dark center, but cannot dominate its local energy.
-                float brightRise = max(lQ - lC, 0.0);
-                float relativeBrightRise = brightRise / max(lC + 0.04, 0.04);
-                wl *= exp(-0.12 * relativeBrightRise);
+                // A smooth hard separation between brightness populations. The
+                // small residual avoids discontinuous flicker at the class boundary.
+                wl *= mix(1.0, 0.02, tierSeparation);
             }
 
             float wRgb = wGeomBase * wl;
