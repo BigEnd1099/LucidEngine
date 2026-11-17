@@ -537,6 +537,9 @@ imageStore(imgS, px, vec4(gi, vis));
 float directionCoherence = (giDirectionEnergy > 1e-5)
     ? clamp(length(giDirectionSum) / giDirectionEnergy, 0.0, 1.0) : 0.0;
 vec3 giDirection = (directionCoherence > 1e-4) ? normalize(giDirectionSum) : vec3(0.0);
+// A single path has coherence=1 by definition, but its direction is not a
+// statistically reliable lighting guide. Keep the vector for temporal
+// accumulation; A-Trous separately gates it by accumulated history length.
 imageStore(imgGiDirection, px, vec4(giDirection, directionCoherence));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
