@@ -24,7 +24,9 @@ namespace engine::renderer {
         GiConfidence = 17,
         GiMeanLuminance = 18,
         GiTemporalVariance = 19,
-        GiRelativeUncertainty = 20
+        GiRelativeUncertainty = 20,
+        SvgfFireflyRejection = 21,
+        SvgfIncomingDirection = 22
     };
 
     struct RtSettings {
@@ -59,6 +61,9 @@ namespace engine::renderer {
         bool giAtrousPass3Enabled{true};
         bool giAtrousPass4Enabled{true};
         bool svgfEnabled{true};
+        bool svgfFireflyFilterEnabled{true};
+        float svgfFireflyFilterStrength{1.0f};
+        bool svgfDirectionalAtrousEnabled{true};
         bool worldRadianceCacheEnabled{true};
         bool giSurfaceHistoryCacheEnabled{true};
         bool wrcClipmapEnabled{true};
