@@ -438,14 +438,14 @@ void main() {
                     float neighborDirectionalSamples = neighborDirectionB.z * max(neighborHistoryLen, 1.0);
                     float directionalSampleConfidence = smoothstep(0.5, 2.0,
                         min(centerDirectionalSamples, neighborDirectionalSamples));
-                    float directionalEnergyConfidence = smoothstep(1e-5, 0.002,
-                        min(centerDirectionEnergy, neighborDirectionEnergy));
+                    // The non-zero energy guard above rejects empty histograms.
+                    // Do not impose a second absolute-radiance threshold here:
+                    // low-energy indirect light must still benefit from reconstruction.
                     // Keep a non-trivial floor: angular mismatch should reduce
                     // cross-lobe leakage, not carve a hard edge into the image.
                     float directionalWeight = mix(0.22, 1.0,
                         smoothstep(0.08, 0.58, directionalOverlap));
-                    float directionalConfidence = directionalSampleConfidence *
-                                                  directionalEnergyConfidence;
+                    float directionalConfidence = directionalSampleConfidence;
                     wRgb *= mix(1.0, directionalWeight, directionalConfidence);
                 }
             }
