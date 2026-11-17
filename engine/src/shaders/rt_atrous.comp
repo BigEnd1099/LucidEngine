@@ -28,6 +28,7 @@ layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
+layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirection;
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -65,7 +66,7 @@ void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRad
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
     float historyLen = unpackGiHistoryLen(geom.w);
-    if (PASS != 3 || pc.u.y == 0u || pc.u.z == 0u || historyLen < 2.0 || !writeSample) return;
+    if (PASS != 3 || (pc.u.y & 1u) == 0u || pc.u.z == 0u || historyLen < 2.0 || !writeSample) return;
     vec2 uv = (vec2(px) + 0.5) / size;
     ivec2 depthSize = textureSize(uDepth, 0);
     ivec2 depthPx = clamp(ivec2(uv * vec2(depthSize)), ivec2(0), depthSize - 1);
@@ -96,6 +97,14 @@ void main() {
             // True raw GI trace, captured before temporal accumulation or spatial filtering.
             vec4 rawS = imageLoad(imgRawGi, px);
             storeDst(px, rawS);
+            return;
+        } else if (mode == 21u) {
+            storeDst(px, imageLoad(imgRawGi, px));
+            return;
+        } else if (mode == 22u) {
+            vec4 direction = imageLoad(imgGiDirection, px);
+            vec3 directionColor = (direction.a > 1e-4) ? normalize(direction.xyz) * 0.5 + 0.5 : vec3(0.0);
+            storeDst(px, vec4(directionColor * direction.a, 1.0));
             return;
         } else if (mode == 8u) {
             vec4 caustic = imageLoad(imgCaustics, px);
@@ -183,7 +192,58 @@ void main() {
 
     vec4 momC = imageLoad(imgMomentsCur, px);
 
-    // 3x3 bilateral pre-filter of temporal variance and Hampel firefly suppression in Pass 0
+    // Independent SVGF spatial firefly rejection. Robust median/MAD statistics are
+    // built only from coplanar, similarly oriented neighbors. Supported bright
+    // clusters are exempt so real HDR illumination is not mistaken for a spike.
+    float fireflyPreservation = 1.0;
+    if (PASS == 0 && pc.f.z > 0.001) {
+        float neighborLuma[8];
+        int neighborCount = 0;
+        float centerLuma = max(dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        int brightSupport = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                ivec2 q = px + ivec2(dx, dy);
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+                vec4 qGeom = imageLoad(imgGeomCur, q);
+                if (qGeom.z < 0.0 || dot(nC, rtOctDecode(qGeom.xy)) < 0.85) continue;
+                vec3 qView = rtViewPosFromLinear(vec2(q) + 0.5, qGeom.z, size);
+                if (abs(dot(nCv, qView - pCv)) > depthTol * 2.0) continue;
+                vec4 qValue = loadSrc(q);
+                float qLuma = max(dot(qValue.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+                neighborLuma[neighborCount++] = qLuma;
+                if (qLuma >= max(centerLuma * 0.45, centerLuma - 0.02)) brightSupport++;
+            }
+        }
+        if (neighborCount >= 4) {
+            for (int i = 1; i < neighborCount; ++i) {
+                float key = neighborLuma[i]; int j = i - 1;
+                while (j >= 0 && neighborLuma[j] > key) { neighborLuma[j + 1] = neighborLuma[j]; --j; }
+                neighborLuma[j + 1] = key;
+            }
+            int mid = neighborCount / 2;
+            float medianLuma = (neighborCount & 1) != 0 ? neighborLuma[mid] : 0.5 * (neighborLuma[mid - 1] + neighborLuma[mid]);
+            float deviations[8];
+            for (int i = 0; i < neighborCount; ++i) deviations[i] = abs(neighborLuma[i] - medianLuma);
+            for (int i = 1; i < neighborCount; ++i) {
+                float key = deviations[i]; int j = i - 1;
+                while (j >= 0 && deviations[j] > key) { deviations[j + 1] = deviations[j]; --j; }
+                deviations[j + 1] = key;
+            }
+            float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
+            float robustLimit = medianLuma + max(3.5 * 1.4826 * mad, medianLuma * 1.25 + 0.015);
+            if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 2.5 + 0.02) {
+                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.20;
+                fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
+                center.rgb *= fireflyPreservation;
+            }
+        }
+    }
+    if (PASS == 0 && pc.u.x == 21u)
+        imageStore(imgRawGi, px, vec4(vec3(fireflyPreservation), 1.0));
+
+    // 3x3 bilateral pre-filter of temporal variance.
     float varC = max(momC.z, 0.0);
     if (PASS == 0) {
         float varSum = 0.0;
@@ -212,12 +272,6 @@ void main() {
         if (wVarTotal > 1e-4) {
             varC = (varC * 0.25 + varSum) / (0.25 + wVarTotal);
         }
-        // Do not clamp radiance in the spatial pass. Temporal firefly rejection
-        // already classifies unsupported one-frame spikes. A second per-pixel
-        // Hampel clamp here destroys legitimate isolated bright samples before
-        // the edge-aware filter can combine them with the rest of the bright cluster.
-        // Keep this neighborhood pass exclusively for variance pre-filtering.
-
         // Store smoothed variance into momC.w for downstream passes 1, 2, 3 to read immutably
         momC.w = varC;
         imageStore(imgMomentsCur, px, momC);
@@ -331,6 +385,16 @@ void main() {
             }
 
             float wRgb = wGeomBase * wl;
+            if ((pc.u.y & 2u) != 0u) {
+                vec4 centerDirection = imageLoad(imgGiDirection, px);
+                vec4 neighborDirection = imageLoad(imgGiDirection, q);
+                if (centerDirection.a > 0.05 && neighborDirection.a > 0.05) {
+                    float directionalAgreement = dot(normalize(centerDirection.xyz), normalize(neighborDirection.xyz));
+                    float directionalWeight = smoothstep(-0.10, 0.80, directionalAgreement);
+                    float directionalConfidence = min(centerDirection.a, neighborDirection.a);
+                    wRgb *= mix(1.0, directionalWeight, directionalConfidence);
+                }
+            }
             sumRgb += safeQCol.rgb * wRgb;
             wRgbTotal += wRgb;
 
