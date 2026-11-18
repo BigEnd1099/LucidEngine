@@ -228,6 +228,7 @@ void main() {
 
         float metricSum = 0.0;
         float metricWeight = 0.0;
+        float confidenceSum = 0.0;
         for (int j = -2; j <= 2; ++j) {
             for (int i = -2; i <= 2; ++i) {
                 if (i == 0 && j == 0) continue;
@@ -247,28 +248,33 @@ void main() {
                 float overlap,confidence;
                 float factor=giDirectionalFilterFactor(centerBins0,centerBins1,centerBins2,centerDirectionCount,
                     neighborBins0,neighborBins1,neighborBins2,neighborDirectionCount,centerHistory,unpackGiHistoryLen(gQ.w),overlap,confidence);
+                if (confidence <= 0.0) continue;
+
+                float metric = 0.0;
                 if (pc.u.x == 24u) {
-                    // A missing/empty histogram is not a directional mismatch.
-                    // Exclude it from the overlap average; pixels with no valid
-                    // neighbor evidence are shown as neutral gray below.
-                    if (confidence <= 0.0) continue;
-                    float mismatch = clamp((1.0 - overlap) * 4.0, 0.0, 1.0);
-                    metricSum += mismatch * wGeom;
-                    metricWeight += wGeom;
+                    // Raw histogram agreement: red = different directions,
+                    // green = matching directions. Blue carries evidence confidence.
+                    metric = clamp(overlap, 0.0, 1.0);
                 } else {
-                    // Show the actual directional multiplier, normalized from
-                    // its minimum (0.22) to full acceptance (1.0):
-                    // black = reject neighbor, white = allow full mixing.
-                    float acceptance = clamp((factor - 0.22) / 0.78, 0.0, 1.0);
-                    metricSum += acceptance * wGeom;
-                    metricWeight += wGeom;
+                    // Actual directional acceptance after confidence blending:
+                    // red = rejected, green = fully accepted. Blue carries confidence.
+                    metric = clamp((factor - 0.22) / 0.78, 0.0, 1.0);
                 }
+                metricSum += metric * wGeom;
+                confidenceSum += confidence * wGeom;
+                metricWeight += wGeom;
             }
         }
-        // Neutral gray means there was no valid directional comparison.
-        float result = (metricWeight > 1e-6) ? metricSum / metricWeight
-                                             : ((pc.u.x == 24u) ? 0.5 : 1.0);
-        storeDst(px, vec4(vec3(clamp(result, 0.0, 1.0)), 1.0));
+
+        if (metricWeight > 1e-6) {
+            float metric = clamp(metricSum / metricWeight, 0.0, 1.0);
+            float confidence = clamp(confidenceSum / metricWeight, 0.0, 1.0);
+            storeDst(px, vec4(1.0 - metric, metric, confidence, 1.0));
+        } else {
+            // Blue means no trustworthy directional evidence. In particular,
+            // do not display white here: white is reserved for full acceptance.
+            storeDst(px, vec4(0.0, 0.0, 1.0, 1.0));
+        }
         return;
     }
 
