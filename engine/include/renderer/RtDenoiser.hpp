@@ -35,6 +35,9 @@ namespace engine::renderer {
             bool      giTemporalFilterEnabled{true};
             bool      giHistoryClampEnabled{true};
             bool      giTemporalFireflyFilterEnabled{true};
+            float     svgfFireflyFilterStrength{1.0f};
+            bool      svgfDirectionalAtrousEnabled{true};
+            bool      svgfDirectionalPathGuideEnabled{false};
             bool      giDominanceRatioFilterEnabled{true};
             float     giDarkRatio{0.15f};
             float     giBrightRatio{0.80f};
@@ -163,11 +166,20 @@ namespace engine::renderer {
         std::array<Image, 2> m_imgReflHist{}; // reflection temporal ping-pong
         std::array<Image, 2> m_imgReflGeom{}; // previous-frame primary geometry for reflection reprojection
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
+        std::array<std::array<Image, 4>, 2> m_giDirectionBins{}; // 12 directional energy lobes + independent valid-path count, ping-ponged per frame
+        std::array<Image, 2> m_giPathPosition{}; // weighted-reservoir first-hit world position + total path energy
+        std::array<Image, 2> m_giPathNormal{};   // selected first-hit normal + valid path count
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
         VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
         VkBuffer m_surfaceHistoryBuffer{VK_NULL_HANDLE};
         VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
+        VkBuffer m_giSurfacePatchBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_giSurfacePatchAllocation{VK_NULL_HANDLE};
+        VkBuffer m_giSurfacePatchHistoryBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_giSurfacePatchHistoryAllocation{VK_NULL_HANDLE};
+        bool m_giSurfacePatchHistoryNeedsClear{true};
+        uint32_t m_giSurfacePatchHistoryEpoch{0u};
         bool m_surfaceHistoryNeedsClear{true};
         uint32_t m_surfaceHistoryLightingEpoch{1u};
         bool m_surfaceHistoryCacheStateKnown{false};

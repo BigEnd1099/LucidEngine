@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[22]{};
+        VkDescriptorSetLayoutBinding b[36]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -87,16 +87,36 @@ namespace engine::renderer {
         b[21].descriptorCount = 1;
         b[21].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[21].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        for (uint32_t i = 22; i < 30; ++i) {
+            b[i].binding = i;
+            b[i].descriptorCount = 1;
+            b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+        for (uint32_t i = 30; i < 34; ++i) {
+            b[i].binding = i;
+            b[i].descriptorCount = 1;
+            b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+        b[34].binding = 34;
+        b[34].descriptorCount = 1;
+        b[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[34].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        b[35].binding = 35;
+        b[35].descriptorCount = 1;
+        b[35].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[35].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 22;
+        li.bindingCount = 36;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
 
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 40 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 }
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 68 }, 
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pi.maxSets = 2;
@@ -167,6 +187,31 @@ namespace engine::renderer {
             throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
         std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
 
+        // Current-frame world-space GI patch atlas: 65,536 cells, 12 directional lobes,
+        // each storing fixed-point RGB energy + sample weight (196 bytes/cell).
+        constexpr VkDeviceSize kGiSurfacePatchBytes = VkDeviceSize(196u) * 65536u;
+        VkBufferCreateInfo patchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        patchInfo.size = kGiSurfacePatchBytes;
+        patchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        patchInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo patchAlloc{};
+        patchAlloc.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &patchInfo, &patchAlloc,
+                            &m_giSurfacePatchBuffer, &m_giSurfacePatchAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate GI surface-patch atlas");
+
+        // Persistent world-space GI patch history: key + frame + lighting epoch + 12 directional lobes.
+        constexpr VkDeviceSize kGiSurfacePatchHistoryBytes = VkDeviceSize(204u) * 65536u;
+        VkBufferCreateInfo patchHistoryInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        patchHistoryInfo.size = kGiSurfacePatchHistoryBytes;
+        patchHistoryInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        patchHistoryInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo patchHistoryAlloc{};
+        patchHistoryAlloc.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &patchHistoryInfo, &patchHistoryAlloc,
+                            &m_giSurfacePatchHistoryBuffer, &m_giSurfacePatchHistoryAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate persistent GI surface-patch history");
+
         // Dedicated 25 cm surface-history hash table (48 bytes/cell, 12 MiB).
         // It is separate from the lower-resolution radiance-probe cache at binding 20.
         constexpr VkDeviceSize kSurfaceHistoryBytes = VkDeviceSize(48u) * 262144u;
@@ -225,6 +270,14 @@ namespace engine::renderer {
         destroyImages();
         if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
         if (m_surfaceHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_surfaceHistoryBuffer, m_surfaceHistoryAllocation);
+        if (m_giSurfacePatchBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_giSurfacePatchBuffer, m_giSurfacePatchAllocation);
+        if (m_giSurfacePatchHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_giSurfacePatchHistoryBuffer, m_giSurfacePatchHistoryAllocation);
+        m_giSurfacePatchBuffer = VK_NULL_HANDLE;
+        m_giSurfacePatchAllocation = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryBuffer = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryAllocation = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryNeedsClear = true;
+        m_giSurfacePatchHistoryEpoch = 0u;
         m_diagnosticsBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryAllocation = VK_NULL_HANDLE;
@@ -322,6 +375,9 @@ namespace engine::renderer {
         for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
         for (auto& rg : m_imgReflGeom) rg = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_width, m_height);
         for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& parity : m_giDirectionBins) for (auto& directionImage : parity) directionImage = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& image : m_giPathPosition) image = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& image : m_giPathNormal) image = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
     }
 
     void RtDenoiser::destroyImages() {
@@ -340,6 +396,9 @@ namespace engine::renderer {
         for (auto& rh : m_imgReflHist) destroy(rh);
         for (auto& rg : m_imgReflGeom) destroy(rg);
         for (auto& m : m_moments) destroy(m);
+        for (auto& parity : m_giDirectionBins) for (auto& directionImage : parity) destroy(directionImage);
+        for (auto& image : m_giPathPosition) destroy(image);
+        for (auto& image : m_giPathNormal) destroy(image);
     }
 
     void RtDenoiser::writeDescriptors(VkImageView depthView, VkSampler depthSampler,
@@ -351,7 +410,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[22]{};
+            VkWriteDescriptorSet writes[36]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -487,7 +546,54 @@ namespace engine::renderer {
             writes[21].descriptorCount = 1;
             writes[21].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[21].pBufferInfo = &surfaceHistoryInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 22, writes, 0, nullptr);
+
+            const VkDescriptorImageInfo giDirectionInfos[8] = {
+                { VK_NULL_HANDLE, m_giDirectionBins[p][0].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[p][1].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[p][2].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[p][3].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[q][0].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[q][1].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[q][2].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giDirectionBins[q][3].view, VK_IMAGE_LAYOUT_GENERAL }
+            };
+            for (uint32_t i = 0; i < 8; ++i) {
+                writes[22 + i] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                writes[22 + i].dstSet = m_sets[p];
+                writes[22 + i].dstBinding = 22 + i;
+                writes[22 + i].descriptorCount = 1;
+                writes[22 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                writes[22 + i].pImageInfo = &giDirectionInfos[i];
+            }
+            const VkDescriptorImageInfo giPathInfos[4] = {
+                { VK_NULL_HANDLE, m_giPathPosition[p].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giPathNormal[p].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giPathPosition[q].view, VK_IMAGE_LAYOUT_GENERAL },
+                { VK_NULL_HANDLE, m_giPathNormal[q].view, VK_IMAGE_LAYOUT_GENERAL }
+            };
+            for (uint32_t i = 0; i < 4; ++i) {
+                writes[30 + i] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                writes[30 + i].dstSet = m_sets[p];
+                writes[30 + i].dstBinding = 30 + i;
+                writes[30 + i].descriptorCount = 1;
+                writes[30 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                writes[30 + i].pImageInfo = &giPathInfos[i];
+            }
+            const VkDescriptorBufferInfo giSurfacePatchInfo{ m_giSurfacePatchBuffer, 0, VK_WHOLE_SIZE };
+            writes[34] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[34].dstSet = m_sets[p];
+            writes[34].dstBinding = 34;
+            writes[34].descriptorCount = 1;
+            writes[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[34].pBufferInfo = &giSurfacePatchInfo;
+            const VkDescriptorBufferInfo giSurfacePatchHistoryInfo{ m_giSurfacePatchHistoryBuffer, 0, VK_WHOLE_SIZE };
+            writes[35] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[35].dstSet = m_sets[p];
+            writes[35].dstBinding = 35;
+            writes[35].descriptorCount = 1;
+            writes[35].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[35].pBufferInfo = &giSurfacePatchHistoryInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 36, writes, 0, nullptr);
         }
     }
 
@@ -515,13 +621,19 @@ namespace engine::renderer {
 
         // All images live permanently in GENERAL (storage writes + sampled reads in the PBR pass).
         if (m_needsLayoutInit) {
-            const Image* all[15] = {
+            const Image* all[27] = {
                 &m_imgS, &m_imgA, &m_imgRawGi, &m_imgCaustics, &m_geom[0], &m_geom[1], &m_hist[0], &m_hist[1],
                 &m_imgRefl, &m_imgReflHist[0], &m_imgReflHist[1],
-                &m_moments[0], &m_moments[1], &m_imgReflGeom[0], &m_imgReflGeom[1]
+                &m_moments[0], &m_moments[1], &m_imgReflGeom[0], &m_imgReflGeom[1],
+                &m_giDirectionBins[0][0], &m_giDirectionBins[0][1],
+                &m_giDirectionBins[0][2], &m_giDirectionBins[0][3],
+                &m_giDirectionBins[1][0], &m_giDirectionBins[1][1],
+                &m_giDirectionBins[1][2], &m_giDirectionBins[1][3],
+                &m_giPathPosition[0], &m_giPathNormal[0],
+                &m_giPathPosition[1], &m_giPathNormal[1]
             };
-            VkImageMemoryBarrier2 bars[15]{};
-            for (int i = 0; i < 15; ++i) {
+            VkImageMemoryBarrier2 bars[27]{};
+            for (int i = 0; i < 27; ++i) {
                 bars[i] = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                 bars[i].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 bars[i].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -533,7 +645,7 @@ namespace engine::renderer {
                 bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             }
             VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 15;
+            dep.imageMemoryBarrierCount = 27;
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
@@ -602,6 +714,23 @@ namespace engine::renderer {
             m_giHistoryValid = false;
         }
 
+        // Rebuild the current-frame world-space patch atlas from traced paths.
+        // This resource is separate from WRC and Persistent Surface History Cache.
+        vkCmdFillBuffer(cmd, m_giSurfacePatchBuffer, 0, VK_WHOLE_SIZE, 0u);
+        VkBufferMemoryBarrier2 patchClearBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        patchClearBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        patchClearBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        patchClearBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        patchClearBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        patchClearBarrier.srcQueueFamilyIndex = patchClearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        patchClearBarrier.buffer = m_giSurfacePatchBuffer;
+        patchClearBarrier.offset = 0;
+        patchClearBarrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo patchClearDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        patchClearDependency.bufferMemoryBarrierCount = 1;
+        patchClearDependency.pBufferMemoryBarriers = &patchClearBarrier;
+        vkCmdPipelineBarrier2(cmd, &patchClearDependency);
+
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {
             m_reflHistoryValid = false;
@@ -609,6 +738,30 @@ namespace engine::renderer {
             ++m_surfaceHistoryLightingEpoch;
             if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
         }
+        // Lighting-epoch changes invalidate persistent patch energy. Camera motion does not:
+        // patches are keyed in world space and remain available when their surfaces reappear.
+        if (m_giSurfacePatchHistoryEpoch != m_surfaceHistoryLightingEpoch) {
+            m_giSurfacePatchHistoryEpoch = m_surfaceHistoryLightingEpoch;
+            m_giSurfacePatchHistoryNeedsClear = true;
+        }
+        if (m_giSurfacePatchHistoryNeedsClear) {
+            vkCmdFillBuffer(cmd, m_giSurfacePatchHistoryBuffer, 0, VK_WHOLE_SIZE, 0u);
+            VkBufferMemoryBarrier2 patchHistoryClearBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            patchHistoryClearBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            patchHistoryClearBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            patchHistoryClearBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            patchHistoryClearBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            patchHistoryClearBarrier.srcQueueFamilyIndex = patchHistoryClearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            patchHistoryClearBarrier.buffer = m_giSurfacePatchHistoryBuffer;
+            patchHistoryClearBarrier.offset = 0;
+            patchHistoryClearBarrier.size = VK_WHOLE_SIZE;
+            VkDependencyInfo patchHistoryClearDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            patchHistoryClearDependency.bufferMemoryBarrierCount = 1;
+            patchHistoryClearDependency.pBufferMemoryBarriers = &patchHistoryClearBarrier;
+            vkCmdPipelineBarrier2(cmd, &patchHistoryClearDependency);
+            m_giSurfacePatchHistoryNeedsClear = false;
+        }
+
         m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
             uint64_t timestamps[19]{};
@@ -687,6 +840,9 @@ namespace engine::renderer {
         profiler.recordMetric("rtMaxHistory", params.maxHistory);
         profiler.recordMetric("rtSpatialStrength", params.spatialStrength);
         profiler.recordMetric("rtSvgfEnabled", params.svgfEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtSvgfFireflyFilterStrength", params.svgfFireflyFilterStrength);
+        profiler.recordMetric("rtSvgfDirectionalAtrousEnabled", params.svgfDirectionalAtrousEnabled ? 1.0 : 0.0);
+        profiler.recordMetric("rtSvgfDirectionalPathGuideEnabled", params.svgfDirectionalPathGuideEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtWorldRadianceCacheEnabled", params.worldRadianceCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtGiSurfaceHistoryCacheEnabled", params.giSurfaceHistoryCacheEnabled ? 1.0 : 0.0);
         profiler.recordMetric("rtWrcClipmapsEnabled", params.wrcClipmapEnabled ? 1.0 : 0.0);
@@ -858,13 +1014,16 @@ namespace engine::renderer {
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, m_queryPool, 4);
 
             pd.f.y = std::max(params.maxHistory, 1.0f);
+            pd.f.z = std::clamp(params.svgfFireflyFilterStrength, 0.0f, 1.0f);
             pd.f.w = (params.svgfEnabled && params.giTemporalFilterEnabled) ? 1.0f : 0.0f;
 
             // Pass 3: Atrous step 1 (hist -> A, step 1)
             pd.f.x = params.giAtrousPassEnabled[0] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.f.y = std::max(params.maxHistory, 1.0f);
-            pd.u[0] = 0u;
-            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[0] = (params.debugMode == RtDebugMode::SvgfFireflyRejection) ? 21u : 0u;
+            pd.u[1] = (params.giSurfaceHistoryCacheEnabled ? 1u : 0u) |
+                      (params.svgfDirectionalAtrousEnabled ? 2u : 0u) |
+                      (params.svgfDirectionalPathGuideEnabled ? 4u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[0], pd);
@@ -876,7 +1035,10 @@ namespace engine::renderer {
 
             // Pass 4: Atrous step 2 (A -> S, step 2)
             pd.f.x = params.giAtrousPassEnabled[1] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
-            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[0] = 0u;
+            pd.u[1] = (params.giSurfaceHistoryCacheEnabled ? 1u : 0u) |
+                      (params.svgfDirectionalAtrousEnabled ? 2u : 0u) |
+                      (params.svgfDirectionalPathGuideEnabled ? 4u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[1], pd);
@@ -888,7 +1050,10 @@ namespace engine::renderer {
 
             // Pass 5: Atrous step 3 (S -> A, step 4)
             pd.f.x = params.giAtrousPassEnabled[2] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
-            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[0] = 0u;
+            pd.u[1] = (params.giSurfaceHistoryCacheEnabled ? 1u : 0u) |
+                      (params.svgfDirectionalAtrousEnabled ? 2u : 0u) |
+                      (params.svgfDirectionalPathGuideEnabled ? 4u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[2], pd);
@@ -901,7 +1066,9 @@ namespace engine::renderer {
             // Pass 6: Atrous step 4 (A -> S, step 8, final output with debugMode)
             pd.f.x = params.giAtrousPassEnabled[3] ? std::clamp(params.spatialStrength, 0.0f, 1.0f) : 0.0f;
             pd.u[0] = static_cast<uint32_t>(params.debugMode);
-            pd.u[1] = params.giSurfaceHistoryCacheEnabled ? 1u : 0u;
+            pd.u[1] = (params.giSurfaceHistoryCacheEnabled ? 1u : 0u) |
+                      (params.svgfDirectionalAtrousEnabled ? 2u : 0u) |
+                      (params.svgfDirectionalPathGuideEnabled ? 4u : 0u);
             pd.u[2] = m_surfaceHistoryLightingEpoch;
             pd.u[3] = params.frameIndex;
             bindGI(m_atrousPipelines[3], pd);

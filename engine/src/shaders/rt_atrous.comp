@@ -19,6 +19,7 @@ layout(constant_id = 0) const int PASS = 0;
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
 #include "gi_surface_history_common.glsl"
+#include "restir_gi_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
@@ -28,12 +29,111 @@ layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiDirectionBins0;
+layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
+layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
+layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiPathNormal;
+#define imgGiReservoirC imgGiDirectionBins0
+#define imgGiReservoirA imgGiPathPosition
+#define imgGiReservoirB imgGiPathNormal
+layout(set = 1, binding = 35, std430) readonly buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 51u;
 
 layout(push_constant) uniform PC {
     mat4 unused;
     vec4 f;   // x = spatial strength (0..1), y = maxHistory, w = svgfEnabled (1/0)
     uvec4 u;  // u.x = debugMode (evaluated in final pass)
 } pc;
+
+
+float giDirectionalOverlap(vec4 a0,vec4 a1,vec4 a2,vec4 b0,vec4 b1,vec4 b2){
+ float sa=dot(a0,vec4(1))+dot(a1,vec4(1))+dot(a2,vec4(1)),sb=dot(b0,vec4(1))+dot(b1,vec4(1))+dot(b2,vec4(1));
+ if(sa<=1e-5||sb<=1e-5)return 1e0;
+ a0/=sa;a1/=sa;a2/=sa;b0/=sb;b1/=sb;b2/=sb;
+ return clamp(dot(min(a0,b0),vec4(1))+dot(min(a1,b1),vec4(1))+dot(min(a2,b2),vec4(1)),0,1);
+}
+vec3 giDirectionalDebugColor(vec4 b0,vec4 b1,vec4 b2){
+ const vec3 colors[12]=vec3[](vec3(1,.08,.04),vec3(0,.85,.95),vec3(.1,1,.12),vec3(.95,.05,.85),
+ vec3(.08,.18,1),vec3(1,.82,.05),vec3(.95,.42,.04),vec3(.35,.95,.65),vec3(.55,.25,1),
+ vec3(.05,.65,.35),vec3(.95,.35,.55),vec3(.45,.75,1));
+ float total=dot(b0,vec4(1))+dot(b1,vec4(1))+dot(b2,vec4(1));if(total<=1e-5)return vec3(0);
+ vec3 color=vec3(0);for(int i=0;i<12;++i){float w=i<4?b0[i]:(i<8?b1[i-4]:b2[i-8]);color+=colors[i]*w;}return color/total;
+}
+vec3 giWorldPosition(ivec2 pixel, vec2 giSize) {
+    ivec2 depthSize=textureSize(uDepth,0);
+    vec2 uv=(vec2(pixel)+0.5)/giSize;
+    ivec2 depthPixel=clamp(ivec2(uv*vec2(depthSize)),ivec2(0),depthSize-1);
+    float depth=texelFetch(uDepth,depthPixel,0).r;
+    return rtWorldPos(vec2(pixel)+0.5,depth,giSize);
+}
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0));
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+bool loadGiSurfacePatch(vec3 worldPos, vec3 worldNormal, out vec3 radiance, out float support) {
+    radiance = vec3(0.0); support = 0.0;
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint cellWord = 0u; bool found = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_WORDS_PER_CELL;
+        uint candidateKey = giSurfacePatchHistory.words[candidate];
+        if (candidateKey == key) { cellWord = candidate; found = true; break; }
+        if (candidateKey == 0u) break;
+    }
+    if (!found) return false;
+    vec3 rgbSum = vec3(0.0); float weightSum = 0.0;
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint src = cellWord + 3u + lobe * 4u;
+        float lobeWeight = float(giSurfacePatchHistory.words[src + 3u]);
+        rgbSum += vec3(giSurfacePatchHistory.words[src], giSurfacePatchHistory.words[src + 1u],
+                       giSurfacePatchHistory.words[src + 2u]) * lobeWeight;
+        weightSum += lobeWeight;
+    }
+    if (weightSum <= 1.0) return false;
+    radiance = rgbSum * (1.0 / (32.0 * weightSum));
+    support = weightSum / 4096.0;
+    return true;
+}
+
+float giDirectionalPathFactor(vec3 centerSource,vec4 centerHit,vec4 centerHitNormal,
+                              vec3 neighborSource,vec4 neighborHit,vec4 neighborHitNormal,
+                              out float similarity,out float confidence) {
+    similarity=1.0;confidence=0.0;
+    if(centerHit.w<=1e-6||neighborHit.w<=1e-6||
+       centerHitNormal.z<=0.0||neighborHitNormal.z<=0.0||
+       centerHitNormal.w<=0.0||neighborHitNormal.w<=0.0)return 1.0;
+    vec3 centerDelta=centerHit.xyz-centerSource,neighborDelta=neighborHit.xyz-neighborSource;
+    float centerDistance=length(centerDelta),neighborDistance=length(neighborDelta);
+    if(centerDistance<=1e-4||neighborDistance<=1e-4)return 1.0;
+    float directionAgreement=clamp(dot(centerDelta/centerDistance,neighborDelta/neighborDistance),-1.0,1.0);
+    float hitNormalAgreement=max(dot(rtOctDecode(centerHitNormal.xy),rtOctDecode(neighborHitNormal.xy)),0.0);
+    float distanceAgreement=exp(-abs(centerDistance-neighborDistance)/max(0.10,0.20*min(centerDistance,neighborDistance)));
+    similarity=smoothstep(0.72,0.96,directionAgreement)*
+               mix(0.70,1.0,smoothstep(0.15,0.80,hitNormalAgreement))*
+               mix(0.75,1.0,distanceAgreement);
+    // .w is a measured temporal consistency score, not history length or hit count.
+    confidence=min(clamp(centerHitNormal.w,0.0,1.0),clamp(neighborHitNormal.w,0.0,1.0));
+    return mix(1.0,mix(0.18,1.0,similarity),confidence);
+}
+
+float giDirectionalFilterFactor(vec4 c0,vec4 c1,vec4 c2,float cc,vec4 n0,vec4 n1,vec4 n2,float nc,
+ float ch,float nh,out float overlap,out float confidence){
+ float ce=dot(c0,vec4(1))+dot(c1,vec4(1))+dot(c2,vec4(1)),ne=dot(n0,vec4(1))+dot(n1,vec4(1))+dot(n2,vec4(1));
+ overlap=0;confidence=0;if(ce<=1e-5||ne<=1e-5)return 1;
+ overlap=giDirectionalOverlap(c0,c1,c2,n0,n1,n2);
+ float evidence=min(max(cc,0)*max(ch,1),max(nc,0)*max(nh,1));
+ confidence=smoothstep(.5,2,evidence);
+ return mix(1,mix(.22,1,smoothstep(.08,.58,overlap)),confidence);
+}
 
 vec4 loadSrc(ivec2 p) {
     if (PASS == 0) return imageLoad(imgHistCur, p);
@@ -65,7 +165,7 @@ void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRad
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
     float historyLen = unpackGiHistoryLen(geom.w);
-    if (PASS != 3 || pc.u.y == 0u || pc.u.z == 0u || historyLen < 2.0 || !writeSample) return;
+    if (PASS != 3 || (pc.u.y & 1u) == 0u || pc.u.z == 0u || historyLen < 2.0 || !writeSample) return;
     vec2 uv = (vec2(px) + 0.5) / size;
     ivec2 depthSize = textureSize(uDepth, 0);
     ivec2 depthPx = clamp(ivec2(uv * vec2(depthSize)), ivec2(0), depthSize - 1);
@@ -96,6 +196,43 @@ void main() {
             // True raw GI trace, captured before temporal accumulation or spatial filtering.
             vec4 rawS = imageLoad(imgRawGi, px);
             storeDst(px, rawS);
+            return;
+        } else if (mode == 21u) {
+            storeDst(px, imageLoad(imgRawGi, px));
+            return;
+        } else if (mode == 22u) {
+            vec4 bins0=imageLoad(imgGiDirectionBins0,px),bins1=imageLoad(imgGiDirectionBins1,px),bins2=imageLoad(imgGiDirectionBins2,px);
+            storeDst(px,vec4(giDirectionalDebugColor(bins0,bins1,bins2),1));
+            return;
+        } else if (mode == 26u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            if(hitPosition.w<=1e-6||hitNormal.z<=0.0) storeDst(px,vec4(0,0,0,1));
+            else {vec3 source=giWorldPosition(px,size);vec3 direction=normalize(hitPosition.xyz-source);storeDst(px,vec4(direction*0.5+0.5,1));}
+            return;
+        } else if (mode == 27u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            float stability=(hitPosition.w>1e-6&&hitNormal.z>0.0)?clamp(hitNormal.w,0.0,1.0):0.0;
+            storeDst(px,vec4(stability,stability*stability,1.0-stability,1.0));
+            return;
+        } else if (mode == 28u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            float support=(hitPosition.w>1e-6)?clamp(hitNormal.z,0.0,1.0):0.0;
+            storeDst(px,vec4(vec3(support),1.0));
+            return;
+        } else if (mode == 29u || mode == 30u) {
+            vec3 patchRadiance; float patchSupport;
+            bool patchValid = loadGiSurfacePatch(giWorldPosition(px,size), rtOctDecode(gC.xy), patchRadiance, patchSupport);
+            if (!patchValid) storeDst(px, vec4(0.0, 0.0, 0.0, 1.0));
+            else if (mode == 29u) {
+                vec3 encoded = log2(vec3(1.0) + max(patchRadiance, vec3(0.0)) * 4.0) / 8.0;
+                storeDst(px, vec4(clamp(encoded, 0.0, 1.0), 1.0));
+            } else {
+                float confidence = 1.0 - exp(-patchSupport / 4.0);
+                storeDst(px, vec4(vec3(confidence), 1.0));
+            }
             return;
         } else if (mode == 8u) {
             vec4 caustic = imageLoad(imgCaustics, px);
@@ -168,12 +305,6 @@ void main() {
     }
 
     if (gC.z < 0.0) { storeDst(px, center); return; }
-    if (pc.f.x <= 0.001) {
-        storeDst(px, center);
-        persistFinalSurfaceHistory(px, size, gC, center.rgb);
-        return;
-    }
-
     vec3 nC = rtOctDecode(gC.xy);
     vec3 nCv = mat3(ubo.view) * nC;
     vec3 pCv = rtViewPosFromLinear(vec2(px) + 0.5, gC.z, size);
@@ -181,11 +312,201 @@ void main() {
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
 
+    // Directional diagnostics use the same A-Trous footprint and geometric
+    // eligibility as the real pass. The factor itself is shared with filtering.
+    if (PASS == 3 && pc.u.x >= 23u && pc.u.x <= 25u) {
+        vec4 centerBins0=imageLoad(imgGiDirectionBins0,px),centerBins1=imageLoad(imgGiDirectionBins1,px),centerBins2=imageLoad(imgGiDirectionBins2,px);
+        float centerDirectionCount=imageLoad(imgGiDirectionCount,px).x;
+        float centerHistory = unpackGiHistoryLen(gC.w);
+        if (pc.u.x == 23u) {
+            // Show the temporally averaged number of radiance-bearing paths per
+            // frame, not historyLen * count: the latter saturates almost immediately
+            // and hides whether SPP=1 or SPP=16 is actually being recorded.
+            float samplesPerFrame=max(centerDirectionCount,0.0);
+            float t = log2(1.0 + samplesPerFrame) / log2(17.0);
+            storeDst(px, vec4(vec3(clamp(t, 0.0, 1.0)), 1.0));
+            return;
+        }
+
+        float metricSum = 0.0;
+        float metricWeight = 0.0;
+        float confidenceSum = 0.0;
+        for (int j = -2; j <= 2; ++j) {
+            for (int i = -2; i <= 2; ++i) {
+                if (i == 0 && j == 0) continue;
+                ivec2 q = px + ivec2(i, j) * step;
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+                vec3 qNormal = rtOctDecode(gQ.xy);
+                float planeDist = abs(dot(nCv, rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size) - pCv));
+                float dn = max(0.0, dot(nC, qNormal));
+                float wd = exp(-planeDist / max(depthTol * float(step), 1e-4));
+                float wGeom = h[abs(i)] * h[abs(j)] * wd * dn * dn * dn * dn;
+                if (wGeom <= 1e-6) continue;
+
+                vec4 neighborBins0=imageLoad(imgGiDirectionBins0,q),neighborBins1=imageLoad(imgGiDirectionBins1,q),neighborBins2=imageLoad(imgGiDirectionBins2,q);
+                float neighborDirectionCount=imageLoad(imgGiDirectionCount,q).x;
+                float overlap,confidence;
+                float factor=giDirectionalFilterFactor(centerBins0,centerBins1,centerBins2,centerDirectionCount,
+                    neighborBins0,neighborBins1,neighborBins2,neighborDirectionCount,centerHistory,unpackGiHistoryLen(gQ.w),overlap,confidence);
+                if (confidence <= 0.0) continue;
+
+                float metric = 0.0;
+                if (pc.u.x == 24u) {
+                    // Raw histogram agreement: red = different directions,
+                    // green = matching directions. Blue carries evidence confidence.
+                    metric = clamp(overlap, 0.0, 1.0);
+                } else {
+                    // Actual directional acceptance after confidence blending:
+                    // red = rejected, green = fully accepted. Blue carries confidence.
+                    metric = clamp((factor - 0.22) / 0.78, 0.0, 1.0);
+                }
+                metricSum += metric * wGeom;
+                confidenceSum += confidence * wGeom;
+                metricWeight += wGeom;
+            }
+        }
+
+        if (metricWeight > 1e-6) {
+            float metric = clamp(metricSum / metricWeight, 0.0, 1.0);
+            float confidence = clamp(confidenceSum / metricWeight, 0.0, 1.0);
+            storeDst(px, vec4(1.0 - metric, metric, confidence, 1.0));
+        } else {
+            // Blue means no trustworthy directional evidence. In particular,
+            // do not display white here: white is reserved for full acceptance.
+            storeDst(px, vec4(0.0, 0.0, 1.0, 1.0));
+        }
+        return;
+    }
+
     vec4 momC = imageLoad(imgMomentsCur, px);
 
-    // 3x3 bilateral pre-filter of temporal variance and Hampel firefly suppression in Pass 0
+    // Independent SVGF spatial firefly rejection. Robust median/MAD statistics are
+    // built only from coplanar, similarly oriented neighbors. Supported bright
+    // clusters are exempt so real HDR illumination is not mistaken for a spike.
+    float fireflyPreservation = 1.0;
+    if (PASS == 0 && pc.f.z > 0.001) {
+        float neighborLuma[8];
+        int neighborCount = 0;
+        float centerLuma = max(dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        int brightSupport = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                ivec2 q = px + ivec2(dx, dy);
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+                vec4 qGeom = imageLoad(imgGeomCur, q);
+                if (qGeom.z < 0.0 || dot(nC, rtOctDecode(qGeom.xy)) < 0.85) continue;
+                vec3 qView = rtViewPosFromLinear(vec2(q) + 0.5, qGeom.z, size);
+                if (abs(dot(nCv, qView - pCv)) > depthTol * 2.0) continue;
+                vec4 qValue = loadSrc(q);
+                float qLuma = max(dot(qValue.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+                neighborLuma[neighborCount++] = qLuma;
+                if (qLuma >= max(centerLuma * 0.45, centerLuma - 0.02)) brightSupport++;
+            }
+        }
+        if (neighborCount >= 3) {
+            for (int i = 1; i < neighborCount; ++i) {
+                float key = neighborLuma[i]; int j = i - 1;
+                while (j >= 0 && neighborLuma[j] > key) { neighborLuma[j + 1] = neighborLuma[j]; --j; }
+                neighborLuma[j + 1] = key;
+            }
+            int mid = neighborCount / 2;
+            float medianLuma = (neighborCount & 1) != 0 ? neighborLuma[mid] : 0.5 * (neighborLuma[mid - 1] + neighborLuma[mid]);
+            float deviations[8];
+            for (int i = 0; i < neighborCount; ++i) deviations[i] = abs(neighborLuma[i] - medianLuma);
+            for (int i = 1; i < neighborCount; ++i) {
+                float key = deviations[i]; int j = i - 1;
+                while (j >= 0 && deviations[j] > key) { deviations[j + 1] = deviations[j]; --j; }
+                deviations[j + 1] = key;
+            }
+            float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
+            float robustLimit = medianLuma + max(2.25 * 1.4826 * mad, medianLuma * 0.90 + 0.010);
+            // SPP=1 has no reliable per-pixel estimate: reject stronger isolated
+            // spatial outliers, while the neighbor-support exemption protects real
+            // compact light clusters and coherent bright surfaces.
+            if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 1.8 + 0.015) {
+                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.15;
+                fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
+                center.rgb *= fireflyPreservation;
+            }
+        }
+    }
+    if (PASS == 0 && pc.u.x == 21u)
+        imageStore(imgRawGi, px, vec4(vec3(fireflyPreservation), 1.0));
+
+    // The SVGF firefly stage is independent of wavelet strength and pass toggles.
+    // A zero spatial strength bypasses only the subsequent A-Trous convolution.
+    if (pc.f.x <= 0.001) {
+        storeDst(px, center);
+        persistFinalSurfaceHistory(px, size, gC, center.rgb);
+        return;
+    }
+
+    // 3x3 bilateral pre-filter of temporal variance and ReSTIR Spatial Resampling.
     float varC = max(momC.z, 0.0);
     if (PASS == 0) {
+        rngInit(uvec2(px), pc.u.w);
+        vec4 cResA = imageLoad(imgGiReservoirA, px);
+        vec4 cResB = imageLoad(imgGiReservoirB, px);
+        vec4 cResC = imageLoad(imgGiReservoirC, px);
+        GiReservoir spatialRes = unpackGiReservoir(cResA, cResB, cResC);
+
+        // ReSTIR Spatial Resampling is preserved as an optional spatial reservoir pool
+        // but must NOT overwrite center.rgb with a single-sample stochastic candidate,
+        // which would destroy temporal accumulation and inject speckled noise / fireflies.
+        if (gC.z >= 0.0 && spatialRes.M > 0u) {
+            vec2 curUV = (vec2(px) + 0.5) / size;
+            ivec2 depthSize = textureSize(uDepth, 0).xy;
+            ivec2 fullPx = min(ivec2(curUV * vec2(depthSize)), depthSize - 1);
+            float dC = texelFetch(uDepth, fullPx, 0).r;
+            vec3 pC = rtWorldPos(vec2(px) + 0.5, dC, size);
+
+            clampGiReservoirM(spatialRes, 24u);
+
+            const ivec2 spatialOffsets[8] = ivec2[](
+                ivec2( 3,  1), ivec2(-2,  3), ivec2(-3, -2), ivec2( 1, -3),
+                ivec2( 5, -1), ivec2(-1,  5), ivec2(-5,  2), ivec2( 2, -5)
+            );
+
+            for (int k = 0; k < 8; ++k) {
+                ivec2 q = px + spatialOffsets[k];
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+                if (dot(rtOctDecode(gQ.xy), nC) < 0.8) continue;
+                vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
+                if (abs(dot(nCv, pQv - pCv)) > depthTol * 2.0) continue;
+
+                vec4 qResA = imageLoad(imgGiReservoirA, q);
+                vec4 qResB = imageLoad(imgGiReservoirB, q);
+                vec4 qResC = imageLoad(imgGiReservoirC, q);
+                GiReservoir qRes = unpackGiReservoir(qResA, qResB, qResC);
+
+                if (qRes.flags == 0u || qRes.M == 0u || qRes.W <= 0.0) continue;
+                uint M_q = min(qRes.M, 16u);
+
+                float pHat = evalGiTargetPdf(qRes.Lo, qRes.xs, qRes.ns, pC, nC);
+                if (pHat <= 1e-6) continue;
+
+                float wCand = pHat * qRes.W * float(M_q);
+                spatialRes.wSum += wCand;
+                spatialRes.M += M_q;
+                if (rand1() * spatialRes.wSum < wCand) {
+                    spatialRes.xs = qRes.xs;
+                    spatialRes.ns = qRes.ns;
+                    spatialRes.Lo = qRes.Lo;
+                    spatialRes.targetPdf = pHat;
+                    spatialRes.flags = qRes.flags;
+                }
+            }
+
+            clampGiReservoirM(spatialRes, 24u);
+            finalizeGiReservoir(spatialRes);
+        }
+
         float varSum = 0.0;
         float wVarTotal = 0.0;
 
@@ -212,12 +533,6 @@ void main() {
         if (wVarTotal > 1e-4) {
             varC = (varC * 0.25 + varSum) / (0.25 + wVarTotal);
         }
-        // Do not clamp radiance in the spatial pass. Temporal firefly rejection
-        // already classifies unsupported one-frame spikes. A second per-pixel
-        // Hampel clamp here destroys legitimate isolated bright samples before
-        // the edge-aware filter can combine them with the rest of the bright cluster.
-        // Keep this neighborhood pass exclusively for variance pre-filtering.
-
         // Store smoothed variance into momC.w for downstream passes 1, 2, 3 to read immutably
         momC.w = varC;
         imageStore(imgMomentsCur, px, momC);
@@ -229,6 +544,15 @@ void main() {
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
     float historyLen = unpackGiHistoryLen(gC.w);
+    bool useDirectionalGuide = (pc.u.y & 2u) != 0u;
+    bool useDirectionalPathGuide = (pc.u.y & 4u) != 0u;
+    vec4 centerPathPosition=useDirectionalPathGuide?imageLoad(imgGiPathPosition,px):vec4(0);
+    vec4 centerPathNormal=useDirectionalPathGuide?imageLoad(imgGiPathNormal,px):vec4(0);
+    vec3 centerWorldPosition=useDirectionalPathGuide?giWorldPosition(px,size):vec3(0);
+    vec4 centerDirection0=useDirectionalGuide?imageLoad(imgGiDirectionBins0,px):vec4(0);
+    vec4 centerDirection1=useDirectionalGuide?imageLoad(imgGiDirectionBins1,px):vec4(0);
+    vec4 centerDirection2=useDirectionalGuide?imageLoad(imgGiDirectionBins2,px):vec4(0);
+    float centerDirectionCount=useDirectionalGuide?imageLoad(imgGiDirectionCount,px).x:0;
 
     // Dynamic history boost: at low history (SPP1 / camera motion / fresh frame) widen bandwidth
     // to smooth stochastic hits and prevent energy loss. At mature history, bandwidth contracts
@@ -298,6 +622,12 @@ void main() {
                 // bounded, but references the brighter endpoint so valid HDR
                 // samples are not assigned an almost-zero bandwidth.
                 float tierSeparation = smoothstep(1.8, 3.2, brightnessRatio);
+                // Once both taps belong to the high-radiance population, do not
+                // treat their relative HDR variation as a dark/bright tier edge.
+                // This restores filtering bandwidth inside bright light clusters
+                // without opening the boundary between midtones and highlights.
+                float brightClusterCoherence = smoothstep(0.75, 1.50, darkerLum);
+                tierSeparation *= (1.0 - brightClusterCoherence);
                 float withinTierScale = max(brighterLum, 0.025);
                 float crossTierScale = max(mix(darkerLum, brighterLum, 0.65), 0.025);
                 float withinTierSigmaCap = max(0.018, (withinTierScale + 0.035) * 0.42);
@@ -325,6 +655,25 @@ void main() {
             }
 
             float wRgb = wGeomBase * wl;
+            if (useDirectionalGuide) {
+                vec4 neighborDirection0=imageLoad(imgGiDirectionBins0,q),neighborDirection1=imageLoad(imgGiDirectionBins1,q),neighborDirection2=imageLoad(imgGiDirectionBins2,q);
+                float neighborDirectionCount=imageLoad(imgGiDirectionCount,q).x;
+                float directionalOverlap,directionalConfidence;
+                float directionalFactor=giDirectionalFilterFactor(centerDirection0,centerDirection1,centerDirection2,centerDirectionCount,
+                    neighborDirection0,neighborDirection1,neighborDirection2,neighborDirectionCount,historyLen,unpackGiHistoryLen(gQ.w),
+                    directionalOverlap,directionalConfidence);
+                wRgb *= directionalFactor;
+            }
+            if(useDirectionalPathGuide){
+                vec4 neighborPathPosition=imageLoad(imgGiPathPosition,q);
+                vec4 neighborPathNormal=imageLoad(imgGiPathNormal,q);
+                vec3 neighborWorldPosition=giWorldPosition(q,size);
+                float pathSimilarity,pathConfidence;
+                float pathFactor=giDirectionalPathFactor(centerWorldPosition,centerPathPosition,centerPathNormal,
+                    neighborWorldPosition,neighborPathPosition,neighborPathNormal,
+                    pathSimilarity,pathConfidence);
+                wRgb*=pathFactor;
+            }
             sumRgb += safeQCol.rgb * wRgb;
             wRgbTotal += wRgb;
 

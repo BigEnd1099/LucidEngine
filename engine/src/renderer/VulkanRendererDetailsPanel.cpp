@@ -665,6 +665,16 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Prevents ghosting trails during motion by bounding history to the local neighborhood. In static scenes, protects mature history from noise truncation.");
                         ImGui::Checkbox("GI Temporal Firefly Rejection", &m_rtSettings.giTemporalFireflyFilterEnabled);
+                        ImGui::Checkbox("SVGF Spatial Firefly Filter", &m_rtSettings.svgfFireflyFilterEnabled);
+                        ImGui::BeginDisabled(!m_rtSettings.svgfFireflyFilterEnabled);
+                        ImGui::SliderFloat("SVGF Firefly Filter Strength", &m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f, "%.2f");
+                        ImGui::EndDisabled();
+                        ImGui::Checkbox("SVGF Directional À-Trous (12-bin guide)", &m_rtSettings.svgfDirectionalAtrousEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Legacy mode: compares the temporally accumulated 12-lobe incident-radiance histogram.");
+                        ImGui::Checkbox("SVGF Directional Path Guide (real hits)", &m_rtSettings.svgfDirectionalPathGuideEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Stores an energy-weighted representative first-hit position and normal from actual traced GI paths, then reprojects the selected path temporally. A-Trous compares measured ray directions and hit geometry.");
                         ImGui::Checkbox("GI Dynamic Brightness Filter (Ciemne/Jasne)", &m_rtSettings.giDominanceRatioFilterEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Dwa progi jasności (0..1) z płynną strefą średnią: tłumi szpilki w cieniach i chroni mocne światło przed ściąganiem w dół.");
@@ -713,7 +723,17 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "17: GI Confidence (continuous red=low, green=high)",
                             "18: GI Mean Luminance (log)",
                             "19: GI Temporal Variance (log)",
-                            "20: GI Relative Uncertainty (log)"
+                            "20: GI Relative Uncertainty (log)",
+                            "21: SVGF Firefly Rejection (white=preserved)",
+                            "22: SVGF Incident Light Distribution (12 Lobes)",
+                            "23: Radiance-Bearing Paths per Frame (log)",
+                            "24: Direction Agreement (red = mismatch, green = match, blue = confidence)",
+                            "25: Directional Acceptance (red = reject, green = mix, blue = no evidence/confidence)",
+                            "26: Real First-Hit Path Direction (RGB = world-space direction)",
+                            "27: Real First-Hit Path Stability (temporal path agreement)",
+                            "28: Real First-Hit Path Support (fraction of GI samples with valid hits)",
+                            "29: World-Space GI Patch Radiance (log HDR RGB)",
+                            "30: World-Space GI Patch Confidence (sample support)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {

@@ -16,6 +16,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
+#include "restir_gi_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
@@ -26,6 +27,64 @@ layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
+layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
+layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
+layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
+#define imgGiDirectionBins0 imgGiReservoirC
+#define imgGiPathPosition   imgGiReservoirA
+#define imgGiPathNormal     imgGiReservoirB
+layout(set = 1, binding = 34, std430) buffer GiSurfacePatchCache { uint words[]; } giSurfacePatchCache;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 49u;
+const vec3 GI_DIRECTION_LOBES[12] = vec3[](
+ vec3(0.0,0.5257311121,0.8506508084),vec3(0.0,-0.5257311121,0.8506508084),
+ vec3(0.0,0.5257311121,-0.8506508084),vec3(0.0,-0.5257311121,-0.8506508084),
+ vec3(0.5257311121,0.8506508084,0.0),vec3(-0.5257311121,0.8506508084,0.0),
+ vec3(0.5257311121,-0.8506508084,0.0),vec3(-0.5257311121,-0.8506508084,0.0),
+ vec3(0.8506508084,0.0,0.5257311121),vec3(0.8506508084,0.0,-0.5257311121),
+ vec3(-0.8506508084,0.0,0.5257311121),vec3(-0.8506508084,0.0,-0.5257311121));
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0)); // 20 cm world-space surface patches
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+void storeGiSurfacePatch(vec3 worldPos, vec3 worldNormal, vec4 bins[12]) {
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint cellWord = 0u;
+    bool found = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_WORDS_PER_CELL;
+        uint observed = atomicCompSwap(giSurfacePatchCache.words[candidate], 0u, key);
+        if (observed == 0u || observed == key) { cellWord = candidate; found = true; break; }
+    }
+    if (!found) return;
+    // Fixed-point atomics avoid requiring optional floating-point atomic features.
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint w = uint(round(max(bins[lobe].a, 0.0) * 4096.0));
+        if (w == 0u) continue;
+        uint dst = cellWord + 1u + lobe * 4u;
+        atomicAdd(giSurfacePatchCache.words[dst + 0u], uint(round(clamp(bins[lobe].r, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 1u], uint(round(clamp(bins[lobe].g, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 2u], uint(round(clamp(bins[lobe].b, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 3u], w);
+    }
+}
+
+void encodeGiDirection(vec3 direction,out vec4 bins0,out vec4 bins1,out vec4 bins2){
+ vec3 d=normalize(direction);float weights[12];float total=0.0;
+ for(int i=0;i<12;++i){float c=max(dot(d,GI_DIRECTION_LOBES[i]),0.0);weights[i]=pow(c,8.0);total+=weights[i];}
+ float invTotal=1.0/max(total,1e-6);bins0=vec4(0);bins1=vec4(0);bins2=vec4(0);
+ for(int i=0;i<12;++i){float w=weights[i]*invTotal;if(i<4)bins0[i]=w;else if(i<8)bins1[i-4]=w;else bins2[i-8]=w;}
+}
+
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
 
 void addDiagCounter(uint counterIdx, uint value) {
@@ -180,6 +239,12 @@ float d = texelFetch(uDepth, fullPx, 0).r;
 if (d >= 1.0) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
     imageStore(imgGeomCur, px, vec4(0.0, 0.0, -1.0, 0.0));
+    imageStore(imgGiDirectionBins0,px,vec4(0));
+    imageStore(imgGiDirectionBins1,px,vec4(0));
+    imageStore(imgGiDirectionBins2,px,vec4(0));
+    imageStore(imgGiDirectionCount,px,vec4(0));
+    imageStore(imgGiPathPosition,px,vec4(0));
+    imageStore(imgGiPathNormal,px,vec4(0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
@@ -220,6 +285,12 @@ if (dot(N, toCam) < 0.0) N = -N;
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, 0.0));
 if (ubo.rtParams.x < 0.5) {
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, 1.0));
+    imageStore(imgGiDirectionBins0,px,vec4(0));
+    imageStore(imgGiDirectionBins1,px,vec4(0));
+    imageStore(imgGiDirectionBins2,px,vec4(0));
+    imageStore(imgGiDirectionCount,px,vec4(0));
+    imageStore(imgGiPathPosition,px,vec4(0));
+    imageStore(imgGiPathNormal,px,vec4(0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, 1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
@@ -231,6 +302,7 @@ const bool doGI = (pc.u.z & 1u) != 0u;
 const bool doAO = (pc.u.z & 2u) != 0u;
 const bool clampPathFireflies = (pc.u.z & 8u) != 0u;
 const bool useCheckerboard = (pc.u.z & 4u) != 0u;
+const bool doSurfacePatchCache = (pc.u.z & 32u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
 // Checkerboard for GI: skip alternating pixels every other frame (cuts GI ray tracing cost by 50%)
@@ -238,6 +310,12 @@ bool checkerSkip = useCheckerboard && (((px.x + px.y + int(frame)) & 1) != 0);
 if (checkerSkip) {
     // Store -1.0 in alpha as marker for rt_temporal.comp to reconstruct from history/neighbors
     imageStore(imgS, px, vec4(0.0, 0.0, 0.0, -1.0));
+    imageStore(imgGiDirectionBins0,px,vec4(0));
+    imageStore(imgGiDirectionBins1,px,vec4(0));
+    imageStore(imgGiDirectionBins2,px,vec4(0));
+    imageStore(imgGiDirectionCount,px,vec4(0));
+    imageStore(imgGiPathPosition,px,vec4(0));
+    imageStore(imgGiPathNormal,px,vec4(0));
     if (debugRawGi) imageStore(imgRawGi, px, vec4(0.0, 0.0, 0.0, -1.0));
     if (debugCaustics) imageStore(imgCaustics, px, vec4(0.0));
     return;
@@ -259,6 +337,13 @@ float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
 vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
+GiReservoir pixelReservoir = emptyGiReservoir();
+vec4 giPatchBins[12];
+for (int patchBin = 0; patchBin < 12; ++patchBin) giPatchBins[patchBin] = vec4(0.0);
+vec4 giDirectionBins0=vec4(0),giDirectionBins1=vec4(0),giDirectionBins2=vec4(0);
+float giDirectionSampleCount=0.0;
+vec3 giPathPosition=vec3(0.0),giPathNormal=vec3(0.0);
+float giPathEnergy=0.0,giPathCount=0.0;
 vec3 causticRadiance = vec3(0.0);
 float causticHitCount = 0.0;
 float occ = 0.0;
@@ -284,6 +369,9 @@ for (int s = 0; s < samples; ++s) {
     vec3 rayNormal = N;
     vec3 pathRadiance = vec3(0.0);
     vec3 nextDir = sampleCosineHemisphere(rayNormal, u0);
+    vec3 primaryIncomingDirection = normalize(nextDir);
+    vec3 sampleFirstHitPosition=vec3(0.0),sampleFirstHitNormal=vec3(0.0);
+    bool sampleHasFirstHit=false;
     // Store incident diffuse irradiance only; the PBR pass applies the primary material BRDF after denoising.
     vec3 throughput = vec3(1.0);
 
@@ -300,6 +388,7 @@ for (int s = 0; s < samples; ++s) {
 
         if (b == 0) {
             firstHitDistSum += found ? min(hitDistance, AO_DISTANCE) : AO_DISTANCE;
+            if(found){sampleFirstHitPosition=hitPosition;sampleFirstHitNormal=normalize(hitNormal);sampleHasFirstHit=true;}
             firstHitCount += 1.0;
         }
         // Ignore near-zero grazing self-intersections; fade AO smoothly with hit distance.
@@ -363,22 +452,46 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
         vec3 hitDiffuseAlbedo = hitAlbedo * (1.0 - hitMetallic);
 
-        // Keep directly evaluated hit lighting intact. The world cache supplies
-        // an additional indirect estimate only at the final requested bounce.
+        // Evaluate direct illumination at this hit point
         vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
+
+        // Radiance Cache (SHaRC / NRC principles):
+        // World Radiance Cache provides the multi-bounce indirect illumination tail.
+        // The cache REPLACES further explicit bounce tracing to prevent double-counting.
+        bool wrcEnabled = (pc.u.z & 16u) != 0u;
         bool wrcFirstBounce = (pc.u.z & (1u << 13)) != 0u;
         float wrcBounceIntensity = max(pc.f.z, 0.0);
-        bool useWrcOnThisBounce = wrcFirstBounce ? (b == 0) : (b == bounces - 1);
-        if ((pc.u.z & 16u) != 0u && useWrcOnThisBounce && hitDistance > 0.10) {
-            diagValues[10]++;
-            vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
-            if (cachedRadiance.a > 0.0) {
-                float bounceWeight = (b == bounces - 1) ? 0.85 : 0.55;
-                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
-                                (bounceWeight * wrcBounceIntensity * cachedRadiance.a);
-                diagValues[8]++;
+
+        if (wrcEnabled && hitDistance > 0.10) {
+            bool isTerminalBounce = (b == bounces - 1);
+            bool shouldQueryWrc = isTerminalBounce || (wrcFirstBounce && b == 0);
+
+            if (shouldQueryWrc) {
+                diagValues[10]++;
+                vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
+                if (cachedRadiance.a > 0.0) {
+                    pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
+                                    (wrcBounceIntensity * cachedRadiance.a);
+                    diagValues[8]++;
+                    // When WRC is queried on bounce 0 (fast 1-bounce + cache mode), terminate path:
+                    // do NOT trace downstream bounces to prevent double-counting indirect energy.
+                    if (wrcFirstBounce && b == 0) {
+                        break;
+                    }
+                }
+            } else if (b >= 1) {
+                // Early path termination: if intermediate bounce has mature, high-confidence cache,
+                // query cache tail and terminate path early to save rays and eliminate high-bounce variance.
+                vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
+                if (cachedRadiance.a >= 0.90) {
+                    diagValues[10]++;
+                    pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
+                                    (wrcBounceIntensity * cachedRadiance.a);
+                    diagValues[8]++;
+                    break;
+                }
             }
         }
 
@@ -510,8 +623,47 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
             throughput /= p;
         }
     }
-    gi += clampPathFireflies ? clampFirefly(pathRadiance, 256.0) : pathRadiance;
+    vec3 sampleRadiance = clampPathFireflies ? clampFirefly(pathRadiance, 256.0) : pathRadiance;
+    gi += sampleRadiance;
+    float sampleEnergy = max(dot(sampleRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+    if (sampleEnergy > 1e-5) {
+        vec4 sampleBins0,sampleBins1,sampleBins2;
+        encodeGiDirection(primaryIncomingDirection,sampleBins0,sampleBins1,sampleBins2);
+        for (int patchBin = 0; patchBin < 12; ++patchBin) {
+            float directionWeight = patchBin < 4 ? sampleBins0[patchBin] :
+                                    (patchBin < 8 ? sampleBins1[patchBin - 4] : sampleBins2[patchBin - 8]);
+            giPatchBins[patchBin] += vec4(sampleRadiance * directionWeight, directionWeight);
+        }
+        giDirectionBins0+=sampleBins0*sampleEnergy;
+        giDirectionBins1+=sampleBins1*sampleEnergy;
+        giDirectionBins2+=sampleBins2*sampleEnergy;
+        giDirectionSampleCount+=1.0;
+    }
+    if (sampleEnergy > 1e-6) {
+        vec3 hitPos = sampleHasFirstHit ? sampleFirstHitPosition : (P + primaryIncomingDirection * 10000.0);
+        vec3 hitNorm = sampleHasFirstHit ? sampleFirstHitNormal : (-primaryIncomingDirection);
+        vec3 v = hitPos - P;
+        float d = length(v);
+        vec3 omega = (d > 1e-4) ? (v / d) : primaryIncomingDirection;
+        float cosTheta0 = max(dot(N, omega), 0.0);
+        float targetPdf = sampleEnergy * cosTheta0;
+        float w = sampleEnergy;
+
+        updateGiReservoir(pixelReservoir, hitPos, hitNorm,
+                          sampleRadiance, targetPdf, w, 1u, rand1());
+
+        giPathEnergy += sampleEnergy;
+        giPathCount += 1.0;
+        giPathPosition = pixelReservoir.xs;
+        giPathNormal = pixelReservoir.ns;
+    }
 }
+
+finalizeGiReservoir(pixelReservoir);
+
+// Consolidate all successful paths from this pixel into a world-space patch
+// keyed by the primary receiving surface, retaining separate directional lobes.
+if (doGI && doSurfacePatchCache) storeGiSurfacePatch(P, N, giPatchBins);
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
@@ -521,6 +673,20 @@ float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount
 float initHitDistFactor = clamp(avgFirstHitDist / AO_DISTANCE, 0.15, 1.0);
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, packGiGeomW(0.0, initHitDistFactor)));
 imageStore(imgS, px, vec4(gi, vis));
+
+// ReSTIR GI initial reservoir export:
+// Reservoir A: xyz = xs, w = targetPdf
+// Reservoir B: x = packed ns, y = wSum, z = M, w = flags
+// Reservoir C: rgb = Lo, a = W
+vec4 resA, resB, resC;
+packGiReservoir(pixelReservoir, resA, resB, resC);
+imageStore(imgGiReservoirA, px, resA);
+imageStore(imgGiReservoirB, px, resB);
+imageStore(imgGiReservoirC, px, resC);
+
+imageStore(imgGiDirectionBins1, px, giDirectionBins1 * invSamples);
+imageStore(imgGiDirectionBins2, px, giDirectionBins2 * invSamples);
+imageStore(imgGiDirectionCount, px, vec4(giDirectionSampleCount, 0, 0, 0));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;

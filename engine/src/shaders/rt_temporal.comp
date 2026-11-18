@@ -64,6 +64,26 @@ layout(set = 1, binding = 12) uniform sampler2D uMotion;           // in: screen
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: mu1, mu2, variance, filtered_var
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
+#include "restir_gi_common.glsl"
+
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
+layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
+layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
+layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 26, rgba32f) uniform image2D imgGiReservoirCPrev;
+layout(set = 1, binding = 27, rgba16f) uniform image2D imgGiDirectionBinsPrev1;
+layout(set = 1, binding = 28, rgba16f) uniform image2D imgGiDirectionBinsPrev2;
+layout(set = 1, binding = 29, rgba16f) uniform image2D imgGiDirectionCountPrev;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
+layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiReservoirAPrev;
+layout(set = 1, binding = 33, rgba32f) uniform image2D imgGiReservoirBPrev;
+
+layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCurrent { uint words[]; } giSurfacePatchCurrent;
+layout(set = 1, binding = 35, std430) buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_CURRENT_STRIDE = 49u;
+const uint GI_SURFACE_PATCH_HISTORY_STRIDE = 51u;
 
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
@@ -192,6 +212,75 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
 
 
 
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0));
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+void updateGiSurfacePatchHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uint frameIndex) {
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint currentWord = 0u; bool currentFound = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_CURRENT_STRIDE;
+        uint candidateKey = giSurfacePatchCurrent.words[candidate];
+        if (candidateKey == key) { currentWord = candidate; currentFound = true; break; }
+        if (candidateKey == 0u) break;
+    }
+    if (!currentFound) return;
+
+    uint historyWord = 0u; bool historyFound = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_HISTORY_STRIDE;
+        uint observed = atomicCompSwap(giSurfacePatchHistory.words[candidate], 0u, key);
+        if (observed == 0u || observed == key) { historyWord = candidate; historyFound = true; break; }
+    }
+    if (!historyFound) return;
+
+    // One invocation per world-space patch owns the temporal update. Other pixels
+    // sharing this patch see the frame stamp and leave the persistent record untouched.
+    uint frameStamp = frameIndex + 1u;
+    uint previousFrame = atomicExchange(giSurfacePatchHistory.words[historyWord + 1u], frameStamp);
+    if (previousFrame == frameStamp) return;
+
+    // Expire patches that have not been observed for two seconds at 60 Hz.
+    // A camera can leave and later revisit a surface without reusing stale illumination.
+    bool expired = previousFrame != 0u && (frameStamp - previousFrame) > 120u;
+    if (giSurfacePatchHistory.words[historyWord + 2u] != lightingEpoch || expired) {
+        for (uint i = 0u; i < 48u; ++i) giSurfacePatchHistory.words[historyWord + 3u + i] = 0u;
+        giSurfacePatchHistory.words[historyWord + 2u] = lightingEpoch;
+    }
+
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint src = currentWord + 1u + lobe * 4u;
+        uint dst = historyWord + 3u + lobe * 4u;
+        uint currentWeight = giSurfacePatchCurrent.words[src + 3u];
+        uint oldWeight = giSurfacePatchHistory.words[dst + 3u];
+        if (currentWeight == 0u) {
+            giSurfacePatchHistory.words[dst + 3u] = uint(float(oldWeight) * 0.985);
+            continue;
+        }
+        vec3 currentMeanFixed = vec3(giSurfacePatchCurrent.words[src],
+                                     giSurfacePatchCurrent.words[src + 1u],
+                                     giSurfacePatchCurrent.words[src + 2u]) * (4096.0 / float(currentWeight));
+        vec3 oldMeanFixed = vec3(giSurfacePatchHistory.words[dst],
+                                 giSurfacePatchHistory.words[dst + 1u],
+                                 giSurfacePatchHistory.words[dst + 2u]);
+        float blend = oldWeight == 0u ? 1.0 : 0.22;
+        vec3 newMeanFixed = mix(oldMeanFixed, currentMeanFixed, blend);
+        giSurfacePatchHistory.words[dst] = uint(round(clamp(newMeanFixed.r, 0.0, 8192.0)));
+        giSurfacePatchHistory.words[dst + 1u] = uint(round(clamp(newMeanFixed.g, 0.0, 8192.0)));
+        giSurfacePatchHistory.words[dst + 2u] = uint(round(clamp(newMeanFixed.b, 0.0, 8192.0)));
+        uint boundedCurrentWeight = min(currentWeight, 8u * 4096u);
+        uint decayedOldWeight = uint(float(oldWeight) * 0.985);
+        giSurfacePatchHistory.words[dst + 3u] = min(decayedOldWeight + boundedCurrentWeight, 64u * 4096u);
+    }
+}
+
 void addDiagCounter(uint counterIdx, uint value) {
     uint sgSum = subgroupAdd(value);
     if (subgroupElect() && sgSum != 0u) {
@@ -224,6 +313,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
         imageStore(imgMomentsCur, px, vec4(0.0));
+        imageStore(imgGiDirectionBins1, px, vec4(0.0));
+        imageStore(imgGiDirectionBins2, px, vec4(0.0));
+        imageStore(imgGiDirectionCount, px, vec4(0.0));
+        imageStore(imgGiReservoirA, px, vec4(0.0));
+        imageStore(imgGiReservoirB, px, vec4(0.0));
+        imageStore(imgGiReservoirC, px, vec4(0.0));
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
 
@@ -248,6 +343,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     // depth sample is nearest-neighbour, but its integer texel centre must not
     // replace the GI pixel's continuous screen-space centre during reprojection.
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    rngInit(uvec2(px), pc.u.w);
+
+    // Accumulate current-frame path samples into persistent world-space receiver patches.
+    // This update runs before temporal bypass/debug exits, so the patch history is independent
+    // of the pixel-space denoiser's enable state.
+    updateGiSurfacePatchHistory(P, N, pc.u.z, pc.u.w);
 
     // Evaluate cache diagnostics before temporal work, but do not return here:
     // cache writes must still run while a cache-hit debug view is selected.
@@ -296,7 +397,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
     float histHitDist = 0.0;
+    vec4 histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
     float wSum = 0.0;
+    ivec2 bestPrevTap = ivec2(0);
+    float bestPrevWeight = -1.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
     ivec2 fullMotionPx = min(ivec2(curUV * vec2(fullMotionSize)), fullMotionSize - 1);
@@ -334,10 +438,91 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histMoments += w * imageLoad(imgMomentsPrev, tp);
             histLen     += w * unpackGiHistoryLen(g.w);
             histHitDist += w * unpackGiHitDistFactor(g.w);
+            histDirectionBins1+=w*imageLoad(imgGiDirectionBinsPrev1,tp);
+            histDirectionBins2+=w*imageLoad(imgGiDirectionBinsPrev2,tp);
+            histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
+            if (w > bestPrevWeight) {
+                bestPrevWeight = w;
+                bestPrevTap = tp;
+            }
             wSum        += w;
         }
+    }
 
+    // =========================================================================
+    // ReSTIR GI: Temporal Resampling (RIS)
+    // =========================================================================
+    vec4 curResA = imageLoad(imgGiReservoirA, px);
+    vec4 curResB = imageLoad(imgGiReservoirB, px);
+    vec4 curResC = imageLoad(imgGiReservoirC, px);
+    GiReservoir curRes = unpackGiReservoir(curResA, curResB, curResC);
 
+    GiReservoir prevRes = emptyGiReservoir();
+    if (isHistValid && wSum > 0.05 && bestPrevWeight > 0.0) {
+        vec4 prevResA = imageLoad(imgGiReservoirAPrev, bestPrevTap);
+        vec4 prevResB = imageLoad(imgGiReservoirBPrev, bestPrevTap);
+        vec4 prevResC = imageLoad(imgGiReservoirCPrev, bestPrevTap);
+        prevRes = unpackGiReservoir(prevResA, prevResB, prevResC);
+    }
+
+    GiReservoir resampledRes = emptyGiReservoir();
+    vec3 resampledRadiance = raw.rgb;
+    bool isCheckerSkipped = (raw.a < -0.5);
+
+    if (isCheckerSkipped) {
+        if (prevRes.flags != 0u && prevRes.M > 0u) {
+            resampledRes = prevRes;
+            clampGiReservoirM(resampledRes, 24u);
+            finalizeGiReservoir(resampledRes);
+            if (resampledRes.targetPdf > 1e-6) {
+                float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+                float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+                resampledRadiance = resampledRes.Lo * effWeight;
+            }
+        }
+    } else {
+        // 1. Current sample into reservoir
+        if (curRes.flags != 0u && curRes.M > 0u) {
+            resampledRes = curRes;
+        }
+
+        // 2. Stream historical sample into reservoir
+        if (prevRes.flags != 0u && prevRes.M > 0u && prevRes.W > 0.0) {
+            uint M_prev = min(prevRes.M, 24u);
+            float pHatReuse = evalGiTargetPdf(prevRes.Lo, prevRes.xs, prevRes.ns, P, N);
+            if (pHatReuse > 1e-6) {
+                float wCand = pHatReuse * prevRes.W * float(M_prev);
+                resampledRes.wSum += wCand;
+                resampledRes.M += M_prev;
+                if (rand1() * resampledRes.wSum < wCand) {
+                    resampledRes.xs = prevRes.xs;
+                    resampledRes.ns = prevRes.ns;
+                    resampledRes.Lo = prevRes.Lo;
+                    resampledRes.targetPdf = pHatReuse;
+                    resampledRes.flags = prevRes.flags;
+                }
+            }
+        }
+
+        clampGiReservoirM(resampledRes, 24u);
+        finalizeGiReservoir(resampledRes);
+
+        if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0 && resampledRes.targetPdf > 1e-6) {
+            float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+            float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+            resampledRadiance = resampledRes.Lo * effWeight;
+        }
+    }
+
+    // Export resampled reservoir for spatial reuse / next frame
+    vec4 outResA, outResB, outResC;
+    packGiReservoir(resampledRes, outResA, outResB, outResC);
+    imageStore(imgGiReservoirA, px, outResA);
+    imageStore(imgGiReservoirB, px, outResB);
+    imageStore(imgGiReservoirC, px, outResC);
+
+    if (!isCheckerSkipped && resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0) {
+        raw.rgb = resampledRadiance;
     }
 
     float maxHist = max(pc.f.x, 1.0);
@@ -347,7 +532,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4 result;
     float newLen;
     float finalHitDistFactor = curHitDistFactor;
-    bool isCheckerSkipped = (raw.a < -0.5);
     // Pre-temporal spatial jitter is disabled to prevent frame-to-frame checkerboard variance fighting.
     // Pure temporal accumulation integrates raw rays smoothly without injecting spatial noise.
 
@@ -647,9 +831,19 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Tighten the dark-surface floor while keeping the threshold proportional
         // to the local robust spread. The old fixed offsets were large enough to
         // leave visible low-energy fireflies on otherwise uniform walls.
-        float fireflySigma = max(robustSigma * 2.0, localFireflyScale * 0.12 + 0.005);
+        // Young history cannot reliably distinguish a recurring bright surface
+        // from a one-frame Monte Carlo spike. In that regime, lean slightly more
+        // on the robust current-frame neighborhood; mature history restores the
+        // original wider tolerance so converged HDR detail is not clipped.
+        float historyConfidence = (wSum > 0.25)
+            ? smoothstep(1.0, 4.0, histLen) * smoothstep(0.25, 0.75, wSum)
+            : 0.0;
+        float fireflySigmaScale = mix(1.75, 2.0, historyConfidence);
+        float fireflySigma = max(robustSigma * fireflySigmaScale,
+                                 localFireflyScale * 0.12 + 0.005);
         float fireflyRelativeGate = baseline * 1.9 + max(0.012, baseline * 0.12);
-        float robustFireflyLimit = medianLum + max(2.5 * robustSigma,
+        float robustSigmaScale = mix(2.0, 2.5, historyConfidence);
+        float robustFireflyLimit = medianLum + max(robustSigmaScale * robustSigma,
                                                    medianLum * 1.10 + 0.012);
         float fireflyLimit = min(m1Y.x + 2.75 * fireflySigma,
                                  robustFireflyLimit);
@@ -660,12 +854,17 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
                                  (rawYCoCg.x > max(darkFloor * 3.0, 0.045));
             bool outlierSpike = (rawYCoCg.x > fireflyLimit) &&
                                 (rawYCoCg.x > fireflyRelativeGate);
+            // A pixel inside a neighborhood-dominant bright tier is part of a
+            // coherent high-energy region, not an isolated firefly. Preserve its
+            // raw radiance even when reprojection history has not converged yet.
             realRawFirefly = (loneDarkSpike || outlierSpike) &&
+                             !inBrightZone &&
                              !historySupportsCurrent && !cacheSupportsBright &&
                              !spatiallySupportedBright;
         } else {
             realRawFirefly = (rawYCoCg.x > robustFireflyLimit) &&
                              (rawYCoCg.x > fireflyRelativeGate) &&
+                             !inBrightZone &&
                              !historySupportsCurrent && !cacheSupportsBright &&
                              !spatiallySupportedBright;
         }
@@ -752,10 +951,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
 
             clampMaxY.x = max(clampMaxY.x, targetCeiling);
 
-            // Bit 0: "GI Patch Firefly Clamp" (GI Temporal Neighborhood Clamp)
-            if ((pc.u.y & 1u) != 0u) {
-                // In static scenes, never clamp converged history downward due to single-frame ray misses
-                float lowerBound = (motionPixels > 0.5 || histLen < 2.0) ? clampMinY.x : min(clampMinY.x, histY.x * 0.5);
+            // Bit 0: "GI Patch Firefly Clamp" (GI Temporal Neighborhood Clamp).
+            // Only clamp when reprojection/history may be stale. Mature history in a
+            // static view must survive isolated current-frame ray misses unchanged.
+            bool historyMayBeStale = (motionPixels > 0.5) || (histLen < 2.0);
+            if ((pc.u.y & 1u) != 0u && historyMayBeStale) {
+                float lowerBound = (motionPixels > 0.5 || histLen < 2.0)
+                    ? clampMinY.x : min(clampMinY.x, histY.x * 0.5);
                 float clampedHistY = clamp(histY.x, lowerBound, clampMaxY.x);
                 hist.rgb *= clampedHistY / max(histY.x, 1e-4);
             }
@@ -779,6 +981,24 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             outMoments = vec4(curSampleMoments, spatialVar, spatialVar);
         }
     }
+
+    // Reproject direction bins 1, 2 and count
+    vec4 cur1=imageLoad(imgGiDirectionBins1,px);
+    vec4 cur2=imageLoad(imgGiDirectionBins2,px);
+    vec4 curCount=imageLoad(imgGiDirectionCount,px);
+    vec4 prev1=(wSum>0.05)?histDirectionBins1/wSum:vec4(0);
+    vec4 prev2=(wSum>0.05)?histDirectionBins2/wSum:vec4(0);
+    vec4 prevCount=(wSum>0.05)?histDirectionCount/wSum:vec4(0);
+    vec4 out1=cur1,out2=cur2,outCount=curCount;
+    if(isCheckerSkipped){out1=prev1;out2=prev2;outCount=prevCount;}
+    else if(wSum>0.05){
+        float alpha=1.0/max(newLen,1.0);
+        out1=mix(prev1,cur1,alpha);out2=mix(prev2,cur2,alpha);
+        outCount=mix(prevCount,curCount,alpha);
+    }
+    imageStore(imgGiDirectionBins1,px,out1);
+    imageStore(imgGiDirectionBins2,px,out2);
+    imageStore(imgGiDirectionCount,px,outCount);
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.

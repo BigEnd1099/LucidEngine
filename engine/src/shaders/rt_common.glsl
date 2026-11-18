@@ -274,8 +274,8 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     vec3 V = -normalize(rayDir);
     float NdotV = max(dot(hitNormal, V), 0.001);
 
-    // Emissive surface: acts as secondary light source
-    vec3 radiance = albedo * (emissive * 6.0) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - rawRoughness * 0.25)) : vec3(0.0));
+    // Emissive surface: acts as secondary light source (scaled identically to pbr.frag and pbr_rt.frag)
+    vec3 radiance = albedo * (emissive * 3.5) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - rawRoughness * 0.25)) : vec3(0.0));
 
     // Microfacet GGX parameters: a is linear roughness, a2 is physical alpha (squared only once)
     float a = max(effRoughness, 0.02);

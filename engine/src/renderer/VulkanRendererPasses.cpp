@@ -1405,6 +1405,10 @@ namespace engine::renderer {
                 rtp.giTemporalFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFilterEnabled;
                 rtp.giHistoryClampEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giHistoryClampEnabled;
                 rtp.giTemporalFireflyFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giTemporalFireflyFilterEnabled;
+                rtp.svgfFireflyFilterStrength = (m_rtSettings.denoiseEnabled && m_rtSettings.svgfFireflyFilterEnabled)
+                    ? std::clamp(m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f) : 0.0f;
+                rtp.svgfDirectionalAtrousEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalAtrousEnabled;
+                rtp.svgfDirectionalPathGuideEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalPathGuideEnabled;
                 rtp.giDominanceRatioFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giDominanceRatioFilterEnabled;
                 rtp.giDarkRatio = m_rtSettings.giDarkRatio;
                 rtp.giBrightRatio = m_rtSettings.giBrightRatio;
@@ -1468,6 +1472,11 @@ namespace engine::renderer {
                     ? static_cast<double>(m_rtSettings.spatialStrength) : 0.0);
                 rtProfiler.recordMetric("rtSvgfEnabled",
                     m_rtSettings.denoiseEnabled && m_rtSettings.svgfEnabled ? 1.0 : 0.0);
+                rtProfiler.recordMetric("rtSvgfFireflyFilterStrength",
+                    (m_rtSettings.denoiseEnabled && m_rtSettings.svgfFireflyFilterEnabled)
+                        ? std::clamp(m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f) : 0.0f);
+                rtProfiler.recordMetric("rtSvgfDirectionalAtrousEnabled",
+                    (m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalAtrousEnabled) ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiCheckerboard", m_rtSettings.giCheckerboard ? 1.0 : 0.0);
                 rtProfiler.recordMetric("rtGiHistoryValid", 0.0);
                 rtProfiler.recordMetric("rtReflectionHistoryValid", 0.0);
