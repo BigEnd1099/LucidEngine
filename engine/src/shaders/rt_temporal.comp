@@ -854,7 +854,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     bool currentPathValid = curPathPosition.w > 1e-6 && curPathNormal.z > 0.0;
     bool historyPathValid = wSum > 0.05 && histPathBestScore > 0.0 &&
                             histPathPositionBest.w > 1e-6 && histPathNormalBest.z > 0.0;
-    vec4 outPathPosition=curPathPosition,outPathNormal=curPathNormal;
+    // Keep the current frame's measured path as the guide whenever it exists.
+    // Temporal history is evidence for stability, not a competing direction
+    // reservoir: weighting old paths by history length made debug mode 26 drift
+    // toward stale directions and made per-frame support appear accumulated.
+    vec4 outPathPosition=vec4(0),outPathNormal=vec4(0);
     float currentSupport=clamp(curPathNormal.z,0.0,1.0);
     float historyStability=historyPathValid?clamp(histPathNormalBest.w,0.0,1.0):0.0;
     float pathAgreement=0.0;
@@ -875,42 +879,32 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     }
 
     if(isCheckerSkipped){
+        // No current trace was made for this checkerboard pixel. Reuse the
+        // geometry-validated historical record without claiming new support.
         if(historyPathValid){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
-        else {outPathPosition=vec4(0);outPathNormal=vec4(0);}
-        // A checkerboard-skipped pixel has no new measurement: preserve the
-        // reprojection confidence rather than manufacturing fresh evidence.
-    }else if(wSum>0.05){
-        float currentMass=max(curPathPosition.w,0.0);
-        float historyMass=max(histPathEnergy,0.0)*max(histLen,1.0);
-        float totalMass=currentMass+historyMass;
-        bool currentWins=currentPathValid && (historyMass<=0.0 ||
-            ignTemporal(vec2(px),pc.u.w)<currentMass/max(totalMass,1e-6));
-        if(currentWins){outPathPosition=curPathPosition;outPathNormal=curPathNormal;}
-        else if(historyPathValid){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
-        else if(currentPathValid){outPathPosition=curPathPosition;outPathNormal=curPathNormal;}
-        else {outPathPosition=vec4(0);outPathNormal=vec4(0);}
-
-        if(currentPathValid && historyPathValid){
+    }else if(currentPathValid){
+        // Modes 26 and 28 now describe this frame's actual traced paths.
+        // History affects only .w (stability), never the measured direction or
+        // per-frame support in .z.
+        outPathPosition=curPathPosition;
+        outPathNormal=curPathNormal;
+        if(historyPathValid){
             // Agreement is a hard gate: a different first-hit path cannot
-            // inherit the confidence of the previous reservoir.
+            // inherit the confidence of the previous frame.
             float stabilityAlpha=clamp(0.20+0.35*currentSupport,0.20,0.55);
             outPathNormal.w=mix(historyStability,currentSupport,stabilityAlpha)*pathAgreement;
-        }else if(currentPathValid){
+        }else{
             // A newly observed path starts provisional; repeated matching
             // measurements are required before it becomes trusted.
             outPathNormal.w=currentSupport*0.20;
-        }else if(historyPathValid){
-            outPathNormal.w=historyStability*0.995;
-        }else{
-            outPathNormal.w=0.0;
         }
-    }else if(currentPathValid){
-        // First frame / rejected reprojection: keep the path as provisional
-        // evidence. It can gain confidence only after a later matching trace.
-        outPathNormal.w=currentSupport*0.20;
-    }else{
-        outPathPosition=vec4(0);
-        outPathNormal=vec4(0);
+    }else if(historyPathValid){
+        // No radiance-bearing path was measured this frame. Retain the last
+        // valid record with a gentle stability decay, but do not call it new
+        // support (the .z value remains explicitly historical in this fallback).
+        outPathPosition=histPathPositionBest;
+        outPathNormal=histPathNormalBest;
+        outPathNormal.w=historyStability*0.995;
     }
     imageStore(imgGiPathPosition,px,outPathPosition);
     imageStore(imgGiPathNormal,px,outPathNormal);
