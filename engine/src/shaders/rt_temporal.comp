@@ -244,7 +244,10 @@ void updateGiSurfacePatchHistory(vec3 worldPos, vec3 worldNormal, uint lightingE
     uint previousFrame = atomicExchange(giSurfacePatchHistory.words[historyWord + 1u], frameStamp);
     if (previousFrame == frameStamp) return;
 
-    if (giSurfacePatchHistory.words[historyWord + 2u] != lightingEpoch) {
+    // Expire patches that have not been observed for two seconds at 60 Hz.
+    // A camera can leave and later revisit a surface without reusing stale illumination.
+    bool expired = previousFrame != 0u && (frameStamp - previousFrame) > 120u;
+    if (giSurfacePatchHistory.words[historyWord + 2u] != lightingEpoch || expired) {
         for (uint i = 0u; i < 48u; ++i) giSurfacePatchHistory.words[historyWord + 3u + i] = 0u;
         giSurfacePatchHistory.words[historyWord + 2u] = lightingEpoch;
     }
