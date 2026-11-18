@@ -161,6 +161,19 @@ void main() {
             vec4 bins0=imageLoad(imgGiDirectionBins0,px),bins1=imageLoad(imgGiDirectionBins1,px),bins2=imageLoad(imgGiDirectionBins2,px);
             storeDst(px,vec4(giDirectionalDebugColor(bins0,bins1,bins2),1));
             return;
+        } else if (mode == 26u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            if(hitPosition.w<=1e-6||hitNormal.w<=0.0) storeDst(px,vec4(0,0,0,1));
+            else {vec3 source=giWorldPosition(px,size);vec3 direction=normalize(hitPosition.xyz-source);storeDst(px,vec4(direction*0.5+0.5,1));}
+            return;
+        } else if (mode == 27u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            float evidence=(hitPosition.w>1e-6&&hitNormal.w>0.0)?hitNormal.w*unpackGiHistoryLen(gC.w):0.0;
+            float confidence=smoothstep(0.5,2.0,evidence);
+            storeDst(px,vec4(confidence,confidence*confidence,1.0-confidence,1.0));
+            return;
         } else if (mode == 8u) {
             vec4 caustic = imageLoad(imgCaustics, px);
             storeDst(px, vec4(caustic.rgb, 1.0));
