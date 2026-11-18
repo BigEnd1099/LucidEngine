@@ -67,6 +67,7 @@ namespace engine::renderer {
         bool svgfFireflyFilterEnabled{true};
         float svgfFireflyFilterStrength{1.0f};
         bool svgfDirectionalAtrousEnabled{true};
+        bool svgfDirectionalPathGuideEnabled{false};
         bool worldRadianceCacheEnabled{true};
         bool giSurfaceHistoryCacheEnabled{true};
         bool wrcClipmapEnabled{true};
