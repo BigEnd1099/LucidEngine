@@ -298,6 +298,7 @@ const bool doGI = (pc.u.z & 1u) != 0u;
 const bool doAO = (pc.u.z & 2u) != 0u;
 const bool clampPathFireflies = (pc.u.z & 8u) != 0u;
 const bool useCheckerboard = (pc.u.z & 4u) != 0u;
+const bool doSurfacePatchCache = (pc.u.z & 32u) != 0u;
 const int bounces = int(clamp(pc.u.w, 1u, uint(MAX_BOUNCES)));
 
 // Checkerboard for GI: skip alternating pixels every other frame (cuts GI ray tracing cost by 50%)
@@ -446,22 +447,46 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         float hitMetallic = clamp(hit.material.x * hitOrm.b, 0.0, 1.0);
         vec3 hitDiffuseAlbedo = hitAlbedo * (1.0 - hitMetallic);
 
-        // Keep directly evaluated hit lighting intact. The world cache supplies
-        // an additional indirect estimate only at the final requested bounce.
+        // Evaluate direct illumination at this hit point
         vec3 hitRadiance = shadeRtHitEx(hit, hitPosition, hitNormal, hitUv, hitTangent,
                                         dir, true, -1.0, singleLight, singleWeight, bounceLod);
         pathRadiance += throughput * hitRadiance;
+
+        // Radiance Cache (SHaRC / NRC principles):
+        // World Radiance Cache provides the multi-bounce indirect illumination tail.
+        // The cache REPLACES further explicit bounce tracing to prevent double-counting.
+        bool wrcEnabled = (pc.u.z & 16u) != 0u;
         bool wrcFirstBounce = (pc.u.z & (1u << 13)) != 0u;
         float wrcBounceIntensity = max(pc.f.z, 0.0);
-        bool useWrcOnThisBounce = wrcFirstBounce ? (b == 0) : (b == bounces - 1);
-        if ((pc.u.z & 16u) != 0u && useWrcOnThisBounce && hitDistance > 0.10) {
-            diagValues[10]++;
-            vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
-            if (cachedRadiance.a > 0.0) {
-                float bounceWeight = (b == bounces - 1) ? 0.85 : 0.55;
-                pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
-                                (bounceWeight * wrcBounceIntensity * cachedRadiance.a);
-                diagValues[8]++;
+
+        if (wrcEnabled && hitDistance > 0.10) {
+            bool isTerminalBounce = (b == bounces - 1);
+            bool shouldQueryWrc = isTerminalBounce || (wrcFirstBounce && b == 0);
+
+            if (shouldQueryWrc) {
+                diagValues[10]++;
+                vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
+                if (cachedRadiance.a > 0.0) {
+                    pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
+                                    (wrcBounceIntensity * cachedRadiance.a);
+                    diagValues[8]++;
+                    // When WRC is queried on bounce 0 (fast 1-bounce + cache mode), terminate path:
+                    // do NOT trace downstream bounces to prevent double-counting indirect energy.
+                    if (wrcFirstBounce && b == 0) {
+                        break;
+                    }
+                }
+            } else if (b >= 1) {
+                // Early path termination: if intermediate bounce has mature, high-confidence cache,
+                // query cache tail and terminate path early to save rays and eliminate high-bounce variance.
+                vec4 cachedRadiance = sampleWorldRadianceCacheFast(hitPosition, hitNormal);
+                if (cachedRadiance.a >= 0.90) {
+                    diagValues[10]++;
+                    pathRadiance += throughput * hitDiffuseAlbedo * cachedRadiance.rgb *
+                                    (wrcBounceIntensity * cachedRadiance.a);
+                    diagValues[8]++;
+                    break;
+                }
             }
         }
 
@@ -621,7 +646,7 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
 
 // Consolidate all successful paths from this pixel into a world-space patch
 // keyed by the primary receiving surface, retaining separate directional lobes.
-if (doGI) storeGiSurfacePatch(P, N, giPatchBins);
+if (doGI && doSurfacePatchCache) storeGiSurfacePatch(P, N, giPatchBins);
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);
