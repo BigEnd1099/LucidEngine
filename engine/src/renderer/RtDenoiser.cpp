@@ -590,7 +590,7 @@ namespace engine::renderer {
                 bars[i].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             }
             VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 23;
+            dep.imageMemoryBarrierCount = 27;
             dep.pImageMemoryBarriers = bars;
             vkCmdPipelineBarrier2(cmd, &dep);
             m_needsLayoutInit = false;
