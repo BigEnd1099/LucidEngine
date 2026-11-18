@@ -796,10 +796,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
 
             clampMaxY.x = max(clampMaxY.x, targetCeiling);
 
-            // Bit 0: "GI Patch Firefly Clamp" (GI Temporal Neighborhood Clamp)
-            if ((pc.u.y & 1u) != 0u) {
-                // In static scenes, never clamp converged history downward due to single-frame ray misses
-                float lowerBound = (motionPixels > 0.5 || histLen < 2.0) ? clampMinY.x : min(clampMinY.x, histY.x * 0.5);
+            // Bit 0: "GI Patch Firefly Clamp" (GI Temporal Neighborhood Clamp).
+            // Only clamp when reprojection/history may be stale. Mature history in a
+            // static view must survive isolated current-frame ray misses unchanged.
+            bool historyMayBeStale = (motionPixels > 0.5) || (histLen < 2.0);
+            if ((pc.u.y & 1u) != 0u && historyMayBeStale) {
+                float lowerBound = (motionPixels > 0.5 || histLen < 2.0)
+                    ? clampMinY.x : min(clampMinY.x, histY.x * 0.5);
                 float clampedHistY = clamp(histY.x, lowerBound, clampMaxY.x);
                 hist.rgb *= clampedHistY / max(histY.x, 1e-4);
             }
