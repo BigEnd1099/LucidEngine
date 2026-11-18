@@ -165,7 +165,7 @@ namespace engine::renderer {
         std::array<Image, 2> m_imgReflHist{}; // reflection temporal ping-pong
         std::array<Image, 2> m_imgReflGeom{}; // previous-frame primary geometry for reflection reprojection
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
-        std::array<std::array<Image, 2>, 2> m_giDirectionBins{}; // six-lobe incident-radiance distribution, ping-ponged per frame
+        std::array<std::array<Image, 4>, 2> m_giDirectionBins{}; // 12 directional energy lobes + independent valid-path count, ping-ponged per frame
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
         VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
