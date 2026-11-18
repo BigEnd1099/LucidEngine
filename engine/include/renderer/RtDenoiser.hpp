@@ -37,6 +37,7 @@ namespace engine::renderer {
             bool      giTemporalFireflyFilterEnabled{true};
             float     svgfFireflyFilterStrength{1.0f};
             bool      svgfDirectionalAtrousEnabled{true};
+            bool      svgfDirectionalPathGuideEnabled{false};
             bool      giDominanceRatioFilterEnabled{true};
             float     giDarkRatio{0.15f};
             float     giBrightRatio{0.80f};
@@ -166,6 +167,8 @@ namespace engine::renderer {
         std::array<Image, 2> m_imgReflGeom{}; // previous-frame primary geometry for reflection reprojection
         std::array<Image, 2> m_moments{};     // SVGF: moments (mu1, mu2, variance, filtered_var)
         std::array<std::array<Image, 4>, 2> m_giDirectionBins{}; // 12 directional energy lobes + independent valid-path count, ping-ponged per frame
+        std::array<Image, 2> m_giPathPosition{}; // weighted-reservoir first-hit world position + total path energy
+        std::array<Image, 2> m_giPathNormal{};   // selected first-hit normal + valid path count
 
         VkBuffer m_diagnosticsBuffer{VK_NULL_HANDLE};
         VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
