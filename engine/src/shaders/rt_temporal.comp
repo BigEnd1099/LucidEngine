@@ -64,10 +64,14 @@ layout(set = 1, binding = 12) uniform sampler2D uMotion;           // in: screen
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: mu1, mu2, variance, filtered_var
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
-layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBinsA;
-layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBinsB;
-layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBinsPrevA;
-layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionBinsPrevB;
+layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBins0;
+layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
+layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
+layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 26, rgba16f) uniform image2D imgGiDirectionBinsPrev0;
+layout(set = 1, binding = 27, rgba16f) uniform image2D imgGiDirectionBinsPrev1;
+layout(set = 1, binding = 28, rgba16f) uniform image2D imgGiDirectionBinsPrev2;
+layout(set = 1, binding = 29, rgba16f) uniform image2D imgGiDirectionCountPrev;
 
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
@@ -228,8 +232,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
         imageStore(imgMomentsCur, px, vec4(0.0));
-        imageStore(imgGiDirectionBinsA, px, vec4(0.0));
-        imageStore(imgGiDirectionBinsB, px, vec4(0.0));
+        imageStore(imgGiDirectionBins0,px,vec4(0));
+        imageStore(imgGiDirectionBins1,px,vec4(0));
+        imageStore(imgGiDirectionBins2,px,vec4(0));
+        imageStore(imgGiDirectionCount,px,vec4(0));
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
 
@@ -302,8 +308,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
     float histHitDist = 0.0;
-    vec4 histDirectionBinsA = vec4(0.0);
-    vec4 histDirectionBinsB = vec4(0.0);
+    vec4 histDirectionBins0=vec4(0),histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -342,8 +347,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histMoments += w * imageLoad(imgMomentsPrev, tp);
             histLen     += w * unpackGiHistoryLen(g.w);
             histHitDist += w * unpackGiHitDistFactor(g.w);
-            histDirectionBinsA += w * imageLoad(imgGiDirectionBinsPrevA, tp);
-            histDirectionBinsB += w * imageLoad(imgGiDirectionBinsPrevB, tp);
+            histDirectionBins0+=w*imageLoad(imgGiDirectionBinsPrev0,tp);
+            histDirectionBins1+=w*imageLoad(imgGiDirectionBinsPrev1,tp);
+            histDirectionBins2+=w*imageLoad(imgGiDirectionBinsPrev2,tp);
+            histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
             wSum        += w;
         }
 
@@ -805,25 +812,23 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
     }
 
-    // Reproject the six-lobe incident-radiance distribution using exactly the
-    // same geometry-accepted taps as GI radiance. Accumulate each lobe separately:
-    // opposing and simultaneous light directions must not cancel into one vector.
-    vec4 currentBinsA = imageLoad(imgGiDirectionBinsA, px);
-    vec4 currentBinsB = imageLoad(imgGiDirectionBinsB, px);
-    vec4 previousBinsA = (wSum > 0.05) ? (histDirectionBinsA / wSum) : vec4(0.0);
-    vec4 previousBinsB = (wSum > 0.05) ? (histDirectionBinsB / wSum) : vec4(0.0);
-    vec4 resolvedBinsA = currentBinsA;
-    vec4 resolvedBinsB = currentBinsB;
-    if (isCheckerSkipped) {
-        resolvedBinsA = previousBinsA;
-        resolvedBinsB = previousBinsB;
-    } else if (wSum > 0.05) {
-        float directionAlpha = 1.0 / max(newLen, 1.0);
-        resolvedBinsA = mix(previousBinsA, currentBinsA, directionAlpha);
-        resolvedBinsB = mix(previousBinsB, currentBinsB, directionAlpha);
+    // Reproject all 12 energy lobes and the independent valid-path count using
+    // the same geometry-accepted taps as GI. Count remains samples/frame.
+    vec4 cur0=imageLoad(imgGiDirectionBins0,px),cur1=imageLoad(imgGiDirectionBins1,px);
+    vec4 cur2=imageLoad(imgGiDirectionBins2,px),curCount=imageLoad(imgGiDirectionCount,px);
+    vec4 prev0=(wSum>0.05)?histDirectionBins0/wSum:vec4(0);
+    vec4 prev1=(wSum>0.05)?histDirectionBins1/wSum:vec4(0);
+    vec4 prev2=(wSum>0.05)?histDirectionBins2/wSum:vec4(0);
+    vec4 prevCount=(wSum>0.05)?histDirectionCount/wSum:vec4(0);
+    vec4 out0=cur0,out1=cur1,out2=cur2,outCount=curCount;
+    if(isCheckerSkipped){out0=prev0;out1=prev1;out2=prev2;outCount=prevCount;}
+    else if(wSum>0.05){
+        float alpha=1.0/max(newLen,1.0);
+        out0=mix(prev0,cur0,alpha);out1=mix(prev1,cur1,alpha);
+        out2=mix(prev2,cur2,alpha);outCount=mix(prevCount,curCount,alpha);
     }
-    imageStore(imgGiDirectionBinsA, px, resolvedBinsA);
-    imageStore(imgGiDirectionBinsB, px, resolvedBinsB);
+    imageStore(imgGiDirectionBins0,px,out0);imageStore(imgGiDirectionBins1,px,out1);
+    imageStore(imgGiDirectionBins2,px,out2);imageStore(imgGiDirectionCount,px,outCount);
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.
