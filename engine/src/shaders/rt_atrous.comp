@@ -232,12 +232,12 @@ void main() {
         vec4 centerBinsB = imageLoad(imgGiDirectionBinsB, px);
         float centerHistory = unpackGiHistoryLen(gC.w);
         if (pc.u.x == 23u) {
-            float effectiveSamples = centerBinsB.z * max(centerHistory, 1.0);
-            float confidence = smoothstep(0.5, 2.0, effectiveSamples);
-            // Match the exact confidence curve used by the directional filter.
-            // Black means no radiance-bearing directional evidence; white means
-            // the sample-count gate is fully open.
-            storeDst(px, vec4(vec3(confidence), 1.0));
+            // Show the temporally averaged number of radiance-bearing paths per
+            // frame, not historyLen * count: the latter saturates almost immediately
+            // and hides whether SPP=1 or SPP=16 is actually being recorded.
+            float samplesPerFrame = max(centerBinsB.z, 0.0);
+            float t = log2(1.0 + samplesPerFrame) / log2(17.0);
+            storeDst(px, vec4(vec3(clamp(t, 0.0, 1.0)), 1.0));
             return;
         }
 
@@ -263,7 +263,12 @@ void main() {
                 float factor = giDirectionalFilterFactor(centerBinsA, centerBinsB,
                     neighborBinsA, neighborBinsB, centerHistory, unpackGiHistoryLen(gQ.w),
                     overlap, confidence);
-                float metric = (pc.u.x == 24u) ? overlap : factor;
+                // Mode 24 expands the high-overlap range where six broad lobes
+                // tend to cluster, making small but systematic differences visible.
+                // Mode 25 visualizes rejected neighbor weight (black = no rejection).
+                float metric = (pc.u.x == 24u)
+                    ? clamp((1.0 - overlap) * 4.0, 0.0, 1.0)
+                    : clamp((1.0 - factor) * 4.0, 0.0, 1.0);
                 metricSum += metric * wGeom;
                 metricWeight += wGeom;
             }
