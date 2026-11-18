@@ -29,7 +29,9 @@ namespace engine::renderer {
         SvgfIncomingDirection = 22,
         SvgfDirectionalSampleConfidence = 23,
         SvgfDirectionalOverlap = 24,
-        SvgfDirectionalFilterWeight = 25
+        SvgfDirectionalFilterWeight = 25,
+        SvgfDirectionalPathDirection = 26,
+        SvgfDirectionalPathConfidence = 27
     };
 
     struct RtSettings {
