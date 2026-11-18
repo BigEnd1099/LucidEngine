@@ -94,4 +94,13 @@ void finalizeGiReservoir(inout GiReservoir r) {
     }
 }
 
+// Clamp reservoir sample count M to maxM while proportionally scaling wSum
+// to preserve the unbiased estimator ratio W = wSum / (M * targetPdf)
+void clampGiReservoirM(inout GiReservoir r, uint maxM) {
+    if (r.M > maxM && r.M > 0u) {
+        r.wSum *= float(maxM) / float(r.M);
+        r.M = maxM;
+    }
+}
+
 #endif // RESTIR_GI_COMMON_GLSL

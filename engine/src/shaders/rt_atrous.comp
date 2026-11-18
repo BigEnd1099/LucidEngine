@@ -453,6 +453,9 @@ void main() {
         vec4 cResC = imageLoad(imgGiReservoirC, px);
         GiReservoir spatialRes = unpackGiReservoir(cResA, cResB, cResC);
 
+        // ReSTIR Spatial Resampling is preserved as an optional spatial reservoir pool
+        // but must NOT overwrite center.rgb with a single-sample stochastic candidate,
+        // which would destroy temporal accumulation and inject speckled noise / fireflies.
         if (gC.z >= 0.0 && spatialRes.M > 0u) {
             vec2 curUV = (vec2(px) + 0.5) / size;
             ivec2 depthSize = textureSize(uDepth, 0).xy;
@@ -460,7 +463,7 @@ void main() {
             float dC = texelFetch(uDepth, fullPx, 0).r;
             vec3 pC = rtWorldPos(vec2(px) + 0.5, dC, size);
 
-            spatialRes.M = min(spatialRes.M, 24u);
+            clampGiReservoirM(spatialRes, 24u);
 
             const ivec2 spatialOffsets[8] = ivec2[](
                 ivec2( 3,  1), ivec2(-2,  3), ivec2(-3, -2), ivec2( 1, -3),
@@ -500,14 +503,8 @@ void main() {
                 }
             }
 
+            clampGiReservoirM(spatialRes, 24u);
             finalizeGiReservoir(spatialRes);
-
-            if (spatialRes.flags != 0u && spatialRes.M > 0u && spatialRes.W > 0.0 && spatialRes.targetPdf > 1e-6) {
-                float lumLo = max(dot(spatialRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
-                float effWeight = spatialRes.wSum / (float(spatialRes.M) * lumLo);
-                vec3 resRadiance = spatialRes.Lo * effWeight;
-                center.rgb = resRadiance;
-            }
         }
 
         float varSum = 0.0;

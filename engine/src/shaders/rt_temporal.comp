@@ -472,7 +472,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     if (isCheckerSkipped) {
         if (prevRes.flags != 0u && prevRes.M > 0u) {
             resampledRes = prevRes;
-            resampledRes.M = min(prevRes.M, 24u);
+            clampGiReservoirM(resampledRes, 24u);
             finalizeGiReservoir(resampledRes);
             if (resampledRes.targetPdf > 1e-6) {
                 float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
@@ -504,6 +504,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             }
         }
 
+        clampGiReservoirM(resampledRes, 24u);
         finalizeGiReservoir(resampledRes);
 
         if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0 && resampledRes.targetPdf > 1e-6) {
@@ -520,7 +521,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     imageStore(imgGiReservoirB, px, outResB);
     imageStore(imgGiReservoirC, px, outResC);
 
-    if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0) {
+    if (!isCheckerSkipped && resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0) {
         raw.rgb = resampledRadiance;
     }
 
