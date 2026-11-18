@@ -176,6 +176,10 @@ namespace engine::renderer {
         VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
         VkBuffer m_giSurfacePatchBuffer{VK_NULL_HANDLE};
         VmaAllocation m_giSurfacePatchAllocation{VK_NULL_HANDLE};
+        VkBuffer m_giSurfacePatchHistoryBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_giSurfacePatchHistoryAllocation{VK_NULL_HANDLE};
+        bool m_giSurfacePatchHistoryNeedsClear{true};
+        uint32_t m_giSurfacePatchHistoryEpoch{0u};
         bool m_surfaceHistoryNeedsClear{true};
         uint32_t m_surfaceHistoryLightingEpoch{1u};
         bool m_surfaceHistoryCacheStateKnown{false};

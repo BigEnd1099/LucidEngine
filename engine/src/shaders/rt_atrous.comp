@@ -34,9 +34,9 @@ layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
 layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
 layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
-layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCache { uint words[]; } giSurfacePatchCache;
+layout(set = 1, binding = 35, std430) readonly buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
 const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
-const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 49u;
+const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 51u;
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -81,20 +81,21 @@ bool loadGiSurfacePatch(vec3 worldPos, vec3 worldNormal, out vec3 radiance, out 
     uint cellWord = 0u; bool found = false;
     for (uint probe = 0u; probe < 8u; ++probe) {
         uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_WORDS_PER_CELL;
-        uint candidateKey = giSurfacePatchCache.words[candidate];
+        uint candidateKey = giSurfacePatchHistory.words[candidate];
         if (candidateKey == key) { cellWord = candidate; found = true; break; }
         if (candidateKey == 0u) break;
     }
     if (!found) return false;
     vec3 rgbSum = vec3(0.0); float weightSum = 0.0;
     for (uint lobe = 0u; lobe < 12u; ++lobe) {
-        uint src = cellWord + 1u + lobe * 4u;
-        rgbSum += vec3(giSurfacePatchCache.words[src], giSurfacePatchCache.words[src + 1u],
-                       giSurfacePatchCache.words[src + 2u]);
-        weightSum += float(giSurfacePatchCache.words[src + 3u]);
+        uint src = cellWord + 3u + lobe * 4u;
+        float lobeWeight = float(giSurfacePatchHistory.words[src + 3u]);
+        rgbSum += vec3(giSurfacePatchHistory.words[src], giSurfacePatchHistory.words[src + 1u],
+                       giSurfacePatchHistory.words[src + 2u]) * lobeWeight;
+        weightSum += lobeWeight;
     }
     if (weightSum <= 1.0) return false;
-    radiance = rgbSum * (128.0 / weightSum);
+    radiance = rgbSum * (1.0 / (32.0 * weightSum));
     support = weightSum / 4096.0;
     return true;
 }

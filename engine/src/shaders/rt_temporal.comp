@@ -76,6 +76,11 @@ layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
 layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
 layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiPathPositionPrev;
 layout(set = 1, binding = 33, rgba16f) uniform image2D imgGiPathNormalPrev;
+layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCurrent { uint words[]; } giSurfacePatchCurrent;
+layout(set = 1, binding = 35, std430) buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_CURRENT_STRIDE = 49u;
+const uint GI_SURFACE_PATCH_HISTORY_STRIDE = 51u;
 
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
@@ -204,6 +209,72 @@ vec4 sampleWorldRadianceCache(vec3 worldPos, vec3 worldNormal, uint currentFrame
 
 
 
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0));
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+void updateGiSurfacePatchHistory(vec3 worldPos, vec3 worldNormal, uint lightingEpoch, uint frameIndex) {
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint currentWord = 0u; bool currentFound = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_CURRENT_STRIDE;
+        uint candidateKey = giSurfacePatchCurrent.words[candidate];
+        if (candidateKey == key) { currentWord = candidate; currentFound = true; break; }
+        if (candidateKey == 0u) break;
+    }
+    if (!currentFound) return;
+
+    uint historyWord = 0u; bool historyFound = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_HISTORY_STRIDE;
+        uint observed = atomicCompSwap(giSurfacePatchHistory.words[candidate], 0u, key);
+        if (observed == 0u || observed == key) { historyWord = candidate; historyFound = true; break; }
+    }
+    if (!historyFound) return;
+
+    // One invocation per world-space patch owns the temporal update. Other pixels
+    // sharing this patch see the frame stamp and leave the persistent record untouched.
+    uint frameStamp = frameIndex + 1u;
+    uint previousFrame = atomicExchange(giSurfacePatchHistory.words[historyWord + 1u], frameStamp);
+    if (previousFrame == frameStamp) return;
+
+    if (giSurfacePatchHistory.words[historyWord + 2u] != lightingEpoch) {
+        for (uint i = 0u; i < 48u; ++i) giSurfacePatchHistory.words[historyWord + 3u + i] = 0u;
+        giSurfacePatchHistory.words[historyWord + 2u] = lightingEpoch;
+    }
+
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint src = currentWord + 1u + lobe * 4u;
+        uint dst = historyWord + 3u + lobe * 4u;
+        uint currentWeight = giSurfacePatchCurrent.words[src + 3u];
+        uint oldWeight = giSurfacePatchHistory.words[dst + 3u];
+        if (currentWeight == 0u) {
+            giSurfacePatchHistory.words[dst + 3u] = uint(float(oldWeight) * 0.985);
+            continue;
+        }
+        vec3 currentMeanFixed = vec3(giSurfacePatchCurrent.words[src],
+                                     giSurfacePatchCurrent.words[src + 1u],
+                                     giSurfacePatchCurrent.words[src + 2u]) * (4096.0 / float(currentWeight));
+        vec3 oldMeanFixed = vec3(giSurfacePatchHistory.words[dst],
+                                 giSurfacePatchHistory.words[dst + 1u],
+                                 giSurfacePatchHistory.words[dst + 2u]);
+        float blend = oldWeight == 0u ? 1.0 : 0.22;
+        vec3 newMeanFixed = mix(oldMeanFixed, currentMeanFixed, blend);
+        giSurfacePatchHistory.words[dst] = uint(round(clamp(newMeanFixed.r, 0.0, 8192.0)));
+        giSurfacePatchHistory.words[dst + 1u] = uint(round(clamp(newMeanFixed.g, 0.0, 8192.0)));
+        giSurfacePatchHistory.words[dst + 2u] = uint(round(clamp(newMeanFixed.b, 0.0, 8192.0)));
+        uint boundedCurrentWeight = min(currentWeight, 8u * 4096u);
+        uint decayedOldWeight = uint(float(oldWeight) * 0.985);
+        giSurfacePatchHistory.words[dst + 3u] = min(decayedOldWeight + boundedCurrentWeight, 64u * 4096u);
+    }
+}
+
 void addDiagCounter(uint counterIdx, uint value) {
     uint sgSum = subgroupAdd(value);
     if (subgroupElect() && sgSum != 0u) {
@@ -266,6 +337,11 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     // depth sample is nearest-neighbour, but its integer texel centre must not
     // replace the GI pixel's continuous screen-space centre during reprojection.
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+
+    // Accumulate current-frame path samples into persistent world-space receiver patches.
+    // This update runs before temporal bypass/debug exits, so the patch history is independent
+    // of the pixel-space denoiser's enable state.
+    updateGiSurfacePatchHistory(P, N, pc.u.z, pc.u.w);
 
     // Evaluate cache diagnostics before temporal work, but do not return here:
     // cache writes must still run while a cache-hit debug view is selected.

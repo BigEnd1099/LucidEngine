@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[35]{};
+        VkDescriptorSetLayoutBinding b[36]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -103,8 +103,12 @@ namespace engine::renderer {
         b[34].descriptorCount = 1;
         b[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[34].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        b[35].binding = 35;
+        b[35].descriptorCount = 1;
+        b[35].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[35].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 35;
+        li.bindingCount = 36;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
@@ -112,7 +116,7 @@ namespace engine::renderer {
         const VkDescriptorPoolSize sizes[3] = {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 68 }, 
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 }
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 }
         };
         VkDescriptorPoolCreateInfo pi{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pi.maxSets = 2;
@@ -196,6 +200,18 @@ namespace engine::renderer {
                             &m_giSurfacePatchBuffer, &m_giSurfacePatchAllocation, nullptr) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to allocate GI surface-patch atlas");
 
+        // Persistent world-space GI patch history: key + frame + lighting epoch + 12 directional lobes.
+        constexpr VkDeviceSize kGiSurfacePatchHistoryBytes = VkDeviceSize(204u) * 65536u;
+        VkBufferCreateInfo patchHistoryInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        patchHistoryInfo.size = kGiSurfacePatchHistoryBytes;
+        patchHistoryInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        patchHistoryInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo patchHistoryAlloc{};
+        patchHistoryAlloc.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &patchHistoryInfo, &patchHistoryAlloc,
+                            &m_giSurfacePatchHistoryBuffer, &m_giSurfacePatchHistoryAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate persistent GI surface-patch history");
+
         // Dedicated 25 cm surface-history hash table (48 bytes/cell, 12 MiB).
         // It is separate from the lower-resolution radiance-probe cache at binding 20.
         constexpr VkDeviceSize kSurfaceHistoryBytes = VkDeviceSize(48u) * 262144u;
@@ -255,8 +271,13 @@ namespace engine::renderer {
         if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
         if (m_surfaceHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_surfaceHistoryBuffer, m_surfaceHistoryAllocation);
         if (m_giSurfacePatchBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_giSurfacePatchBuffer, m_giSurfacePatchAllocation);
+        if (m_giSurfacePatchHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_giSurfacePatchHistoryBuffer, m_giSurfacePatchHistoryAllocation);
         m_giSurfacePatchBuffer = VK_NULL_HANDLE;
         m_giSurfacePatchAllocation = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryBuffer = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryAllocation = VK_NULL_HANDLE;
+        m_giSurfacePatchHistoryNeedsClear = true;
+        m_giSurfacePatchHistoryEpoch = 0u;
         m_diagnosticsBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryAllocation = VK_NULL_HANDLE;
@@ -389,7 +410,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[35]{};
+            VkWriteDescriptorSet writes[36]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -565,7 +586,14 @@ namespace engine::renderer {
             writes[34].descriptorCount = 1;
             writes[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[34].pBufferInfo = &giSurfacePatchInfo;
-            vkUpdateDescriptorSets(m_context->getDevice(), 35, writes, 0, nullptr);
+            const VkDescriptorBufferInfo giSurfacePatchHistoryInfo{ m_giSurfacePatchHistoryBuffer, 0, VK_WHOLE_SIZE };
+            writes[35] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[35].dstSet = m_sets[p];
+            writes[35].dstBinding = 35;
+            writes[35].descriptorCount = 1;
+            writes[35].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[35].pBufferInfo = &giSurfacePatchHistoryInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 36, writes, 0, nullptr);
         }
     }
 
@@ -710,6 +738,30 @@ namespace engine::renderer {
             ++m_surfaceHistoryLightingEpoch;
             if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
         }
+        // Lighting-epoch changes invalidate persistent patch energy. Camera motion does not:
+        // patches are keyed in world space and remain available when their surfaces reappear.
+        if (m_giSurfacePatchHistoryEpoch != m_surfaceHistoryLightingEpoch) {
+            m_giSurfacePatchHistoryEpoch = m_surfaceHistoryLightingEpoch;
+            m_giSurfacePatchHistoryNeedsClear = true;
+        }
+        if (m_giSurfacePatchHistoryNeedsClear) {
+            vkCmdFillBuffer(cmd, m_giSurfacePatchHistoryBuffer, 0, VK_WHOLE_SIZE, 0u);
+            VkBufferMemoryBarrier2 patchHistoryClearBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            patchHistoryClearBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            patchHistoryClearBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            patchHistoryClearBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            patchHistoryClearBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            patchHistoryClearBarrier.srcQueueFamilyIndex = patchHistoryClearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            patchHistoryClearBarrier.buffer = m_giSurfacePatchHistoryBuffer;
+            patchHistoryClearBarrier.offset = 0;
+            patchHistoryClearBarrier.size = VK_WHOLE_SIZE;
+            VkDependencyInfo patchHistoryClearDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            patchHistoryClearDependency.bufferMemoryBarrierCount = 1;
+            patchHistoryClearDependency.pBufferMemoryBarriers = &patchHistoryClearBarrier;
+            vkCmdPipelineBarrier2(cmd, &patchHistoryClearDependency);
+            m_giSurfacePatchHistoryNeedsClear = false;
+        }
+
         m_gpuTimings = {};
         if (m_timestampsSupported && m_queryPool && m_hasTimestampResults) {
             uint64_t timestamps[19]{};
