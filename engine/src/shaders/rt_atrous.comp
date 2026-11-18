@@ -263,17 +263,27 @@ void main() {
                 float factor = giDirectionalFilterFactor(centerBinsA, centerBinsB,
                     neighborBinsA, neighborBinsB, centerHistory, unpackGiHistoryLen(gQ.w),
                     overlap, confidence);
-                // Mode 24 expands the high-overlap range where six broad lobes
-                // tend to cluster, making small but systematic differences visible.
-                // Mode 25 visualizes rejected neighbor weight (black = no rejection).
-                float metric = (pc.u.x == 24u)
-                    ? clamp((1.0 - overlap) * 4.0, 0.0, 1.0)
-                    : clamp((1.0 - factor) * 4.0, 0.0, 1.0);
-                metricSum += metric * wGeom;
-                metricWeight += wGeom;
+                if (pc.u.x == 24u) {
+                    // A missing/empty histogram is not a directional mismatch.
+                    // Exclude it from the overlap average; pixels with no valid
+                    // neighbor evidence are shown as neutral gray below.
+                    if (confidence <= 0.0) continue;
+                    float mismatch = clamp((1.0 - overlap) * 4.0, 0.0, 1.0);
+                    metricSum += mismatch * wGeom;
+                    metricWeight += wGeom;
+                } else {
+                    // Show the actual directional multiplier, normalized from
+                    // its minimum (0.22) to full acceptance (1.0):
+                    // black = reject neighbor, white = allow full mixing.
+                    float acceptance = clamp((factor - 0.22) / 0.78, 0.0, 1.0);
+                    metricSum += acceptance * wGeom;
+                    metricWeight += wGeom;
+                }
             }
         }
-        float result = (metricWeight > 1e-6) ? metricSum / metricWeight : 1.0;
+        // Neutral gray means there was no valid directional comparison.
+        float result = (metricWeight > 1e-6) ? metricSum / metricWeight
+                                             : ((pc.u.x == 24u) ? 0.5 : 1.0);
         storeDst(px, vec4(vec3(clamp(result, 0.0, 1.0)), 1.0));
         return;
     }
