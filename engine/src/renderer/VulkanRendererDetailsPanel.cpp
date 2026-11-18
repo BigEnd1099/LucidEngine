@@ -722,7 +722,10 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "19: GI Temporal Variance (log)",
                             "20: GI Relative Uncertainty (log)",
                             "21: SVGF Firefly Rejection (white=preserved)",
-                            "22: SVGF Incident Light Distribution (6 Lobes)"
+                            "22: SVGF Incident Light Distribution (6 Lobes)",
+                            "23: Directional Sample Confidence (effective samples)",
+                            "24: Directional Histogram Overlap (neighbor agreement)",
+                            "25: Directional Filter Weight (spatial contribution)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
