@@ -26,7 +26,10 @@ namespace engine::renderer {
         GiTemporalVariance = 19,
         GiRelativeUncertainty = 20,
         SvgfFireflyRejection = 21,
-        SvgfIncomingDirection = 22
+        SvgfIncomingDirection = 22,
+        SvgfDirectionalSampleConfidence = 23,
+        SvgfDirectionalOverlap = 24,
+        SvgfDirectionalFilterWeight = 25
     };
 
     struct RtSettings {
