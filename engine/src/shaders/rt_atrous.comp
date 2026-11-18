@@ -382,15 +382,24 @@ void main() {
 
     vec4 momC = imageLoad(imgMomentsCur, px);
 
-    // Independent SVGF spatial firefly rejection. Robust median/MAD statistics are
-    // built only from coplanar, similarly oriented neighbors. Supported bright
-    // clusters are exempt so real HDR illumination is not mistaken for a spike.
+    // Independent SVGF spatial firefly & light path density reconstruction.
+    // Preserves photon energy in illuminated areas (turning sand/speckles into a continuous beam)
+    // while the dual-scale shadow guard (radius 8 and radius 16 block check) prevents any light leaking into shadows.
     float fireflyPreservation = 1.0;
+    float pass0ShadowGate = 0.0;
+    float pass0LocalAvgLuma = 0.0;
+    vec3  pass0LocalAvgRgb = vec3(0.0);
+    float pass0RobustLimit = 1e6;
+
     if (PASS == 0 && pc.f.z > 0.001) {
         float neighborLuma[8];
         int neighborCount = 0;
         float centerLuma = max(dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
         int brightSupport = 0;
+
+        vec3 localRgbSum = center.rgb;
+        float localWeightSum = 1.0;
+
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
                 if (dx == 0 && dy == 0) continue;
@@ -402,10 +411,50 @@ void main() {
                 if (abs(dot(nCv, qView - pCv)) > depthTol * 2.0) continue;
                 vec4 qValue = loadSrc(q);
                 float qLuma = max(dot(qValue.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+
+                float wTap = (abs(dx) + abs(dy) == 2) ? 0.707 : 1.0;
                 neighborLuma[neighborCount++] = qLuma;
+                localRgbSum += qValue.rgb * wTap;
+                localWeightSum += wTap;
+
                 if (qLuma >= max(centerLuma * 0.45, centerLuma - 0.02)) brightSupport++;
             }
         }
+
+        // --- Dual-Scale Outer Block Guard ("8x8 + 8x8 klocek dalej") ---
+        // Samples 12 taps at radius 8 (8x8 block boundary) and radius 16 (8+8 block boundary)
+        // Strictly on the same coplanar surface (dot(nC, nQ) > 0.85, planeDist < depthTol * 3.0).
+        const ivec2 coarseOffsets[12] = ivec2[](
+            ivec2( 8,  0), ivec2(-8,  0), ivec2( 0,  8), ivec2( 0, -8),
+            ivec2( 6,  6), ivec2(-6,  6), ivec2( 6, -6), ivec2(-6, -6),
+            ivec2(16,  0), ivec2(-16,  0), ivec2( 0, 16), ivec2( 0, -16)
+        );
+
+        float coarseLumaSum = 0.0;
+        int coarseLitCount = 0;
+        int coarseCount = 0;
+
+        for (int k = 0; k < 12; ++k) {
+            ivec2 qCoarse = px + coarseOffsets[k];
+            if (any(lessThan(qCoarse, ivec2(0))) || any(greaterThanEqual(qCoarse, isize))) continue;
+            vec4 gQC = imageLoad(imgGeomCur, qCoarse);
+            if (gQC.z < 0.0) continue;
+            if (dot(nC, rtOctDecode(gQC.xy)) < 0.85) continue;
+            vec3 qViewC = rtViewPosFromLinear(vec2(qCoarse) + 0.5, gQC.z, size);
+            if (abs(dot(nCv, qViewC - pCv)) > depthTol * 3.0) continue;
+
+            vec4 qValC = loadSrc(qCoarse);
+            float qLumC = max(dot(qValC.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+            coarseLumaSum += qLumC;
+            if (qLumC > 0.15) coarseLitCount++;
+            coarseCount++;
+        }
+
+        float coarseAvgLuma = (coarseCount >= 3) ? (coarseLumaSum / float(coarseCount)) : 0.0;
+        // Confirmed light path footprint: sustained illumination across multiple coarse taps on the coplanar plane
+        bool isLightPathFootprint = (coarseLitCount >= 3 && coarseAvgLuma > 0.15);
+        pass0ShadowGate = isLightPathFootprint ? smoothstep(0.15, 0.40, coarseAvgLuma) : 0.0;
+
         if (neighborCount >= 3) {
             for (int i = 1; i < neighborCount; ++i) {
                 float key = neighborLuma[i]; int j = i - 1;
@@ -423,13 +472,44 @@ void main() {
             }
             float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
             float robustLimit = medianLuma + max(2.25 * 1.4826 * mad, medianLuma * 0.90 + 0.010);
-            // SPP=1 has no reliable per-pixel estimate: reject stronger isolated
-            // spatial outliers, while the neighbor-support exemption protects real
-            // compact light clusters and coherent bright surfaces.
+            pass0RobustLimit = robustLimit;
+
+            pass0LocalAvgRgb = localRgbSum / max(localWeightSum, 1e-4);
+            pass0LocalAvgLuma = max(dot(pass0LocalAvgRgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+
+            // Count photon hits in 3x3 footprint
+            int photonHits = 0;
+            for (int i = 0; i < neighborCount; ++i) {
+                if (neighborLuma[i] > robustLimit || neighborLuma[i] > medianLuma * 1.8 + 0.015) {
+                    photonHits++;
+                }
+            }
+            if (centerLuma > robustLimit || centerLuma > medianLuma * 1.8 + 0.015) {
+                photonHits++;
+            }
+
+            // Energy-preserving firefly & light path density reconstruction:
             if (brightSupport < 2 && centerLuma > robustLimit && centerLuma > medianLuma * 1.8 + 0.015) {
-                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.15;
-                fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
-                center.rgb *= fireflyPreservation;
+                if (pass0ShadowGate <= 1e-4) {
+                    // Outlier in legitimate darkness: clamp down aggressively
+                    float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.15;
+                    fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
+                    center.rgb *= fireflyPreservation;
+                } else {
+                    // Legitimate photon spike inside illuminated beam:
+                    // Preserve HDR energy by compressing toward local path average
+                    float targetLuma = max(robustLimit, pass0LocalAvgLuma * 1.4);
+                    if (centerLuma > targetLuma) {
+                        float compressedLuma = targetLuma + (centerLuma - targetLuma) * 0.25;
+                        fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
+                        center.rgb *= fireflyPreservation;
+                    }
+                }
+            } else if (pass0ShadowGate > 0.001 && photonHits >= 2 && centerLuma < pass0LocalAvgLuma * 0.70) {
+                // Legitimate dark gap between sparse 1 SPP photon hits inside the confirmed bright beam:
+                // Smoothly lift center toward local path density, strictly zero in shadows
+                float liftWeight = pass0ShadowGate * clamp(float(photonHits) / 4.0, 0.0, 1.0) * clamp(pc.f.z, 0.0, 1.0) * 0.60;
+                center.rgb = mix(center.rgb, pass0LocalAvgRgb, liftWeight);
             }
         }
     }
@@ -589,6 +669,12 @@ void main() {
             if (wGeomBase <= 1e-6) continue;
 
             vec3 safeQCol = qCol.rgb;
+            if (PASS == 0 && pass0ShadowGate > 0.001 && pc.f.z > 0.001) {
+                float rawQLuma = max(dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+                if (rawQLuma > pass0RobustLimit) {
+                    safeQCol = mix(safeQCol, pass0LocalAvgRgb, 0.70);
+                }
+            }
             float lQ = max(0.0, dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)));
             float deltaL = abs(lC - lQ);
 
@@ -627,6 +713,8 @@ void main() {
                 // This restores filtering bandwidth inside bright light clusters
                 // without opening the boundary between midtones and highlights.
                 float brightClusterCoherence = smoothstep(0.75, 1.50, darkerLum);
+                float coplanarBrightCoherence = smoothstep(0.12, 0.65, darkerLum) * smoothstep(0.75, 0.95, wn);
+                brightClusterCoherence = max(brightClusterCoherence, coplanarBrightCoherence);
                 tierSeparation *= (1.0 - brightClusterCoherence);
                 float withinTierScale = max(brighterLum, 0.025);
                 float crossTierScale = max(mix(darkerLum, brighterLum, 0.65), 0.025);
