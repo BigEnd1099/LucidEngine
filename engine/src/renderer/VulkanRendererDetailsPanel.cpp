@@ -722,7 +722,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "19: GI Temporal Variance (log)",
                             "20: GI Relative Uncertainty (log)",
                             "21: SVGF Firefly Rejection (white=preserved)",
-                            "22: SVGF Incident Light Distribution (6 Lobes)",
+                            "22: SVGF Incident Light Distribution (12 Lobes)",
                             "23: Radiance-Bearing Paths per Frame (log)",
                             "24: Directional Mismatch (gray = no evidence) (neighbor agreement)",
                             "25: Directional Filter Acceptance (white = mix) (spatial contribution)"
