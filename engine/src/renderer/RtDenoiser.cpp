@@ -375,9 +375,9 @@ namespace engine::renderer {
         for (auto& rh : m_imgReflHist) rh = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_width, m_height);
         for (auto& rg : m_imgReflGeom) rg = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_width, m_height);
         for (auto& m : m_moments) m = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
-        for (auto& parity : m_giDirectionBins) for (auto& directionImage : parity) directionImage = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& parity : m_giDirectionBins) for (auto& directionImage : parity) directionImage = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
         for (auto& image : m_giPathPosition) image = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
-        for (auto& image : m_giPathNormal) image = makeImage(VK_FORMAT_R16G16B16A16_SFLOAT, m_giWidth, m_giHeight);
+        for (auto& image : m_giPathNormal) image = makeImage(VK_FORMAT_R32G32B32A32_SFLOAT, m_giWidth, m_giHeight);
     }
 
     void RtDenoiser::destroyImages() {

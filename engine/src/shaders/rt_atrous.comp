@@ -19,6 +19,7 @@ layout(constant_id = 0) const int PASS = 0;
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
 #include "gi_surface_history_common.glsl"
+#include "restir_gi_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
@@ -28,12 +29,15 @@ layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
-layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBins0;
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiDirectionBins0;
 layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
 layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
 layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
-layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiPathNormal;
+#define imgGiReservoirC imgGiDirectionBins0
+#define imgGiReservoirA imgGiPathPosition
+#define imgGiReservoirB imgGiPathNormal
 layout(set = 1, binding = 35, std430) readonly buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
 const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
 const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 51u;
@@ -440,9 +444,72 @@ void main() {
         return;
     }
 
-    // 3x3 bilateral pre-filter of temporal variance.
+    // 3x3 bilateral pre-filter of temporal variance and ReSTIR Spatial Resampling.
     float varC = max(momC.z, 0.0);
     if (PASS == 0) {
+        rngInit(uvec2(px), pc.u.w);
+        vec4 cResA = imageLoad(imgGiReservoirA, px);
+        vec4 cResB = imageLoad(imgGiReservoirB, px);
+        vec4 cResC = imageLoad(imgGiReservoirC, px);
+        GiReservoir spatialRes = unpackGiReservoir(cResA, cResB, cResC);
+
+        if (gC.z >= 0.0 && spatialRes.M > 0u) {
+            vec2 curUV = (vec2(px) + 0.5) / size;
+            ivec2 depthSize = textureSize(uDepth, 0).xy;
+            ivec2 fullPx = min(ivec2(curUV * vec2(depthSize)), depthSize - 1);
+            float dC = texelFetch(uDepth, fullPx, 0).r;
+            vec3 pC = rtWorldPos(vec2(px) + 0.5, dC, size);
+
+            spatialRes.M = min(spatialRes.M, 24u);
+
+            const ivec2 spatialOffsets[8] = ivec2[](
+                ivec2( 3,  1), ivec2(-2,  3), ivec2(-3, -2), ivec2( 1, -3),
+                ivec2( 5, -1), ivec2(-1,  5), ivec2(-5,  2), ivec2( 2, -5)
+            );
+
+            for (int k = 0; k < 8; ++k) {
+                ivec2 q = px + spatialOffsets[k];
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+                if (dot(rtOctDecode(gQ.xy), nC) < 0.8) continue;
+                vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
+                if (abs(dot(nCv, pQv - pCv)) > depthTol * 2.0) continue;
+
+                vec4 qResA = imageLoad(imgGiReservoirA, q);
+                vec4 qResB = imageLoad(imgGiReservoirB, q);
+                vec4 qResC = imageLoad(imgGiReservoirC, q);
+                GiReservoir qRes = unpackGiReservoir(qResA, qResB, qResC);
+
+                if (qRes.flags == 0u || qRes.M == 0u || qRes.W <= 0.0) continue;
+                uint M_q = min(qRes.M, 16u);
+
+                float pHat = evalGiTargetPdf(qRes.Lo, qRes.xs, qRes.ns, pC, nC);
+                if (pHat <= 1e-6) continue;
+
+                float wCand = pHat * qRes.W * float(M_q);
+                spatialRes.wSum += wCand;
+                spatialRes.M += M_q;
+                if (rand1() * spatialRes.wSum < wCand) {
+                    spatialRes.xs = qRes.xs;
+                    spatialRes.ns = qRes.ns;
+                    spatialRes.Lo = qRes.Lo;
+                    spatialRes.targetPdf = pHat;
+                    spatialRes.flags = qRes.flags;
+                }
+            }
+
+            finalizeGiReservoir(spatialRes);
+
+            if (spatialRes.flags != 0u && spatialRes.M > 0u && spatialRes.W > 0.0 && spatialRes.targetPdf > 1e-6) {
+                float lumLo = max(dot(spatialRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+                float effWeight = spatialRes.wSum / (float(spatialRes.M) * lumLo);
+                vec3 resRadiance = spatialRes.Lo * effWeight;
+                center.rgb = resRadiance;
+            }
+        }
+
         float varSum = 0.0;
         float wVarTotal = 0.0;
 

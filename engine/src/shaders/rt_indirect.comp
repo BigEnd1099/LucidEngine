@@ -16,6 +16,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "rt_common.glsl"
 #include "rt_screen.glsl"
 #include "gi_world_cache_common.glsl"
+#include "restir_gi_common.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D uDepth;
 layout(set = 1, binding = 1, rgba16f) uniform image2D imgS;
@@ -26,12 +27,15 @@ layout(set = 1, binding = 8) uniform sampler2D uGAlbedoMetallic;
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
-layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBins0;
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
 layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
 layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
-layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
-layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
+#define imgGiDirectionBins0 imgGiReservoirC
+#define imgGiPathPosition   imgGiReservoirA
+#define imgGiPathNormal     imgGiReservoirB
 layout(set = 1, binding = 34, std430) buffer GiSurfacePatchCache { uint words[]; } giSurfacePatchCache;
 const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
 const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 49u;
@@ -333,6 +337,7 @@ float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
 vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
+GiReservoir pixelReservoir = emptyGiReservoir();
 vec4 giPatchBins[12];
 for (int patchBin = 0; patchBin < 12; ++patchBin) giPatchBins[patchBin] = vec4(0.0);
 vec4 giDirectionBins0=vec4(0),giDirectionBins1=vec4(0),giDirectionBins2=vec4(0);
@@ -634,15 +639,27 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         giDirectionBins2+=sampleBins2*sampleEnergy;
         giDirectionSampleCount+=1.0;
     }
-    if(sampleEnergy>1e-5 && sampleHasFirstHit){
-        giPathEnergy+=sampleEnergy;
-        giPathCount+=1.0;
-        if(rand1()*giPathEnergy<sampleEnergy){
-            giPathPosition=sampleFirstHitPosition;
-            giPathNormal=sampleFirstHitNormal;
-        }
+    if (sampleEnergy > 1e-6) {
+        vec3 hitPos = sampleHasFirstHit ? sampleFirstHitPosition : (P + primaryIncomingDirection * 10000.0);
+        vec3 hitNorm = sampleHasFirstHit ? sampleFirstHitNormal : (-primaryIncomingDirection);
+        vec3 v = hitPos - P;
+        float d = length(v);
+        vec3 omega = (d > 1e-4) ? (v / d) : primaryIncomingDirection;
+        float cosTheta0 = max(dot(N, omega), 0.0);
+        float targetPdf = sampleEnergy * cosTheta0;
+        float w = sampleEnergy;
+
+        updateGiReservoir(pixelReservoir, hitPos, hitNorm,
+                          sampleRadiance, targetPdf, w, 1u, rand1());
+
+        giPathEnergy += sampleEnergy;
+        giPathCount += 1.0;
+        giPathPosition = pixelReservoir.xs;
+        giPathNormal = pixelReservoir.ns;
     }
 }
+
+finalizeGiReservoir(pixelReservoir);
 
 // Consolidate all successful paths from this pixel into a world-space patch
 // keyed by the primary receiving surface, retaining separate directional lobes.
@@ -656,17 +673,20 @@ float avgFirstHitDist = (firstHitCount > 0.0) ? (firstHitDistSum / firstHitCount
 float initHitDistFactor = clamp(avgFirstHitDist / AO_DISTANCE, 0.15, 1.0);
 imageStore(imgGeomCur, px, vec4(rtOctEncode(N), zC, packGiGeomW(0.0, initHitDistFactor)));
 imageStore(imgS, px, vec4(gi, vis));
-// Energy and valid-path count are separate; radiance magnitude is not confidence.
-imageStore(imgGiDirectionBins0,px,giDirectionBins0*invSamples);
-imageStore(imgGiDirectionBins1,px,giDirectionBins1*invSamples);
-imageStore(imgGiDirectionBins2,px,giDirectionBins2*invSamples);
-imageStore(imgGiDirectionCount,px,vec4(giDirectionSampleCount,0,0,0));
-imageStore(imgGiPathPosition,px,vec4(giPathPosition,giPathEnergy));
-vec2 encodedGiPathNormal = (giPathCount > 0.0) ? rtOctEncode(normalize(giPathNormal)) : vec2(0.0);
-float giPathSupport = clamp(giPathCount / float(max(samples, 1)), 0.0, 1.0);
-// .xy = measured first-hit normal, .z = fraction of samples with a valid
-// radiance-bearing first hit, .w = temporal path-stability confidence.
-imageStore(imgGiPathNormal,px,vec4(encodedGiPathNormal,giPathSupport,0.0));
+
+// ReSTIR GI initial reservoir export:
+// Reservoir A: xyz = xs, w = targetPdf
+// Reservoir B: x = packed ns, y = wSum, z = M, w = flags
+// Reservoir C: rgb = Lo, a = W
+vec4 resA, resB, resC;
+packGiReservoir(pixelReservoir, resA, resB, resC);
+imageStore(imgGiReservoirA, px, resA);
+imageStore(imgGiReservoirB, px, resB);
+imageStore(imgGiReservoirC, px, resC);
+
+imageStore(imgGiDirectionBins1, px, giDirectionBins1 * invSamples);
+imageStore(imgGiDirectionBins2, px, giDirectionBins2 * invSamples);
+imageStore(imgGiDirectionCount, px, vec4(giDirectionSampleCount, 0, 0, 0));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;

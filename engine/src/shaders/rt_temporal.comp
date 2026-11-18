@@ -64,18 +64,21 @@ layout(set = 1, binding = 12) uniform sampler2D uMotion;           // in: screen
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur;  // out: mu1, mu2, variance, filtered_var
 
 layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: reprojected moments
-layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBins0;
+#include "restir_gi_common.glsl"
+
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
 layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
 layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
-layout(set = 1, binding = 26, rgba16f) uniform image2D imgGiDirectionBinsPrev0;
+layout(set = 1, binding = 26, rgba32f) uniform image2D imgGiReservoirCPrev;
 layout(set = 1, binding = 27, rgba16f) uniform image2D imgGiDirectionBinsPrev1;
 layout(set = 1, binding = 28, rgba16f) uniform image2D imgGiDirectionBinsPrev2;
 layout(set = 1, binding = 29, rgba16f) uniform image2D imgGiDirectionCountPrev;
-layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
-layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
-layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiPathPositionPrev;
-layout(set = 1, binding = 33, rgba16f) uniform image2D imgGiPathNormalPrev;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
+layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiReservoirAPrev;
+layout(set = 1, binding = 33, rgba32f) uniform image2D imgGiReservoirBPrev;
+
 layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCurrent { uint words[]; } giSurfacePatchCurrent;
 layout(set = 1, binding = 35, std430) buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
 const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
@@ -310,12 +313,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
         imageStore(imgMomentsCur, px, vec4(0.0));
-        imageStore(imgGiDirectionBins0,px,vec4(0));
-        imageStore(imgGiDirectionBins1,px,vec4(0));
-        imageStore(imgGiDirectionBins2,px,vec4(0));
-        imageStore(imgGiDirectionCount,px,vec4(0));
-        imageStore(imgGiPathPosition,px,vec4(0));
-        imageStore(imgGiPathNormal,px,vec4(0));
+        imageStore(imgGiDirectionBins1, px, vec4(0.0));
+        imageStore(imgGiDirectionBins2, px, vec4(0.0));
+        imageStore(imgGiDirectionCount, px, vec4(0.0));
+        imageStore(imgGiReservoirA, px, vec4(0.0));
+        imageStore(imgGiReservoirB, px, vec4(0.0));
+        imageStore(imgGiReservoirC, px, vec4(0.0));
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
 
@@ -340,6 +343,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     // depth sample is nearest-neighbour, but its integer texel centre must not
     // replace the GI pixel's continuous screen-space centre during reprojection.
     vec3 P = rtWorldPos(vec2(px) + 0.5, d, size);
+    rngInit(uvec2(px), pc.u.w);
 
     // Accumulate current-frame path samples into persistent world-space receiver patches.
     // This update runs before temporal bypass/debug exits, so the patch history is independent
@@ -393,10 +397,10 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
     float histHitDist = 0.0;
-    vec4 histDirectionBins0=vec4(0),histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
-    vec4 histPathPositionBest=vec4(0),histPathNormalBest=vec4(0);
-    float histPathBestScore=0.0;
+    vec4 histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
     float wSum = 0.0;
+    ivec2 bestPrevTap = ivec2(0);
+    float bestPrevWeight = -1.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
     ivec2 fullMotionPx = min(ivec2(curUV * vec2(fullMotionSize)), fullMotionSize - 1);
@@ -434,18 +438,90 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histMoments += w * imageLoad(imgMomentsPrev, tp);
             histLen     += w * unpackGiHistoryLen(g.w);
             histHitDist += w * unpackGiHitDistFactor(g.w);
-            histDirectionBins0+=w*imageLoad(imgGiDirectionBinsPrev0,tp);
             histDirectionBins1+=w*imageLoad(imgGiDirectionBinsPrev1,tp);
             histDirectionBins2+=w*imageLoad(imgGiDirectionBinsPrev2,tp);
             histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
-            vec4 prevPathPosition=imageLoad(imgGiPathPositionPrev,tp);
-            vec4 prevPathNormal=imageLoad(imgGiPathNormalPrev,tp);
-            float pathCandidateScore=w*max(prevPathPosition.w,0.0);
-            if(pathCandidateScore>histPathBestScore){histPathBestScore=pathCandidateScore;histPathPositionBest=prevPathPosition;histPathNormalBest=prevPathNormal;}
+            if (w > bestPrevWeight) {
+                bestPrevWeight = w;
+                bestPrevTap = tp;
+            }
             wSum        += w;
         }
+    }
 
+    // =========================================================================
+    // ReSTIR GI: Temporal Resampling (RIS)
+    // =========================================================================
+    vec4 curResA = imageLoad(imgGiReservoirA, px);
+    vec4 curResB = imageLoad(imgGiReservoirB, px);
+    vec4 curResC = imageLoad(imgGiReservoirC, px);
+    GiReservoir curRes = unpackGiReservoir(curResA, curResB, curResC);
 
+    GiReservoir prevRes = emptyGiReservoir();
+    if (isHistValid && wSum > 0.05 && bestPrevWeight > 0.0) {
+        vec4 prevResA = imageLoad(imgGiReservoirAPrev, bestPrevTap);
+        vec4 prevResB = imageLoad(imgGiReservoirBPrev, bestPrevTap);
+        vec4 prevResC = imageLoad(imgGiReservoirCPrev, bestPrevTap);
+        prevRes = unpackGiReservoir(prevResA, prevResB, prevResC);
+    }
+
+    GiReservoir resampledRes = emptyGiReservoir();
+    vec3 resampledRadiance = raw.rgb;
+    bool isCheckerSkipped = (raw.a < -0.5);
+
+    if (isCheckerSkipped) {
+        if (prevRes.flags != 0u && prevRes.M > 0u) {
+            resampledRes = prevRes;
+            resampledRes.M = min(prevRes.M, 24u);
+            finalizeGiReservoir(resampledRes);
+            if (resampledRes.targetPdf > 1e-6) {
+                float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+                float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+                resampledRadiance = resampledRes.Lo * effWeight;
+            }
+        }
+    } else {
+        // 1. Current sample into reservoir
+        if (curRes.flags != 0u && curRes.M > 0u) {
+            resampledRes = curRes;
+        }
+
+        // 2. Stream historical sample into reservoir
+        if (prevRes.flags != 0u && prevRes.M > 0u && prevRes.W > 0.0) {
+            uint M_prev = min(prevRes.M, 24u);
+            float pHatReuse = evalGiTargetPdf(prevRes.Lo, prevRes.xs, prevRes.ns, P, N);
+            if (pHatReuse > 1e-6) {
+                float wCand = pHatReuse * prevRes.W * float(M_prev);
+                resampledRes.wSum += wCand;
+                resampledRes.M += M_prev;
+                if (rand1() * resampledRes.wSum < wCand) {
+                    resampledRes.xs = prevRes.xs;
+                    resampledRes.ns = prevRes.ns;
+                    resampledRes.Lo = prevRes.Lo;
+                    resampledRes.targetPdf = pHatReuse;
+                    resampledRes.flags = prevRes.flags;
+                }
+            }
+        }
+
+        finalizeGiReservoir(resampledRes);
+
+        if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0 && resampledRes.targetPdf > 1e-6) {
+            float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+            float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+            resampledRadiance = resampledRes.Lo * effWeight;
+        }
+    }
+
+    // Export resampled reservoir for spatial reuse / next frame
+    vec4 outResA, outResB, outResC;
+    packGiReservoir(resampledRes, outResA, outResB, outResC);
+    imageStore(imgGiReservoirA, px, outResA);
+    imageStore(imgGiReservoirB, px, outResB);
+    imageStore(imgGiReservoirC, px, outResC);
+
+    if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0) {
+        raw.rgb = resampledRadiance;
     }
 
     float maxHist = max(pc.f.x, 1.0);
@@ -455,7 +531,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4 result;
     float newLen;
     float finalHitDistFactor = curHitDistFactor;
-    bool isCheckerSkipped = (raw.a < -0.5);
     // Pre-temporal spatial jitter is disabled to prevent frame-to-frame checkerboard variance fighting.
     // Pure temporal accumulation integrates raw rays smoothly without injecting spatial noise.
 
@@ -906,87 +981,23 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
     }
 
-    // Reproject all 12 energy lobes and the independent valid-path count using
-    // the same geometry-accepted taps as GI. Count remains samples/frame.
-    vec4 cur0=imageLoad(imgGiDirectionBins0,px),cur1=imageLoad(imgGiDirectionBins1,px);
-    vec4 cur2=imageLoad(imgGiDirectionBins2,px),curCount=imageLoad(imgGiDirectionCount,px);
-    vec4 prev0=(wSum>0.05)?histDirectionBins0/wSum:vec4(0);
+    // Reproject direction bins 1, 2 and count
+    vec4 cur1=imageLoad(imgGiDirectionBins1,px);
+    vec4 cur2=imageLoad(imgGiDirectionBins2,px);
+    vec4 curCount=imageLoad(imgGiDirectionCount,px);
     vec4 prev1=(wSum>0.05)?histDirectionBins1/wSum:vec4(0);
     vec4 prev2=(wSum>0.05)?histDirectionBins2/wSum:vec4(0);
     vec4 prevCount=(wSum>0.05)?histDirectionCount/wSum:vec4(0);
-    vec4 out0=cur0,out1=cur1,out2=cur2,outCount=curCount;
-    if(isCheckerSkipped){out0=prev0;out1=prev1;out2=prev2;outCount=prevCount;}
+    vec4 out1=cur1,out2=cur2,outCount=curCount;
+    if(isCheckerSkipped){out1=prev1;out2=prev2;outCount=prevCount;}
     else if(wSum>0.05){
         float alpha=1.0/max(newLen,1.0);
-        out0=mix(prev0,cur0,alpha);out1=mix(prev1,cur1,alpha);
-        out2=mix(prev2,cur2,alpha);outCount=mix(prevCount,curCount,alpha);
+        out1=mix(prev1,cur1,alpha);out2=mix(prev2,cur2,alpha);
+        outCount=mix(prevCount,curCount,alpha);
     }
-    imageStore(imgGiDirectionBins0,px,out0);imageStore(imgGiDirectionBins1,px,out1);
-    imageStore(imgGiDirectionBins2,px,out2);imageStore(imgGiDirectionCount,px,outCount);
-
-    // Keep one measured first-hit path as a temporal reservoir. Hit positions
-    // and encoded normals are selected, never averaged into a synthetic path.
-    // The normal image stores: oct-normal.xy, per-frame hit support.z,
-    // temporal path-stability confidence.w.
-    vec4 curPathPosition=imageLoad(imgGiPathPosition,px);
-    vec4 curPathNormal=imageLoad(imgGiPathNormal,px);
-    bool currentPathValid = curPathPosition.w > 1e-6 && curPathNormal.z > 0.0;
-    bool historyPathValid = wSum > 0.05 && histPathBestScore > 0.0 &&
-                            histPathPositionBest.w > 1e-6 && histPathNormalBest.z > 0.0;
-    // Keep the current frame's measured path as the guide whenever it exists.
-    // Temporal history is evidence for stability, not a competing direction
-    // reservoir: weighting old paths by history length made debug mode 26 drift
-    // toward stale directions and made per-frame support appear accumulated.
-    vec4 outPathPosition=vec4(0),outPathNormal=vec4(0);
-    float currentSupport=clamp(curPathNormal.z,0.0,1.0);
-    float historyStability=historyPathValid?clamp(histPathNormalBest.w,0.0,1.0):0.0;
-    float pathAgreement=0.0;
-
-    if(currentPathValid && historyPathValid){
-        vec3 currentDelta=curPathPosition.xyz-P;
-        vec3 historyDelta=histPathPositionBest.xyz-P;
-        float currentDistance=length(currentDelta);
-        float historyDistance=length(historyDelta);
-        if(currentDistance>1e-4 && historyDistance>1e-4){
-            float directionAgreement=clamp(dot(currentDelta/currentDistance,historyDelta/historyDistance),-1.0,1.0);
-            float normalAgreement=max(dot(rtOctDecode(curPathNormal.xy),rtOctDecode(histPathNormalBest.xy)),0.0);
-            float distanceAgreement=exp(-abs(currentDistance-historyDistance)/
-                max(0.10,0.15*min(currentDistance,historyDistance)));
-            pathAgreement=smoothstep(0.78,0.98,directionAgreement)*
-                          smoothstep(0.65,0.95,normalAgreement)*distanceAgreement;
-        }
-    }
-
-    if(isCheckerSkipped){
-        // No current trace was made for this checkerboard pixel. Reuse the
-        // geometry-validated historical record without claiming new support.
-        if(historyPathValid){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
-    }else if(currentPathValid){
-        // Modes 26 and 28 now describe this frame's actual traced paths.
-        // History affects only .w (stability), never the measured direction or
-        // per-frame support in .z.
-        outPathPosition=curPathPosition;
-        outPathNormal=curPathNormal;
-        if(historyPathValid){
-            // Agreement is a hard gate: a different first-hit path cannot
-            // inherit the confidence of the previous frame.
-            float stabilityAlpha=clamp(0.20+0.35*currentSupport,0.20,0.55);
-            outPathNormal.w=mix(historyStability,currentSupport,stabilityAlpha)*pathAgreement;
-        }else{
-            // A newly observed path starts provisional; repeated matching
-            // measurements are required before it becomes trusted.
-            outPathNormal.w=currentSupport*0.20;
-        }
-    }else if(historyPathValid){
-        // No radiance-bearing path was measured this frame. Retain the last
-        // valid record with a gentle stability decay, but do not call it new
-        // support (the .z value remains explicitly historical in this fallback).
-        outPathPosition=histPathPositionBest;
-        outPathNormal=histPathNormalBest;
-        outPathNormal.w=historyStability*0.995;
-    }
-    imageStore(imgGiPathPosition,px,outPathPosition);
-    imageStore(imgGiPathNormal,px,outPathNormal);
+    imageStore(imgGiDirectionBins1,px,out1);
+    imageStore(imgGiDirectionBins2,px,out2);
+    imageStore(imgGiDirectionCount,px,outCount);
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.
