@@ -65,7 +65,7 @@ float giDirectionalFilterFactor(vec4 centerA, vec4 centerB, vec4 neighborA, vec4
                                 out float overlap, out float confidence) {
     float centerEnergy = dot(centerA, vec4(1.0)) + centerB.x + centerB.y;
     float neighborEnergy = dot(neighborA, vec4(1.0)) + neighborB.x + neighborB.y;
-    overlap = 1.0;
+    overlap = 0.0;
     confidence = 0.0;
     if (centerEnergy <= 1e-5 || neighborEnergy <= 1e-5) return 1.0;
 
