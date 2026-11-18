@@ -724,8 +724,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "21: SVGF Firefly Rejection (white=preserved)",
                             "22: SVGF Incident Light Distribution (12 Lobes)",
                             "23: Radiance-Bearing Paths per Frame (log)",
-                            "24: Directional Mismatch (gray = no evidence) (neighbor agreement)",
-                            "25: Directional Filter Acceptance (white = mix) (spatial contribution)"
+                            "24: Direction Agreement (red = mismatch, green = match, blue = confidence)",
+                            "25: Directional Acceptance (red = reject, green = mix, blue = no evidence/confidence)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {
