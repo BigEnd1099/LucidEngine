@@ -723,7 +723,7 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "20: GI Relative Uncertainty (log)",
                             "21: SVGF Firefly Rejection (white=preserved)",
                             "22: SVGF Incident Light Distribution (6 Lobes)",
-                            "23: Directional Sample Confidence (effective samples)",
+                            "23: Directional Sample Confidence (0..1)",
                             "24: Directional Histogram Overlap (neighbor agreement)",
                             "25: Directional Filter Weight (spatial contribution)"
                         };
