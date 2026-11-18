@@ -60,6 +60,23 @@ vec3 giDirectionalDebugColor(vec4 a, vec4 b) {
     return c / total;
 }
 
+float giDirectionalFilterFactor(vec4 centerA, vec4 centerB, vec4 neighborA, vec4 neighborB,
+                                float centerHistory, float neighborHistory,
+                                out float overlap, out float confidence) {
+    float centerEnergy = dot(centerA, vec4(1.0)) + centerB.x + centerB.y;
+    float neighborEnergy = dot(neighborA, vec4(1.0)) + neighborB.x + neighborB.y;
+    overlap = 1.0;
+    confidence = 0.0;
+    if (centerEnergy <= 1e-5 || neighborEnergy <= 1e-5) return 1.0;
+
+    overlap = giDirectionalOverlap(centerA, neighborA, centerB, neighborB);
+    float centerSamples = centerB.z * max(centerHistory, 1.0);
+    float neighborSamples = neighborB.z * max(neighborHistory, 1.0);
+    confidence = smoothstep(0.5, 2.0, min(centerSamples, neighborSamples));
+    float directionalWeight = mix(0.22, 1.0, smoothstep(0.08, 0.58, overlap));
+    return mix(1.0, directionalWeight, confidence);
+}
+
 vec4 loadSrc(ivec2 p) {
     if (PASS == 0) return imageLoad(imgHistCur, p);
     if (PASS == 1 || PASS == 3) return imageLoad(imgA, p);
@@ -207,6 +224,57 @@ void main() {
     float depthTol = 0.005 * gC.z + 0.002;
     const int step = 1 << PASS;
     const float h[3] = float[3](0.375, 0.25, 0.0625);   // B3-spline taps for offsets 0, +-1, +-2
+
+    // Directional diagnostics use the same A-Trous footprint and geometric
+    // eligibility as the real pass. The factor itself is shared with filtering.
+    if (PASS == 3 && pc.u.x >= 23u && pc.u.x <= 25u) {
+        vec4 centerBinsA = imageLoad(imgGiDirectionBinsA, px);
+        vec4 centerBinsB = imageLoad(imgGiDirectionBinsB, px);
+        float centerHistory = unpackGiHistoryLen(gC.w);
+        if (pc.u.x == 23u) {
+            float effectiveSamples = centerBinsB.z * max(centerHistory, 1.0);
+            float t = clamp(effectiveSamples / 16.0, 0.0, 1.0);
+            vec3 confidenceColor = (effectiveSamples <= 1e-5)
+                ? vec3(0.02, 0.0, 0.08)
+                : (t < 0.25 ? mix(vec3(0.85, 0.04, 0.02), vec3(1.0, 0.75, 0.02), t * 4.0)
+                   : (t < 0.5 ? mix(vec3(1.0, 0.75, 0.02), vec3(0.08, 0.85, 0.12), (t - 0.25) * 4.0)
+                      : (t < 0.75 ? mix(vec3(0.08, 0.85, 0.12), vec3(0.02, 0.75, 1.0), (t - 0.5) * 4.0)
+                                  : mix(vec3(0.02, 0.75, 1.0), vec3(1.0), (t - 0.75) * 4.0)));
+            storeDst(px, vec4(confidenceColor, 1.0));
+            return;
+        }
+
+        float metricSum = 0.0;
+        float metricWeight = 0.0;
+        for (int j = -2; j <= 2; ++j) {
+            for (int i = -2; i <= 2; ++i) {
+                if (i == 0 && j == 0) continue;
+                ivec2 q = px + ivec2(i, j) * step;
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+                vec3 qNormal = rtOctDecode(gQ.xy);
+                float planeDist = abs(dot(nCv, rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size) - pCv));
+                float dn = max(0.0, dot(nC, qNormal));
+                float wd = exp(-planeDist / max(depthTol * float(step), 1e-4));
+                float wGeom = h[abs(i)] * h[abs(j)] * wd * dn * dn * dn * dn;
+                if (wGeom <= 1e-6) continue;
+
+                vec4 neighborBinsA = imageLoad(imgGiDirectionBinsA, q);
+                vec4 neighborBinsB = imageLoad(imgGiDirectionBinsB, q);
+                float overlap, confidence;
+                float factor = giDirectionalFilterFactor(centerBinsA, centerBinsB,
+                    neighborBinsA, neighborBinsB, centerHistory, unpackGiHistoryLen(gQ.w),
+                    overlap, confidence);
+                float metric = (pc.u.x == 24u) ? overlap : factor;
+                metricSum += metric * wGeom;
+                metricWeight += wGeom;
+            }
+        }
+        float result = (metricWeight > 1e-6) ? metricSum / metricWeight : 1.0;
+        storeDst(px, vec4(vec3(clamp(result, 0.0, 1.0)), 1.0));
+        return;
+    }
 
     vec4 momC = imageLoad(imgMomentsCur, px);
 
@@ -420,34 +488,12 @@ void main() {
             if (useDirectionalGuide) {
                 vec4 neighborDirectionA = imageLoad(imgGiDirectionBinsA, q);
                 vec4 neighborDirectionB = imageLoad(imgGiDirectionBinsB, q);
-                float centerDirectionEnergy = dot(centerDirectionA, vec4(1.0)) +
-                                              centerDirectionB.x + centerDirectionB.y;
-                float neighborDirectionEnergy = dot(neighborDirectionA, vec4(1.0)) +
-                                                neighborDirectionB.x + neighborDirectionB.y;
-                if (centerDirectionEnergy > 1e-5 && neighborDirectionEnergy > 1e-5) {
-                    float directionalOverlap = giDirectionalOverlap(
-                        centerDirectionA, neighborDirectionA, centerDirectionB, neighborDirectionB);
-                    // Histogram overlap measures shared incident-light energy, not a
-                    // dot product between two averaged ray directions.
-                    // A lobe histogram is useful evidence even on the first SPP=1
-                    // observation. B.z carries the temporally averaged count of
-                    // radiance-bearing paths, so confidence is based on actual
-                    // directional observations rather than an arbitrary history>=2 gate.
-                    float neighborHistoryLen = unpackGiHistoryLen(gQ.w);
-                    float centerDirectionalSamples = centerDirectionB.z * max(historyLen, 1.0);
-                    float neighborDirectionalSamples = neighborDirectionB.z * max(neighborHistoryLen, 1.0);
-                    float directionalSampleConfidence = smoothstep(0.5, 2.0,
-                        min(centerDirectionalSamples, neighborDirectionalSamples));
-                    // The non-zero energy guard above rejects empty histograms.
-                    // Do not impose a second absolute-radiance threshold here:
-                    // low-energy indirect light must still benefit from reconstruction.
-                    // Keep a non-trivial floor: angular mismatch should reduce
-                    // cross-lobe leakage, not carve a hard edge into the image.
-                    float directionalWeight = mix(0.22, 1.0,
-                        smoothstep(0.08, 0.58, directionalOverlap));
-                    float directionalConfidence = directionalSampleConfidence;
-                    wRgb *= mix(1.0, directionalWeight, directionalConfidence);
-                }
+                float directionalOverlap, directionalConfidence;
+                float directionalFactor = giDirectionalFilterFactor(
+                    centerDirectionA, centerDirectionB, neighborDirectionA, neighborDirectionB,
+                    historyLen, unpackGiHistoryLen(gQ.w),
+                    directionalOverlap, directionalConfidence);
+                wRgb *= directionalFactor;
             }
             sumRgb += safeQCol.rgb * wRgb;
             wRgbTotal += wRgb;
