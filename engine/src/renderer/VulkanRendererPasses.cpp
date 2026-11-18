@@ -1408,6 +1408,7 @@ namespace engine::renderer {
                 rtp.svgfFireflyFilterStrength = (m_rtSettings.denoiseEnabled && m_rtSettings.svgfFireflyFilterEnabled)
                     ? std::clamp(m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f) : 0.0f;
                 rtp.svgfDirectionalAtrousEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalAtrousEnabled;
+                rtp.svgfDirectionalPathGuideEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.svgfDirectionalPathGuideEnabled;
                 rtp.giDominanceRatioFilterEnabled = m_rtSettings.denoiseEnabled && m_rtSettings.giDominanceRatioFilterEnabled;
                 rtp.giDarkRatio = m_rtSettings.giDarkRatio;
                 rtp.giBrightRatio = m_rtSettings.giBrightRatio;
