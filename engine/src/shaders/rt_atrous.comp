@@ -32,6 +32,8 @@ layout(set = 1, binding = 22, rgba16f) uniform image2D imgGiDirectionBins0;
 layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
 layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
+layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -53,6 +55,33 @@ vec3 giDirectionalDebugColor(vec4 b0,vec4 b1,vec4 b2){
  float total=dot(b0,vec4(1))+dot(b1,vec4(1))+dot(b2,vec4(1));if(total<=1e-5)return vec3(0);
  vec3 color=vec3(0);for(int i=0;i<12;++i){float w=i<4?b0[i]:(i<8?b1[i-4]:b2[i-8]);color+=colors[i]*w;}return color/total;
 }
+vec3 giWorldPosition(ivec2 pixel, vec2 giSize) {
+    ivec2 depthSize=textureSize(uDepth,0);
+    vec2 uv=(vec2(pixel)+0.5)/giSize;
+    ivec2 depthPixel=clamp(ivec2(uv*vec2(depthSize)),ivec2(0),depthSize-1);
+    float depth=texelFetch(uDepth,depthPixel,0).r;
+    return rtWorldPos(vec2(pixel)+0.5,depth,giSize);
+}
+float giDirectionalPathFactor(vec3 centerSource,vec4 centerHit,vec4 centerHitNormal,float centerHistory,
+                              vec3 neighborSource,vec4 neighborHit,vec4 neighborHitNormal,float neighborHistory,
+                              out float similarity,out float confidence) {
+    similarity=1.0;confidence=0.0;
+    if(centerHit.w<=1e-6||neighborHit.w<=1e-6||centerHitNormal.w<=0.0||neighborHitNormal.w<=0.0)return 1.0;
+    vec3 centerDelta=centerHit.xyz-centerSource,neighborDelta=neighborHit.xyz-neighborSource;
+    float centerDistance=length(centerDelta),neighborDistance=length(neighborDelta);
+    if(centerDistance<=1e-4||neighborDistance<=1e-4)return 1.0;
+    float directionAgreement=clamp(dot(centerDelta/centerDistance,neighborDelta/neighborDistance),-1.0,1.0);
+    float hitNormalAgreement=max(dot(normalize(centerHitNormal.xyz),normalize(neighborHitNormal.xyz)),0.0);
+    float distanceAgreement=exp(-abs(centerDistance-neighborDistance)/max(0.10,0.20*min(centerDistance,neighborDistance)));
+    similarity=smoothstep(0.72,0.96,directionAgreement)*
+               mix(0.70,1.0,smoothstep(0.15,0.80,hitNormalAgreement))*
+               mix(0.75,1.0,distanceAgreement);
+    float evidence=min(max(centerHitNormal.w,0.0)*max(centerHistory,1.0),
+                       max(neighborHitNormal.w,0.0)*max(neighborHistory,1.0));
+    confidence=smoothstep(0.5,2.0,evidence);
+    return mix(1.0,mix(0.18,1.0,similarity),confidence);
+}
+
 float giDirectionalFilterFactor(vec4 c0,vec4 c1,vec4 c2,float cc,vec4 n0,vec4 n1,vec4 n2,float nc,
  float ch,float nh,out float overlap,out float confidence){
  float ce=dot(c0,vec4(1))+dot(c1,vec4(1))+dot(c2,vec4(1)),ne=dot(n0,vec4(1))+dot(n1,vec4(1))+dot(n2,vec4(1));
@@ -383,6 +412,10 @@ void main() {
     const bool useSvgf = (pc.f.w > 0.5);
     float historyLen = unpackGiHistoryLen(gC.w);
     bool useDirectionalGuide = (pc.u.y & 2u) != 0u;
+    bool useDirectionalPathGuide = (pc.u.y & 4u) != 0u;
+    vec4 centerPathPosition=useDirectionalPathGuide?imageLoad(imgGiPathPosition,px):vec4(0);
+    vec4 centerPathNormal=useDirectionalPathGuide?imageLoad(imgGiPathNormal,px):vec4(0);
+    vec3 centerWorldPosition=useDirectionalPathGuide?giWorldPosition(px,size):vec3(0);
     vec4 centerDirection0=useDirectionalGuide?imageLoad(imgGiDirectionBins0,px):vec4(0);
     vec4 centerDirection1=useDirectionalGuide?imageLoad(imgGiDirectionBins1,px):vec4(0);
     vec4 centerDirection2=useDirectionalGuide?imageLoad(imgGiDirectionBins2,px):vec4(0);
@@ -497,6 +530,16 @@ void main() {
                     neighborDirection0,neighborDirection1,neighborDirection2,neighborDirectionCount,historyLen,unpackGiHistoryLen(gQ.w),
                     directionalOverlap,directionalConfidence);
                 wRgb *= directionalFactor;
+            }
+            if(useDirectionalPathGuide){
+                vec4 neighborPathPosition=imageLoad(imgGiPathPosition,q);
+                vec4 neighborPathNormal=imageLoad(imgGiPathNormal,q);
+                vec3 neighborWorldPosition=giWorldPosition(q,size);
+                float pathSimilarity,pathConfidence;
+                float pathFactor=giDirectionalPathFactor(centerWorldPosition,centerPathPosition,centerPathNormal,historyLen,
+                    neighborWorldPosition,neighborPathPosition,neighborPathNormal,unpackGiHistoryLen(gQ.w),
+                    pathSimilarity,pathConfidence);
+                wRgb*=pathFactor;
             }
             sumRgb += safeQCol.rgb * wRgb;
             wRgbTotal += wRgb;
