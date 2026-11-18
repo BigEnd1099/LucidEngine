@@ -72,6 +72,10 @@ layout(set = 1, binding = 26, rgba16f) uniform image2D imgGiDirectionBinsPrev0;
 layout(set = 1, binding = 27, rgba16f) uniform image2D imgGiDirectionBinsPrev1;
 layout(set = 1, binding = 28, rgba16f) uniform image2D imgGiDirectionBinsPrev2;
 layout(set = 1, binding = 29, rgba16f) uniform image2D imgGiDirectionCountPrev;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
+layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiPathPositionPrev;
+layout(set = 1, binding = 33, rgba16f) uniform image2D imgGiPathNormalPrev;
 
 layout(set = 1, binding = 15, std430) buffer RtDiagnostics { uint counters[60]; } rtDiag;
 layout(set = 1, binding = 20, std430) readonly buffer WorldRadianceCacheBuf { WorldRadianceCell cells[]; } worldRadianceCache;
@@ -236,6 +240,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         imageStore(imgGiDirectionBins1,px,vec4(0));
         imageStore(imgGiDirectionBins2,px,vec4(0));
         imageStore(imgGiDirectionCount,px,vec4(0));
+        imageStore(imgGiPathPosition,px,vec4(0));
+        imageStore(imgGiPathNormal,px,vec4(0));
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
 
@@ -309,6 +315,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     float histLen = 0.0;
     float histHitDist = 0.0;
     vec4 histDirectionBins0=vec4(0),histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
+    vec4 histPathPositionBest=vec4(0),histPathNormalBest=vec4(0);
+    float histPathBestScore=0.0,histPathEnergy=0.0,histPathCount=0.0;
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -351,11 +359,19 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histDirectionBins1+=w*imageLoad(imgGiDirectionBinsPrev1,tp);
             histDirectionBins2+=w*imageLoad(imgGiDirectionBinsPrev2,tp);
             histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
+            vec4 prevPathPosition=imageLoad(imgGiPathPositionPrev,tp);
+            vec4 prevPathNormal=imageLoad(imgGiPathNormalPrev,tp);
+            histPathEnergy+=w*max(prevPathPosition.w,0.0);
+            histPathCount+=w*max(prevPathNormal.w,0.0);
+            float pathCandidateScore=w*max(prevPathPosition.w,0.0);
+            if(pathCandidateScore>histPathBestScore){histPathBestScore=pathCandidateScore;histPathPositionBest=prevPathPosition;histPathNormalBest=prevPathNormal;}
             wSum        += w;
         }
 
 
     }
+
+    if(wSum>0.05){histPathEnergy/=wSum;histPathCount/=wSum;}
 
     float maxHist = max(pc.f.x, 1.0);
     // Screen-space motion includes camera movement. It is not evidence that
@@ -829,6 +845,32 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     }
     imageStore(imgGiDirectionBins0,px,out0);imageStore(imgGiDirectionBins1,px,out1);
     imageStore(imgGiDirectionBins2,px,out2);imageStore(imgGiDirectionCount,px,outCount);
+
+    // Keep one measured first-hit path as a temporal reservoir. The stored position
+    // and normal are never averaged: mixing unrelated hit points would invent a path.
+    vec4 curPathPosition=imageLoad(imgGiPathPosition,px);
+    vec4 curPathNormal=imageLoad(imgGiPathNormal,px);
+    vec4 outPathPosition=curPathPosition,outPathNormal=curPathNormal;
+    if(isCheckerSkipped){
+        if(wSum>0.05 && histPathBestScore>0.0){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
+        else {outPathPosition=vec4(0);outPathNormal=vec4(0);}
+    }else if(wSum>0.05){
+        float currentMass=max(curPathPosition.w,0.0);
+        float historyMass=max(histPathEnergy,0.0)*max(histLen,1.0);
+        float totalMass=currentMass+historyMass;
+        if(totalMass>1e-6){
+            float chooseCurrent=ignTemporal(vec2(px),pc.u.w);
+            bool currentWins=(currentMass>0.0)&&(historyMass<=0.0 || chooseCurrent<currentMass/totalMass);
+            if(currentWins){outPathPosition.xyz=curPathPosition.xyz;outPathNormal.xyz=curPathNormal.xyz;}
+            else if(histPathBestScore>0.0){outPathPosition.xyz=histPathPositionBest.xyz;outPathNormal.xyz=histPathNormalBest.xyz;}
+            else {outPathPosition.xyz=curPathPosition.xyz;outPathNormal.xyz=curPathNormal.xyz;}
+        }
+        float guideAlpha=1.0/max(min(histLen+1.0,effectiveMaxHist),1.0);
+        outPathPosition.w=mix(histPathEnergy,curPathPosition.w,guideAlpha);
+        outPathNormal.w=mix(histPathCount,curPathNormal.w,guideAlpha);
+    }
+    imageStore(imgGiPathPosition,px,outPathPosition);
+    imageStore(imgGiPathNormal,px,outPathNormal);
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.
