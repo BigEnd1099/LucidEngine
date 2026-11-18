@@ -174,6 +174,8 @@ namespace engine::renderer {
         VkBuffer m_worldCacheBuffer{VK_NULL_HANDLE};
         VkBuffer m_surfaceHistoryBuffer{VK_NULL_HANDLE};
         VmaAllocation m_surfaceHistoryAllocation{VK_NULL_HANDLE};
+        VkBuffer m_giSurfacePatchBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_giSurfacePatchAllocation{VK_NULL_HANDLE};
         bool m_surfaceHistoryNeedsClear{true};
         uint32_t m_surfaceHistoryLightingEpoch{1u};
         bool m_surfaceHistoryCacheStateKnown{false};

@@ -58,7 +58,7 @@ namespace engine::renderer {
         if (vkCreateSampler(dev, &si, nullptr, &m_sampler) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create sampler");
 
-        VkDescriptorSetLayoutBinding b[34]{};
+        VkDescriptorSetLayoutBinding b[35]{};
         for (uint32_t i = 0; i < 15; ++i) {
             b[i].binding = i;
             b[i].descriptorCount = 1;
@@ -99,8 +99,12 @@ namespace engine::renderer {
             b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         }
+        b[34].binding = 34;
+        b[34].descriptorCount = 1;
+        b[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[34].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo li{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        li.bindingCount = 34;
+        li.bindingCount = 35;
         li.pBindings = b;
         if (vkCreateDescriptorSetLayout(dev, &li, nullptr, &m_setLayout) != VK_SUCCESS)
             throw std::runtime_error("RtDenoiser: failed to create set layout");
@@ -179,6 +183,19 @@ namespace engine::renderer {
             throw std::runtime_error("RtDenoiser: diagnostics allocation is not persistently mapped");
         std::memset(m_diagnosticsMapped, 0, sizeof(uint32_t) * kRtDiagnosticCounterCount);
 
+        // Current-frame world-space GI patch atlas: 65,536 cells, 12 directional lobes,
+        // each storing fixed-point RGB energy + sample weight (196 bytes/cell).
+        constexpr VkDeviceSize kGiSurfacePatchBytes = VkDeviceSize(196u) * 65536u;
+        VkBufferCreateInfo patchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        patchInfo.size = kGiSurfacePatchBytes;
+        patchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        patchInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo patchAlloc{};
+        patchAlloc.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &patchInfo, &patchAlloc,
+                            &m_giSurfacePatchBuffer, &m_giSurfacePatchAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("RtDenoiser: failed to allocate GI surface-patch atlas");
+
         // Dedicated 25 cm surface-history hash table (48 bytes/cell, 12 MiB).
         // It is separate from the lower-resolution radiance-probe cache at binding 20.
         constexpr VkDeviceSize kSurfaceHistoryBytes = VkDeviceSize(48u) * 262144u;
@@ -237,6 +254,9 @@ namespace engine::renderer {
         destroyImages();
         if (m_diagnosticsBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_diagnosticsBuffer, m_diagnosticsAllocation);
         if (m_surfaceHistoryBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_surfaceHistoryBuffer, m_surfaceHistoryAllocation);
+        if (m_giSurfacePatchBuffer) vmaDestroyBuffer(m_context->getAllocator(), m_giSurfacePatchBuffer, m_giSurfacePatchAllocation);
+        m_giSurfacePatchBuffer = VK_NULL_HANDLE;
+        m_giSurfacePatchAllocation = VK_NULL_HANDLE;
         m_diagnosticsBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryBuffer = VK_NULL_HANDLE;
         m_surfaceHistoryAllocation = VK_NULL_HANDLE;
@@ -369,7 +389,7 @@ namespace engine::renderer {
             const VkImageView storageViews[6] = { m_imgS.view, m_imgA.view, m_geom[p].view,
                                                   m_geom[q].view, m_hist[p].view, m_hist[q].view };
             VkDescriptorImageInfo storageInfos[6];
-            VkWriteDescriptorSet writes[34]{};
+            VkWriteDescriptorSet writes[35]{};
             writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writes[0].dstSet = m_sets[p];
             writes[0].dstBinding = 0;
@@ -538,7 +558,14 @@ namespace engine::renderer {
                 writes[30 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
                 writes[30 + i].pImageInfo = &giPathInfos[i];
             }
-            vkUpdateDescriptorSets(m_context->getDevice(), 34, writes, 0, nullptr);
+            const VkDescriptorBufferInfo giSurfacePatchInfo{ m_giSurfacePatchBuffer, 0, VK_WHOLE_SIZE };
+            writes[34] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[34].dstSet = m_sets[p];
+            writes[34].dstBinding = 34;
+            writes[34].descriptorCount = 1;
+            writes[34].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[34].pBufferInfo = &giSurfacePatchInfo;
+            vkUpdateDescriptorSets(m_context->getDevice(), 35, writes, 0, nullptr);
         }
     }
 
@@ -658,6 +685,23 @@ namespace engine::renderer {
             if (m_surfaceHistoryLightingEpoch == 0u) m_surfaceHistoryLightingEpoch = 1u;
             m_giHistoryValid = false;
         }
+
+        // Rebuild the current-frame world-space patch atlas from traced paths.
+        // This resource is separate from WRC and Persistent Surface History Cache.
+        vkCmdFillBuffer(cmd, m_giSurfacePatchBuffer, 0, VK_WHOLE_SIZE, 0u);
+        VkBufferMemoryBarrier2 patchClearBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+        patchClearBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        patchClearBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        patchClearBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        patchClearBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        patchClearBarrier.srcQueueFamilyIndex = patchClearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        patchClearBarrier.buffer = m_giSurfacePatchBuffer;
+        patchClearBarrier.offset = 0;
+        patchClearBarrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo patchClearDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        patchClearDependency.bufferMemoryBarrierCount = 1;
+        patchClearDependency.pBufferMemoryBarriers = &patchClearBarrier;
+        vkCmdPipelineBarrier2(cmd, &patchClearDependency);
 
         // Retrieve previous frame's GPU timestamps if available
         if (params.lightChanged) {

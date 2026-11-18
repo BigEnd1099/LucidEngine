@@ -34,6 +34,9 @@ layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
 layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
 layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCache { uint words[]; } giSurfacePatchCache;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 49u;
 
 layout(push_constant) uniform PC {
     mat4 unused;
@@ -62,6 +65,40 @@ vec3 giWorldPosition(ivec2 pixel, vec2 giSize) {
     float depth=texelFetch(uDepth,depthPixel,0).r;
     return rtWorldPos(vec2(pixel)+0.5,depth,giSize);
 }
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0));
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+bool loadGiSurfacePatch(vec3 worldPos, vec3 worldNormal, out vec3 radiance, out float support) {
+    radiance = vec3(0.0); support = 0.0;
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint cellWord = 0u; bool found = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_WORDS_PER_CELL;
+        uint candidateKey = giSurfacePatchCache.words[candidate];
+        if (candidateKey == key) { cellWord = candidate; found = true; break; }
+        if (candidateKey == 0u) break;
+    }
+    if (!found) return false;
+    vec3 rgbSum = vec3(0.0); float weightSum = 0.0;
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint src = cellWord + 1u + lobe * 4u;
+        rgbSum += vec3(giSurfacePatchCache.words[src], giSurfacePatchCache.words[src + 1u],
+                       giSurfacePatchCache.words[src + 2u]);
+        weightSum += float(giSurfacePatchCache.words[src + 3u]);
+    }
+    if (weightSum <= 1.0) return false;
+    radiance = rgbSum * (128.0 / weightSum);
+    support = weightSum / 4096.0;
+    return true;
+}
+
 float giDirectionalPathFactor(vec3 centerSource,vec4 centerHit,vec4 centerHitNormal,
                               vec3 neighborSource,vec4 neighborHit,vec4 neighborHitNormal,
                               out float similarity,out float confidence) {
@@ -179,6 +216,18 @@ void main() {
             vec4 hitNormal=imageLoad(imgGiPathNormal,px);
             float support=(hitPosition.w>1e-6)?clamp(hitNormal.z,0.0,1.0):0.0;
             storeDst(px,vec4(vec3(support),1.0));
+            return;
+        } else if (mode == 29u || mode == 30u) {
+            vec3 patchRadiance; float patchSupport;
+            bool patchValid = loadGiSurfacePatch(giWorldPosition(px,size), rtOctDecode(gC.xy), patchRadiance, patchSupport);
+            if (!patchValid) storeDst(px, vec4(0.0, 0.0, 0.0, 1.0));
+            else if (mode == 29u) {
+                vec3 encoded = log2(vec3(1.0) + max(patchRadiance, vec3(0.0)) * 4.0) / 8.0;
+                storeDst(px, vec4(clamp(encoded, 0.0, 1.0), 1.0));
+            } else {
+                float confidence = 1.0 - exp(-patchSupport / 4.0);
+                storeDst(px, vec4(vec3(confidence), 1.0));
+            }
             return;
         } else if (mode == 8u) {
             vec4 caustic = imageLoad(imgCaustics, px);
@@ -581,6 +630,13 @@ void main() {
         // Final pass: apply spatial strength cleanly
         float s = clamp(pc.f.x, 0.0, 1.0);
         vec4 finalValue = mix(center, filtered, s);
+        // Reconstruct from paths grouped by world-space receiver position and normal,
+        // rather than blurring radiance between unrelated screen-space pixels.
+        vec3 patchRadiance; float patchSupport;
+        if (loadGiSurfacePatch(giWorldPosition(px, size), nC, patchRadiance, patchSupport)) {
+            float patchConfidence = 1.0 - exp(-patchSupport / 4.0);
+            finalValue.rgb = mix(finalValue.rgb, patchRadiance, 0.65 * patchConfidence);
+        }
         storeDst(px, finalValue);
         persistFinalSurfaceHistory(px, size, gC, finalValue.rgb);
     }

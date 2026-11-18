@@ -32,6 +32,9 @@ layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
 layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
 layout(set = 1, binding = 31, rgba16f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 34, std430) buffer GiSurfacePatchCache { uint words[]; } giSurfacePatchCache;
+const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
+const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 49u;
 const vec3 GI_DIRECTION_LOBES[12] = vec3[](
  vec3(0.0,0.5257311121,0.8506508084),vec3(0.0,-0.5257311121,0.8506508084),
  vec3(0.0,0.5257311121,-0.8506508084),vec3(0.0,-0.5257311121,-0.8506508084),
@@ -39,6 +42,38 @@ const vec3 GI_DIRECTION_LOBES[12] = vec3[](
  vec3(0.5257311121,-0.8506508084,0.0),vec3(-0.5257311121,-0.8506508084,0.0),
  vec3(0.8506508084,0.0,0.5257311121),vec3(0.8506508084,0.0,-0.5257311121),
  vec3(-0.8506508084,0.0,0.5257311121),vec3(-0.8506508084,0.0,-0.5257311121));
+uint giSurfacePatchKey(vec3 worldPos, vec3 worldNormal) {
+    ivec3 cell = ivec3(floor(worldPos * 5.0)); // 20 cm world-space surface patches
+    vec2 oct = rtOctEncode(normalize(worldNormal)) * 0.5 + 0.5;
+    uvec2 qn = uvec2(round(clamp(oct, 0.0, 1.0) * 31.0));
+    uint h = pcgHash(uint(cell.x) ^ pcgHash(uint(cell.y) + 0x9e3779b9u));
+    h = pcgHash(h ^ uint(cell.z) ^ (qn.x << 10u) ^ (qn.y << 20u));
+    return h | 1u;
+}
+
+void storeGiSurfacePatch(vec3 worldPos, vec3 worldNormal, vec4 bins[12]) {
+    uint key = giSurfacePatchKey(worldPos, worldNormal);
+    uint base = key % GI_SURFACE_PATCH_CELL_COUNT;
+    uint cellWord = 0u;
+    bool found = false;
+    for (uint probe = 0u; probe < 8u; ++probe) {
+        uint candidate = ((base + probe) % GI_SURFACE_PATCH_CELL_COUNT) * GI_SURFACE_PATCH_WORDS_PER_CELL;
+        uint observed = atomicCompSwap(giSurfacePatchCache.words[candidate], 0u, key);
+        if (observed == 0u || observed == key) { cellWord = candidate; found = true; break; }
+    }
+    if (!found) return;
+    // Fixed-point atomics avoid requiring optional floating-point atomic features.
+    for (uint lobe = 0u; lobe < 12u; ++lobe) {
+        uint w = uint(round(max(bins[lobe].a, 0.0) * 4096.0));
+        if (w == 0u) continue;
+        uint dst = cellWord + 1u + lobe * 4u;
+        atomicAdd(giSurfacePatchCache.words[dst + 0u], uint(round(clamp(bins[lobe].r, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 1u], uint(round(clamp(bins[lobe].g, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 2u], uint(round(clamp(bins[lobe].b, 0.0, 256.0) * 32.0)));
+        atomicAdd(giSurfacePatchCache.words[dst + 3u], w);
+    }
+}
+
 void encodeGiDirection(vec3 direction,out vec4 bins0,out vec4 bins1,out vec4 bins2){
  vec3 d=normalize(direction);float weights[12];float total=0.0;
  for(int i=0;i<12;++i){float c=max(dot(d,GI_DIRECTION_LOBES[i]),0.0);weights[i]=pow(c,8.0);total+=weights[i];}
@@ -297,6 +332,8 @@ float grazingBias = (1.0 - nDotVPrimary) * max(0.006, distToCam * 0.0025);
 vec3 origin = P + N * (bias + grazingBias) + viewDir * (grazingBias * 0.5);
 
 vec3 gi = vec3(0.0);
+vec4 giPatchBins[12];
+for (int patchBin = 0; patchBin < 12; ++patchBin) giPatchBins[patchBin] = vec4(0.0);
 vec4 giDirectionBins0=vec4(0),giDirectionBins1=vec4(0),giDirectionBins2=vec4(0);
 float giDirectionSampleCount=0.0;
 vec3 giPathPosition=vec3(0.0),giPathNormal=vec3(0.0);
@@ -562,6 +599,11 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
     if (sampleEnergy > 1e-5) {
         vec4 sampleBins0,sampleBins1,sampleBins2;
         encodeGiDirection(primaryIncomingDirection,sampleBins0,sampleBins1,sampleBins2);
+        for (int patchBin = 0; patchBin < 12; ++patchBin) {
+            float directionWeight = patchBin < 4 ? sampleBins0[patchBin] :
+                                    (patchBin < 8 ? sampleBins1[patchBin - 4] : sampleBins2[patchBin - 8]);
+            giPatchBins[patchBin] += vec4(sampleRadiance * directionWeight, directionWeight);
+        }
         giDirectionBins0+=sampleBins0*sampleEnergy;
         giDirectionBins1+=sampleBins1*sampleEnergy;
         giDirectionBins2+=sampleBins2*sampleEnergy;
@@ -576,6 +618,10 @@ if (doAO && b == 0 && found && hitDistance > 0.02 && hitDistance < AO_DISTANCE)
         }
     }
 }
+
+// Consolidate all successful paths from this pixel into a world-space patch
+// keyed by the primary receiving surface, retaining separate directional lobes.
+if (doGI) storeGiSurfacePatch(P, N, giPatchBins);
 
 float invSamples = 1.0 / float(samples);
 gi = sanitizeHDR(gi * invSamples);

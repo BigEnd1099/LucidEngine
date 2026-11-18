@@ -32,7 +32,9 @@ namespace engine::renderer {
         SvgfDirectionalFilterWeight = 25,
         SvgfDirectionalPathDirection = 26,
         SvgfDirectionalPathConfidence = 27,
-        SvgfDirectionalPathSupport = 28
+        SvgfDirectionalPathSupport = 28,
+        GiSurfacePatchRadiance = 29,
+        GiSurfacePatchConfidence = 30
     };
 
     struct RtSettings {
