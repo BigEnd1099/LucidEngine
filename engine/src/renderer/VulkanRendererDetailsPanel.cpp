@@ -669,9 +669,12 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                         ImGui::BeginDisabled(!m_rtSettings.svgfFireflyFilterEnabled);
                         ImGui::SliderFloat("SVGF Firefly Filter Strength", &m_rtSettings.svgfFireflyFilterStrength, 0.0f, 1.0f, "%.2f");
                         ImGui::EndDisabled();
-                        ImGui::Checkbox("SVGF Directional À-Trous", &m_rtSettings.svgfDirectionalAtrousEnabled);
+                        ImGui::Checkbox("SVGF Directional À-Trous (12-bin guide)", &m_rtSettings.svgfDirectionalAtrousEnabled);
                         if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Uses the temporally stabilized first-bounce incoming-light direction to stop spatial filtering across different illumination directions.");
+                            ImGui::SetTooltip("Legacy mode: compares the temporally accumulated 12-lobe incident-radiance histogram.");
+                        ImGui::Checkbox("SVGF Directional Path Guide (real hits)", &m_rtSettings.svgfDirectionalPathGuideEnabled);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Stores an energy-weighted representative first-hit position and normal from actual traced GI paths, then reprojects the selected path temporally. A-Trous compares measured ray directions and hit geometry.");
                         ImGui::Checkbox("GI Dynamic Brightness Filter (Ciemne/Jasne)", &m_rtSettings.giDominanceRatioFilterEnabled);
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Dwa progi jasności (0..1) z płynną strefą średnią: tłumi szpilki w cieniach i chroni mocne światło przed ściąganiem w dół.");
