@@ -730,7 +730,8 @@ void VulkanRenderer::drawEditorDetailsPanel(ecs::Registry& registry, core::Engin
                             "24: Direction Agreement (red = mismatch, green = match, blue = confidence)",
                             "25: Directional Acceptance (red = reject, green = mix, blue = no evidence/confidence)",
                             "26: Real First-Hit Path Direction (RGB = world-space direction)",
-                            "27: Real First-Hit Path Confidence (history-weighted path count)"
+                            "27: Real First-Hit Path Stability (temporal path agreement)",
+                            "28: Real First-Hit Path Support (fraction of GI samples with valid hits)"
                         };
                         int currentDebugMode = static_cast<int>(m_rtSettings.debugMode);
                         if (ImGui::Combo(editorText("details.rt_debug_view", "RT Debug View"), &currentDebugMode, debugModes, IM_ARRAYSIZE(debugModes))) {

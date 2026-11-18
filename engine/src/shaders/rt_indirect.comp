@@ -591,7 +591,11 @@ imageStore(imgGiDirectionBins1,px,giDirectionBins1*invSamples);
 imageStore(imgGiDirectionBins2,px,giDirectionBins2*invSamples);
 imageStore(imgGiDirectionCount,px,vec4(giDirectionSampleCount,0,0,0));
 imageStore(imgGiPathPosition,px,vec4(giPathPosition,giPathEnergy));
-imageStore(imgGiPathNormal,px,vec4(giPathNormal,giPathCount));
+vec2 encodedGiPathNormal = (giPathCount > 0.0) ? rtOctEncode(normalize(giPathNormal)) : vec2(0.0);
+float giPathSupport = clamp(giPathCount / float(max(samples, 1)), 0.0, 1.0);
+// .xy = measured first-hit normal, .z = fraction of samples with a valid
+// radiance-bearing first hit, .w = temporal path-stability confidence.
+imageStore(imgGiPathNormal,px,vec4(encodedGiPathNormal,giPathSupport,0.0));
 if (debugRawGi) imageStore(imgRawGi, px, vec4(gi, vis));
 if (debugCaustics) imageStore(imgCaustics, px, vec4(sanitizeHDR(causticRadiance * invSamples), causticHitCount * invSamples));
 diagValues[0] = diagSurfaceHits;

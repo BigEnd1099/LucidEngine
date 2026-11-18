@@ -31,7 +31,8 @@ namespace engine::renderer {
         SvgfDirectionalOverlap = 24,
         SvgfDirectionalFilterWeight = 25,
         SvgfDirectionalPathDirection = 26,
-        SvgfDirectionalPathConfidence = 27
+        SvgfDirectionalPathConfidence = 27,
+        SvgfDirectionalPathSupport = 28
     };
 
     struct RtSettings {

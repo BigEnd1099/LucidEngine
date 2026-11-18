@@ -62,23 +62,24 @@ vec3 giWorldPosition(ivec2 pixel, vec2 giSize) {
     float depth=texelFetch(uDepth,depthPixel,0).r;
     return rtWorldPos(vec2(pixel)+0.5,depth,giSize);
 }
-float giDirectionalPathFactor(vec3 centerSource,vec4 centerHit,vec4 centerHitNormal,float centerHistory,
-                              vec3 neighborSource,vec4 neighborHit,vec4 neighborHitNormal,float neighborHistory,
+float giDirectionalPathFactor(vec3 centerSource,vec4 centerHit,vec4 centerHitNormal,
+                              vec3 neighborSource,vec4 neighborHit,vec4 neighborHitNormal,
                               out float similarity,out float confidence) {
     similarity=1.0;confidence=0.0;
-    if(centerHit.w<=1e-6||neighborHit.w<=1e-6||centerHitNormal.w<=0.0||neighborHitNormal.w<=0.0)return 1.0;
+    if(centerHit.w<=1e-6||neighborHit.w<=1e-6||
+       centerHitNormal.z<=0.0||neighborHitNormal.z<=0.0||
+       centerHitNormal.w<=0.0||neighborHitNormal.w<=0.0)return 1.0;
     vec3 centerDelta=centerHit.xyz-centerSource,neighborDelta=neighborHit.xyz-neighborSource;
     float centerDistance=length(centerDelta),neighborDistance=length(neighborDelta);
     if(centerDistance<=1e-4||neighborDistance<=1e-4)return 1.0;
     float directionAgreement=clamp(dot(centerDelta/centerDistance,neighborDelta/neighborDistance),-1.0,1.0);
-    float hitNormalAgreement=max(dot(normalize(centerHitNormal.xyz),normalize(neighborHitNormal.xyz)),0.0);
+    float hitNormalAgreement=max(dot(rtOctDecode(centerHitNormal.xy),rtOctDecode(neighborHitNormal.xy)),0.0);
     float distanceAgreement=exp(-abs(centerDistance-neighborDistance)/max(0.10,0.20*min(centerDistance,neighborDistance)));
     similarity=smoothstep(0.72,0.96,directionAgreement)*
                mix(0.70,1.0,smoothstep(0.15,0.80,hitNormalAgreement))*
                mix(0.75,1.0,distanceAgreement);
-    float evidence=min(max(centerHitNormal.w,0.0)*max(centerHistory,1.0),
-                       max(neighborHitNormal.w,0.0)*max(neighborHistory,1.0));
-    confidence=smoothstep(0.5,2.0,evidence);
+    // .w is a measured temporal consistency score, not history length or hit count.
+    confidence=min(clamp(centerHitNormal.w,0.0,1.0),clamp(neighborHitNormal.w,0.0,1.0));
     return mix(1.0,mix(0.18,1.0,similarity),confidence);
 }
 
@@ -164,15 +165,20 @@ void main() {
         } else if (mode == 26u) {
             vec4 hitPosition=imageLoad(imgGiPathPosition,px);
             vec4 hitNormal=imageLoad(imgGiPathNormal,px);
-            if(hitPosition.w<=1e-6||hitNormal.w<=0.0) storeDst(px,vec4(0,0,0,1));
+            if(hitPosition.w<=1e-6||hitNormal.z<=0.0) storeDst(px,vec4(0,0,0,1));
             else {vec3 source=giWorldPosition(px,size);vec3 direction=normalize(hitPosition.xyz-source);storeDst(px,vec4(direction*0.5+0.5,1));}
             return;
         } else if (mode == 27u) {
             vec4 hitPosition=imageLoad(imgGiPathPosition,px);
             vec4 hitNormal=imageLoad(imgGiPathNormal,px);
-            float evidence=(hitPosition.w>1e-6&&hitNormal.w>0.0)?hitNormal.w*unpackGiHistoryLen(gC.w):0.0;
-            float confidence=smoothstep(0.5,2.0,evidence);
-            storeDst(px,vec4(confidence,confidence*confidence,1.0-confidence,1.0));
+            float stability=(hitPosition.w>1e-6&&hitNormal.z>0.0)?clamp(hitNormal.w,0.0,1.0):0.0;
+            storeDst(px,vec4(stability,stability*stability,1.0-stability,1.0));
+            return;
+        } else if (mode == 28u) {
+            vec4 hitPosition=imageLoad(imgGiPathPosition,px);
+            vec4 hitNormal=imageLoad(imgGiPathNormal,px);
+            float support=(hitPosition.w>1e-6)?clamp(hitNormal.z,0.0,1.0):0.0;
+            storeDst(px,vec4(vec3(support),1.0));
             return;
         } else if (mode == 8u) {
             vec4 caustic = imageLoad(imgCaustics, px);
@@ -549,8 +555,8 @@ void main() {
                 vec4 neighborPathNormal=imageLoad(imgGiPathNormal,q);
                 vec3 neighborWorldPosition=giWorldPosition(q,size);
                 float pathSimilarity,pathConfidence;
-                float pathFactor=giDirectionalPathFactor(centerWorldPosition,centerPathPosition,centerPathNormal,historyLen,
-                    neighborWorldPosition,neighborPathPosition,neighborPathNormal,unpackGiHistoryLen(gQ.w),
+                float pathFactor=giDirectionalPathFactor(centerWorldPosition,centerPathPosition,centerPathNormal,
+                    neighborWorldPosition,neighborPathPosition,neighborPathNormal,
                     pathSimilarity,pathConfidence);
                 wRgb*=pathFactor;
             }

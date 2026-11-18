@@ -316,7 +316,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     float histHitDist = 0.0;
     vec4 histDirectionBins0=vec4(0),histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
     vec4 histPathPositionBest=vec4(0),histPathNormalBest=vec4(0);
-    float histPathBestScore=0.0,histPathEnergy=0.0,histPathCount=0.0;
+    float histPathBestScore=0.0,histPathEnergy=0.0;
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -362,7 +362,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             vec4 prevPathPosition=imageLoad(imgGiPathPositionPrev,tp);
             vec4 prevPathNormal=imageLoad(imgGiPathNormalPrev,tp);
             histPathEnergy+=w*max(prevPathPosition.w,0.0);
-            histPathCount+=w*max(prevPathNormal.w,0.0);
             float pathCandidateScore=w*max(prevPathPosition.w,0.0);
             if(pathCandidateScore>histPathBestScore){histPathBestScore=pathCandidateScore;histPathPositionBest=prevPathPosition;histPathNormalBest=prevPathNormal;}
             wSum        += w;
@@ -371,7 +370,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
 
     }
 
-    if(wSum>0.05){histPathEnergy/=wSum;histPathCount/=wSum;}
+    if(wSum>0.05){histPathEnergy/=wSum;}
 
     float maxHist = max(pc.f.x, 1.0);
     // Screen-space motion includes camera movement. It is not evidence that
@@ -846,28 +845,65 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     imageStore(imgGiDirectionBins0,px,out0);imageStore(imgGiDirectionBins1,px,out1);
     imageStore(imgGiDirectionBins2,px,out2);imageStore(imgGiDirectionCount,px,outCount);
 
-    // Keep one measured first-hit path as a temporal reservoir. The stored position
-    // and normal are never averaged: mixing unrelated hit points would invent a path.
+    // Keep one measured first-hit path as a temporal reservoir. Hit positions
+    // and encoded normals are selected, never averaged into a synthetic path.
+    // The normal image stores: oct-normal.xy, per-frame hit support.z,
+    // temporal path-stability confidence.w.
     vec4 curPathPosition=imageLoad(imgGiPathPosition,px);
     vec4 curPathNormal=imageLoad(imgGiPathNormal,px);
+    bool currentPathValid = curPathPosition.w > 1e-6 && curPathNormal.z > 0.0;
+    bool historyPathValid = wSum > 0.05 && histPathBestScore > 0.0 &&
+                            histPathPositionBest.w > 1e-6 && histPathNormalBest.z > 0.0;
     vec4 outPathPosition=curPathPosition,outPathNormal=curPathNormal;
+    float currentSupport=clamp(curPathNormal.z,0.0,1.0);
+    float historyStability=historyPathValid?clamp(histPathNormalBest.w,0.0,1.0):0.0;
+    float pathAgreement=0.0;
+
+    if(currentPathValid && historyPathValid){
+        vec3 currentDelta=curPathPosition.xyz-P;
+        vec3 historyDelta=histPathPositionBest.xyz-P;
+        float currentDistance=length(currentDelta);
+        float historyDistance=length(historyDelta);
+        if(currentDistance>1e-4 && historyDistance>1e-4){
+            float directionAgreement=clamp(dot(currentDelta/currentDistance,historyDelta/historyDistance),-1.0,1.0);
+            float normalAgreement=max(dot(rtOctDecode(curPathNormal.xy),rtOctDecode(histPathNormalBest.xy)),0.0);
+            float distanceAgreement=exp(-abs(currentDistance-historyDistance)/
+                max(0.10,0.15*min(currentDistance,historyDistance)));
+            pathAgreement=smoothstep(0.78,0.98,directionAgreement)*
+                          smoothstep(0.65,0.95,normalAgreement)*distanceAgreement;
+        }
+    }
+
     if(isCheckerSkipped){
-        if(wSum>0.05 && histPathBestScore>0.0){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
+        if(historyPathValid){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
         else {outPathPosition=vec4(0);outPathNormal=vec4(0);}
+        // A checkerboard-skipped pixel has no new measurement: preserve the
+        // reprojection confidence rather than manufacturing fresh evidence.
     }else if(wSum>0.05){
         float currentMass=max(curPathPosition.w,0.0);
         float historyMass=max(histPathEnergy,0.0)*max(histLen,1.0);
         float totalMass=currentMass+historyMass;
-        if(totalMass>1e-6){
-            float chooseCurrent=ignTemporal(vec2(px),pc.u.w);
-            bool currentWins=(currentMass>0.0)&&(historyMass<=0.0 || chooseCurrent<currentMass/totalMass);
-            if(currentWins){outPathPosition.xyz=curPathPosition.xyz;outPathNormal.xyz=curPathNormal.xyz;}
-            else if(histPathBestScore>0.0){outPathPosition.xyz=histPathPositionBest.xyz;outPathNormal.xyz=histPathNormalBest.xyz;}
-            else {outPathPosition.xyz=curPathPosition.xyz;outPathNormal.xyz=curPathNormal.xyz;}
+        bool currentWins=currentPathValid && (historyMass<=0.0 ||
+            ignTemporal(vec2(px),pc.u.w)<currentMass/max(totalMass,1e-6));
+        if(currentWins){outPathPosition=curPathPosition;outPathNormal=curPathNormal;}
+        else if(historyPathValid){outPathPosition=histPathPositionBest;outPathNormal=histPathNormalBest;}
+        else if(currentPathValid){outPathPosition=curPathPosition;outPathNormal=curPathNormal;}
+        else {outPathPosition=vec4(0);outPathNormal=vec4(0);}
+
+        if(currentPathValid && historyPathValid){
+            // Agreement is a hard gate: a different first-hit path cannot
+            // inherit the confidence of the previous reservoir.
+            float stabilityAlpha=clamp(0.20+0.35*currentSupport,0.20,0.55);
+            outPathNormal.w=mix(historyStability,currentSupport,stabilityAlpha)*pathAgreement;
+        }else if(currentPathValid){
+            // A newly observed path starts provisional; repeated matching
+            // measurements are required before it becomes trusted.
+            outPathNormal.w=currentSupport*0.20;
+        }else if(historyPathValid){
+            outPathNormal.w=historyStability*0.995;
+        }else{
+            outPathNormal.w=0.0;
         }
-        float guideAlpha=1.0/max(min(histLen+1.0,effectiveMaxHist),1.0);
-        outPathPosition.w=mix(histPathEnergy,curPathPosition.w,guideAlpha);
-        outPathNormal.w=mix(histPathCount,curPathNormal.w,guideAlpha);
     }
     imageStore(imgGiPathPosition,px,outPathPosition);
     imageStore(imgGiPathNormal,px,outPathNormal);
