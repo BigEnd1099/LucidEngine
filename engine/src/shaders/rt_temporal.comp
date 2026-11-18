@@ -904,6 +904,13 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }else{
             outPathNormal.w=0.0;
         }
+    }else if(currentPathValid){
+        // First frame / rejected reprojection: keep the path as provisional
+        // evidence. It can gain confidence only after a later matching trace.
+        outPathNormal.w=currentSupport*0.20;
+    }else{
+        outPathPosition=vec4(0);
+        outPathNormal=vec4(0);
     }
     imageStore(imgGiPathPosition,px,outPathPosition);
     imageStore(imgGiPathNormal,px,outPathNormal);
