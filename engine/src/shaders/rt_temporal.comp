@@ -316,7 +316,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     float histHitDist = 0.0;
     vec4 histDirectionBins0=vec4(0),histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
     vec4 histPathPositionBest=vec4(0),histPathNormalBest=vec4(0);
-    float histPathBestScore=0.0,histPathEnergy=0.0;
+    float histPathBestScore=0.0;
     float wSum = 0.0;
 
     ivec2 fullMotionSize = textureSize(uMotion, 0).xy;
@@ -361,7 +361,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
             vec4 prevPathPosition=imageLoad(imgGiPathPositionPrev,tp);
             vec4 prevPathNormal=imageLoad(imgGiPathNormalPrev,tp);
-            histPathEnergy+=w*max(prevPathPosition.w,0.0);
             float pathCandidateScore=w*max(prevPathPosition.w,0.0);
             if(pathCandidateScore>histPathBestScore){histPathBestScore=pathCandidateScore;histPathPositionBest=prevPathPosition;histPathNormalBest=prevPathNormal;}
             wSum        += w;
@@ -369,8 +368,6 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
 
 
     }
-
-    if(wSum>0.05){histPathEnergy/=wSum;}
 
     float maxHist = max(pc.f.x, 1.0);
     // Screen-space motion includes camera movement. It is not evidence that
