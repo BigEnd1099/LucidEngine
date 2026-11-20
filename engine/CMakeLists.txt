@@ -190,14 +190,16 @@ if(Python3_FOUND)
     )
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/include/network/EmbeddedAssets.hpp"
+               "${CMAKE_CURRENT_SOURCE_DIR}/src/network/EmbeddedAssets.cpp"
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_assets.py"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_assets.py"
-        COMMENT "Embedding Web Assets into C++ Header"
+        COMMENT "Embedding Web Assets into C++ Header and Source"
     )
     add_custom_target(GenerateBinarySchema DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/include/network/DualTransportContracts.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/TelemetrySnapshot.ts"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/network/EmbeddedAssets.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/network/EmbeddedAssets.cpp"
     )
 endif()
 

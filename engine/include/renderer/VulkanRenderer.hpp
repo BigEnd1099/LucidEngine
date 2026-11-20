@@ -28,10 +28,65 @@ namespace engine::renderer {
     struct EditorViewportOverlayState;
     struct EditorCameraNavigationState;
     enum class EditorGizmoMode;
+
+    struct RendererConfig {
+        bool bloomEnabled{true};
+        float bloomIntensity{0.8f};
+        float bloomThreshold{1.0f};
+        bool gtaoEnabled{true};
+        float gtaoRadius{2.0f};
+        float gtaoIntensity{1.0f};
+        bool lightBounceEnabled{true};
+        int antiAliasingMode{1}; // 0 = None, 1 = FXAA, 2 = TAA
+        float shadowDistance{100.0f};
+        bool hiZCullingEnabled{true};
+        bool standaloneGameMode{false};
+        bool benchmarkMode{false};
+        bool decoupledRenderThread{false};
+        float resolutionScale{1.0f};
+        float uiScale{1.0f};
+    };
+
     class VulkanRenderer {
     public:
         VulkanRenderer(VulkanContext* context, uint32_t width, uint32_t height);
         ~VulkanRenderer();
+
+        RendererConfig getRendererConfig() const {
+            RendererConfig cfg;
+            cfg.bloomEnabled = m_bloomEnabled;
+            cfg.bloomIntensity = m_bloomIntensity;
+            cfg.bloomThreshold = m_bloomThreshold;
+            cfg.gtaoEnabled = m_gtaoEnabled;
+            cfg.gtaoRadius = m_gtaoRadius;
+            cfg.gtaoIntensity = m_gtaoIntensity;
+            cfg.lightBounceEnabled = m_lightBounceEnabled;
+            cfg.antiAliasingMode = m_antiAliasingMode;
+            cfg.shadowDistance = m_shadowDistance;
+            cfg.hiZCullingEnabled = m_hiZCullingEnabled;
+            cfg.standaloneGameMode = m_standaloneGameMode;
+            cfg.benchmarkMode = m_benchmarkMode;
+            cfg.resolutionScale = m_resolutionScale;
+            cfg.uiScale = m_uiScale;
+            return cfg;
+        }
+
+        void setRendererConfig(const RendererConfig& cfg) {
+            setBloomEnabled(cfg.bloomEnabled);
+            setBloomIntensity(cfg.bloomIntensity);
+            setBloomThreshold(cfg.bloomThreshold);
+            setGtaoEnabled(cfg.gtaoEnabled);
+            setGtaoRadius(cfg.gtaoRadius);
+            setGtaoIntensity(cfg.gtaoIntensity);
+            setSsgiEnabled(cfg.lightBounceEnabled);
+            setAntiAliasingMode(cfg.antiAliasingMode);
+            setShadowDistance(cfg.shadowDistance);
+            setHiZCullingEnabled(cfg.hiZCullingEnabled);
+            setStandaloneGameMode(cfg.standaloneGameMode);
+            setBenchmarkMode(cfg.benchmarkMode);
+            setResolutionScale(cfg.resolutionScale);
+            setUiScale(cfg.uiScale);
+        }
 
         void setBenchmarkMode(bool enabled) { m_benchmarkMode = enabled; }
         void render(ecs::Registry& registry, core::AssetManager* assetManager = nullptr, glm::mat4 viewMatrix = glm::mat4(1.0f), core::Engine* engine = nullptr);

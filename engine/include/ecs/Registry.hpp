@@ -15,6 +15,57 @@ namespace engine::ecs {
 
         entt::entity createEntity() { return m_registry.create(); }
 
+        entt::entity cloneEntity(entt::entity source) {
+            if (!m_registry.valid(source)) return entt::null;
+            entt::entity clone = m_registry.create();
+
+            if (m_registry.all_of<TransformComponent>(source)) {
+                m_registry.emplace<TransformComponent>(clone, m_registry.get<TransformComponent>(source));
+            }
+            if (m_registry.all_of<LocalTransformComponent>(source)) {
+                m_registry.emplace<LocalTransformComponent>(clone, m_registry.get<LocalTransformComponent>(source));
+            }
+            if (m_registry.all_of<TagComponent>(source)) {
+                auto tag = m_registry.get<TagComponent>(source);
+                tag.name += "_Clone";
+                m_registry.emplace<TagComponent>(clone, tag);
+            }
+            if (m_registry.all_of<MeshComponent>(source)) {
+                m_registry.emplace<MeshComponent>(clone, m_registry.get<MeshComponent>(source));
+            }
+            if (m_registry.all_of<MaterialComponent>(source)) {
+                m_registry.emplace<MaterialComponent>(clone, m_registry.get<MaterialComponent>(source));
+            }
+            if (m_registry.all_of<LightComponent>(source)) {
+                m_registry.emplace<LightComponent>(clone, m_registry.get<LightComponent>(source));
+            }
+            if (m_registry.all_of<ParticleEmitterComponent>(source)) {
+                m_registry.emplace<ParticleEmitterComponent>(clone, m_registry.get<ParticleEmitterComponent>(source));
+            }
+            if (m_registry.all_of<RigidBodyComponent>(source)) {
+                auto rb = m_registry.get<RigidBodyComponent>(source);
+                rb.bodyId = 0xFFFFFFFF; // unassigned for new simulation instance
+                m_registry.emplace<RigidBodyComponent>(clone, rb);
+            }
+            if (m_registry.all_of<VelocityComponent>(source)) {
+                m_registry.emplace<VelocityComponent>(clone, m_registry.get<VelocityComponent>(source));
+            }
+            if (m_registry.all_of<DestructibleComponent>(source)) {
+                m_registry.emplace<DestructibleComponent>(clone, m_registry.get<DestructibleComponent>(source));
+            }
+            if (m_registry.all_of<ChemistryComponent>(source)) {
+                m_registry.emplace<ChemistryComponent>(clone, m_registry.get<ChemistryComponent>(source));
+            }
+            if (m_registry.all_of<UUIDComponent>(source)) {
+                uint64_t oldUuid = m_registry.get<UUIDComponent>(source).uuid;
+                uint64_t newUuid = oldUuid ^ (static_cast<uint64_t>(clone) * 0x9e3779b97f4a7c15ull + 1u);
+                if (newUuid == 0) newUuid = 1u;
+                m_registry.emplace<UUIDComponent>(clone, UUIDComponent{ newUuid });
+            }
+
+            return clone;
+        }
+
         void markTransformDirty(entt::entity entity) {
             if (!m_registry.valid(entity)) return;
             if (m_registry.all_of<HierarchyComponent>(entity)) {

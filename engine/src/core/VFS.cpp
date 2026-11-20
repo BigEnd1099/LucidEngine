@@ -2,6 +2,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 
 namespace engine::core {
 
@@ -86,8 +87,26 @@ namespace engine::core {
             return true;
         }
         if (m_passthrough) {
-            std::ifstream test(virtualPath);
-            return test.good();
+            try {
+                std::filesystem::path currentBase = std::filesystem::current_path();
+                std::filesystem::path target = std::filesystem::weakly_canonical(currentBase / virtualPath);
+                auto baseStr = currentBase.lexically_normal().string();
+                auto targetStr = target.lexically_normal().string();
+#ifdef _WIN32
+                std::string lowerBase = baseStr;
+                std::string lowerTarget = targetStr;
+                std::transform(lowerBase.begin(), lowerBase.end(), lowerBase.begin(), ::tolower);
+                std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
+                if (lowerTarget.rfind(lowerBase, 0) == 0) {
+                    return std::filesystem::exists(target);
+                }
+#else
+                if (targetStr.rfind(baseStr, 0) == 0) {
+                    return std::filesystem::exists(target);
+                }
+#endif
+            } catch (...) {}
+            return false;
         }
         return false;
     }
@@ -112,18 +131,35 @@ namespace engine::core {
             return buffer;
         }
 
-        // Native filesystem passthrough
+        // Native filesystem passthrough with strict sandbox enforcement
         if (m_passthrough) {
-            std::ifstream file(virtualPath, std::ios::binary | std::ios::ate);
-            if (file.is_open()) {
-                auto size = file.tellg();
-                if (size >= 0) {
-                    file.seekg(0, std::ios::beg);
-                    std::vector<uint8_t> buffer(static_cast<size_t>(size));
-                    file.read(reinterpret_cast<char*>(buffer.data()), size);
-                    return buffer;
+            try {
+                std::filesystem::path currentBase = std::filesystem::current_path();
+                std::filesystem::path target = std::filesystem::weakly_canonical(currentBase / virtualPath);
+                auto baseStr = currentBase.lexically_normal().string();
+                auto targetStr = target.lexically_normal().string();
+#ifdef _WIN32
+                std::string lowerBase = baseStr;
+                std::string lowerTarget = targetStr;
+                std::transform(lowerBase.begin(), lowerBase.end(), lowerBase.begin(), ::tolower);
+                std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
+                bool inSandbox = (lowerTarget.rfind(lowerBase, 0) == 0);
+#else
+                bool inSandbox = (targetStr.rfind(baseStr, 0) == 0);
+#endif
+                if (inSandbox && std::filesystem::is_regular_file(target)) {
+                    std::ifstream file(target, std::ios::binary | std::ios::ate);
+                    if (file.is_open()) {
+                        auto size = file.tellg();
+                        if (size >= 0) {
+                            file.seekg(0, std::ios::beg);
+                            std::vector<uint8_t> buffer(static_cast<size_t>(size));
+                            file.read(reinterpret_cast<char*>(buffer.data()), size);
+                            return buffer;
+                        }
+                    }
                 }
-            }
+            } catch (...) {}
         }
 
         return std::nullopt;
