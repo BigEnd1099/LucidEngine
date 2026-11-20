@@ -1,3 +1,0 @@
-../../../Templates/TemplateResources/Standard/XRMannequins/FeaturePack/manifest.json
-../../../Templates/TemplateResources/Standard/XRMannequins/Media/XRMannequins.png
-../../../Templates/TemplateResources/Standard/XRMannequins/Media/XRMannequins_Preview.png

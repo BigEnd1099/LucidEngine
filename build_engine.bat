@@ -6,7 +6,7 @@ cd /d "%~dp0"
 title Lucid Engine - Budowanie engine.exe (C++ / Vulkan / Jolt)
 
 echo ========================================================
-echo       LUCID ENGINE - KOMPILATOR SILNIKA C++
+echo        LUCID ENGINE - KOMPILATOR SILNIKA C++
 echo ========================================================
 
 if exist "C:\Program Files\CMake\bin\cmake.exe" set "PATH=C:\Program Files\CMake\bin;%PATH%"
@@ -20,8 +20,9 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-powershell -Command "Stop-Process -Name engine -Force -ErrorAction SilentlyContinue" >nul 2>nul
+:: Szybkie zamkniecie istniejacych procesow silnika
 taskkill /F /IM engine.exe >nul 2>nul
+powershell -Command "Stop-Process -Name engine -Force -ErrorAction SilentlyContinue" >nul 2>nul
 
 set CONFIG=Release
 set DO_CLEAN=0
@@ -31,6 +32,7 @@ set DO_RUN=0
 if "%~1"=="" goto after_args
 if /i "%~1"=="debug" set CONFIG=Debug
 if /i "%~1"=="release" set CONFIG=Release
+if /i "%~1"=="relwithdebinfo" set CONFIG=RelWithDebInfo
 if /i "%~1"=="clean" set DO_CLEAN=1
 if /i "%~1"=="--clean" set DO_CLEAN=1
 if /i "%~1"=="run" set DO_RUN=1
@@ -44,9 +46,17 @@ if "!DO_CLEAN!"=="1" (
     if exist "engine\build" rmdir /s /q "engine\build"
 )
 
+set NEED_CMAKE=0
 if not exist "engine\build\CMakeCache.txt" (
+    set NEED_CMAKE=1
+)
+if not exist "engine\build\gi_world_cache_filter.comp.spv" (
+    set NEED_CMAKE=1
+)
+
+if "!NEED_CMAKE!"=="1" (
     echo [INFO] Inicjalizacja konfiguracji CMake dla silnika Lucid Engine...
-    cmake -B engine/build -S engine
+    cmake -B engine/build -S engine -DCMAKE_CXX_FLAGS="/MP" -DCMAKE_C_FLAGS="/MP"
     if !ERRORLEVEL! neq 0 (
         echo.
         echo [BLAD] Konfiguracja CMake zakonczyla sie niepowodzeniem [kod: !ERRORLEVEL!].
@@ -56,8 +66,8 @@ if not exist "engine\build\CMakeCache.txt" (
 )
 
 echo.
-echo [INFO] Kompilacja silnika Lucid Engine [Tryb: !CONFIG!, Wielowatkowosc: wlaczona]...
-cmake --build engine/build --config !CONFIG! --parallel
+echo [INFO] Kompilacja silnika Lucid Engine [Tryb: !CONFIG!, Rdzenie: %NUMBER_OF_PROCESSORS%]...
+cmake --build engine/build --config !CONFIG! --parallel %NUMBER_OF_PROCESSORS% -- /m /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true
 if !ERRORLEVEL! neq 0 (
     echo.
     echo ========================================================

@@ -5,7 +5,7 @@ The benchmark runner starts a separate windowed engine process on port **9011** 
 ## Run
 
 1. Build the engine in Release:
-   `.uild_engine.bat release`
+   `.\build_engine.bat release`
 2. From the repository root, run:
    `npm run benchmark:render`
 

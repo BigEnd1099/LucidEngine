@@ -67,17 +67,17 @@ Lucid Engine to zorientowany na współpracę ze sztuczną inteligencją (*AI-Na
 - [x] Wprowadzenie stałego kroku czasowego (Fixed Timestep) w Jolt Physics i synchronizacja rotacji.
 - [x] Oczyszczenie repozytorium z tymczasowych skryptów i patchy.
 
-### Faza 2: Cienie i Oświetlenie Dynamiczne (Następny Krok)
-- [ ] Kaskadowe Mapy Cieni (Cascaded Shadow Maps - CSM) dla słońca/światła kierunkowego.
+### Faza 2: Cienie i Oświetlenie Dynamiczne
+- [x] Dynamiczne mapy cieni (Shadow Maps / CSM - shadow_depth.vert, shadow_depth.frag).
 - [ ] Bufor cieni wielopunktowych (Omnidirectional Point Light Shadow Cubemaps).
-- [ ] SSAO (Screen Space Ambient Occlusion) w buforze postprocessingu.
+- [x] Okluzja otoczenia SSAO / GTAO (Ground Truth Ambient Occlusion - gtao.frag, gtao_blur.frag) w buforze postprocessingu.
 
 ### Faza 3: Skalowanie Wydajności Renderera
-- [ ] GPU-Driven Rendering: `vkCmdDrawIndexedIndirect` i frustum culling na GPU (Compute Shader).
+- [x] GPU-Driven Rendering: `vkCmdDrawIndexedIndirect` i frustum culling na GPU (Compute Shader - cull_indirect.comp).
 - [ ] Płynny LOD (Level of Detail) dla załadowanych siatek GLTF.
 - [ ] Descriptor Indexing / Bindless Textures (płaska tablica tekstur w deskryptorze Vulkan).
 
 ### Faza 4: Integracja Audio i Rozszerzenia MCP
-- [ ] Wbudowany silnik dźwięku 3D (miniaudio) z przestrzennym pozycjonowaniem źródeł dźwięku.
-- [ ] Rozszerzenie narzędzi MCP o inspekcję wydajności (profiler klatek, alokacje pamięci).
+- [x] Wbudowany silnik dźwięku 3D (SpatialAudioEngine / miniaudio) z przestrzennym pozycjonowaniem źródeł dźwięku.
+- [x] Rozszerzenie narzędzi MCP i silnika o inspekcję wydajności (profiler klatek, GPU compute timestamps).
 - [ ] Automatyczne snapshoty stanu do odtwarzania powtórek (deterministic replay recorder).

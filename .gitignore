@@ -4,22 +4,27 @@ node_modules/
 .pnp.js
 
 # Production and distribution builds
-dist/
-build/
-Build/
-out/
-bin/
+/dist/
+/dist-electron/
+/build/
+/Build/
+/out/
+/bin/
 .vite/
 .cache/
-Saved/
+/Saved/
 
 # C / C++ / MSVC / CMake artifacts
-engine/build/
+/engine/build/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
+CMakeSettings.json
 CMakeUserPresets.json
+CMakePresets.json.user
 compile_commands.json
+cmake-build-*/
+/Testing/
 *.obj
 *.lib
 *.exp
@@ -38,10 +43,17 @@ compile_commands.json
 *.vcxproj.user
 *.vcxproj.filters.user
 *.sln.docstates
+*.suo
+*.user
+*.userosv
+*.ipch
 x64/
 x86/
 ARM/
 ARM64/
+.ninja_deps
+.ninja_log
+build.ninja
 
 # Compiled Binaries & Shaders
 *.exe
@@ -61,6 +73,8 @@ err.log
 out.log
 electron.log
 tree.md
+*.dmp
+*.mdmp
 
 # Environment and OS files
 .env*
@@ -74,18 +88,41 @@ coverage/
 # IDE files
 .idea/
 .vscode/
+*.sublime-project
+*.sublime-workspace
 
-# Test media artifacts (keep test automation scripts .mjs tracked!)
+# TypeScript and linter caches
+*.tsbuildinfo
+.eslintcache
+
+# Python artifacts (tools and utility scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test media artifacts & frame captures (keep test automation scripts .mjs tracked!)
 test_*.jpg
 test_*.png
 test_*.mp4
 test_*.webm
 screenshot_*.png
 capture_*.png
+isolated_*.jpg
+metallic_*.jpg
+scene_*.jpg
 
 # Generated AI assets
 public/assets/aistudio/*
 !public/assets/aistudio/.gitignore
+
+# AI Context / Repomix dumps
+repomix-output*
+repomix.*
+*-repomix.*
+lucid-*.xml
 
 # Temporary and backup files
 *.bak
@@ -94,10 +131,11 @@ public/assets/aistudio/*
 *~
 *.old
 *.old.*
-
-
+*.orig
+*.rej
 
 switch_branch.bat
 
-# Local GPU benchmark captures and reports
-benchmark-results/
+# Local GPU benchmark and RT debug captures and reports
+/benchmark-results/
+/rt-debug-results/

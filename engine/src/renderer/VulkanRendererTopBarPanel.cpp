@@ -162,7 +162,7 @@ void VulkanRenderer::drawEditorTopBarPanel(core::Engine* engine, EditorTopBarUiS
                         ImGui::Separator();
                         if (ImGui::BeginMenu(editorText("ui.editor_theme", "Editor Theme"))) {
                             static int s_topBarTheme = 0;
-                            if (ImGui::MenuItem(editorText("ui.unreal_slate_dark_graphite", "Unreal Slate (Dark Graphite)"), nullptr, s_topBarTheme == 0)) {
+                            if (ImGui::MenuItem(editorText("ui.unreal_slate_dark_graphite", "Slate Dark (Graphite)"), nullptr, s_topBarTheme == 0)) {
                                 s_topBarTheme = 0;
                                 applyEditorUiTheme(EditorThemePreset::UnrealSlate);
                             }

@@ -161,13 +161,10 @@ void loadEditorUiFont(ImGuiIO& io) {
     const std::vector<std::string> fontCandidates = {
         "engine/assets/fonts/Inter-Variable.ttf",
         "assets/fonts/Inter-Variable.ttf",
-        "public/fonts/Inter-Variable.ttf",
-        "public/fonts/Roboto-Medium.ttf",
         "engine/assets/fonts/Roboto-Medium.ttf",
         "assets/fonts/Roboto-Medium.ttf",
-        "D:/UE_5.8/Engine/Content/Slate/Fonts/Roboto-Medium.ttf",
-        "public/fonts/Roboto-Regular.ttf",
         "engine/assets/fonts/Roboto-Regular.ttf",
+        "assets/fonts/Roboto-Regular.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
         "C:/Windows/Fonts/arial.ttf"
     };
