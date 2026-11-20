@@ -51,8 +51,9 @@ bool tryLoadSurfaceHistoryCell(ivec3 cell, vec3 worldNormal, uint lightingEpoch,
                 break;
             }
         }
-        if (!stableSnapshot)
-            return false;
+        if (!stableSnapshot) {
+            entry = surfaceHistoryCache.cells[index];
+        }
 
         empty = entry.meta.x == 0u;
         if (empty)

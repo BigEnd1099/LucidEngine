@@ -320,7 +320,7 @@ void main() {
 
             if (hitBulb) { pathRadiance += throughput * bulbRadiance; break; }
             if (!hitGeo) {
-                if ((ubo.skyboxMode & 3) != 0) pathRadiance += throughput * sampleRtSkyRadiance(curDir) * ((bounce == 0) ? 1.0 : 0.25);
+                if ((ubo.skyboxMode & 3) != 0) pathRadiance += throughput * sampleRtSkyRadiance(curDir);
                 break;
             }
 

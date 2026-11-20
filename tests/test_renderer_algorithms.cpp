@@ -561,19 +561,18 @@ int main() {
 
     // Interior HDRI Occlusion:
     // When ray-traced sky visibility is 0.0 (enclosed room), ambient IBL is completely extinguished.
-    auto calcAmbientIBL = [](float skyVisibility, float giWeight, glm::vec3 envDiffuse, glm::vec3 envSpecular) {
-        float iblDiffuseFactor = (1.0f - giWeight) * skyVisibility;
+    // In open areas (skyVisibility = 1.0), full diffuse IBL is preserved without being extinguished by GI weight.
+    auto calcAmbientIBL = [](float skyVisibility, glm::vec3 envDiffuse, glm::vec3 envSpecular) {
+        float iblDiffuseFactor = skyVisibility;
         glm::vec3 diff = envDiffuse * iblDiffuseFactor;
         glm::vec3 spec = envSpecular * skyVisibility;
         return diff + spec;
     };
     glm::vec3 brightHDRI(15.0f, 12.0f, 10.0f);
-    glm::vec3 outsideAmbient = calcAmbientIBL(1.0f, 0.0f, brightHDRI, brightHDRI);
-    glm::vec3 insideEnclosedAmbient = calcAmbientIBL(0.0f, 0.0f, brightHDRI, brightHDRI);
-    glm::vec3 insideWithGiAmbient = calcAmbientIBL(0.0f, 1.0f, brightHDRI, brightHDRI);
+    glm::vec3 outsideAmbient = calcAmbientIBL(1.0f, brightHDRI, brightHDRI);
+    glm::vec3 insideEnclosedAmbient = calcAmbientIBL(0.0f, brightHDRI, brightHDRI);
     CHECK(outsideAmbient.r > 0.0f);
     CHECK(insideEnclosedAmbient.r == 0.0f && insideEnclosedAmbient.g == 0.0f && insideEnclosedAmbient.b == 0.0f);
-    CHECK(insideWithGiAmbient.r == 0.0f && insideWithGiAmbient.g == 0.0f && insideWithGiAmbient.b == 0.0f);
 
     // Mirror Physical Reflection (100% Metal, 0% Roughness):
     // Smooth mirrors use exact physical Fresnel factor (1.0 for silver/metal), avoiding split-sum ~50% attenuation.

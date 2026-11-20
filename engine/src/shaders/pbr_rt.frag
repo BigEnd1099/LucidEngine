@@ -296,8 +296,8 @@ void main() {
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
     float roughness = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.0, 1.0);
     float alphaRT = max(roughness * roughness, 1e-5);
-    // Physically correct specular roughness for direct analytical lights (Disney alpha = roughness^2, min alpha = 0.001)
-    float alphaDirect = max(roughness * roughness, 0.001);
+    // Physically correct specular roughness for direct analytical lights (minimum roughness = 0.04; distributionGGX computes a2 = a * a)
+    float alphaDirect = max(roughness, 0.04);
 
     vec3 F0 = mix(vec3(0.04), max(albedo, vec3(0.04)), metallic);
 
@@ -403,7 +403,7 @@ void main() {
         rtIndirect = textureLod(rtIndirectTex, screenUV, 0.0);
     }
     if (ubo.rtParams.x > 0.5 && ubo.rtParams.z > 0.5) {
-        combinedAO *= clamp(rtIndirect.a, 0.0, 1.0);
+        combinedAO = min(combinedAO, clamp(rtIndirect.a, 0.0, 1.0));
     }
 
     float totalSceneLight = sunIntensity + localLightEnergy * 0.25;
@@ -416,10 +416,6 @@ void main() {
 
     // Physical sky visibility from ray tracing (rtIndirect.a is 0.0 inside fully enclosed rooms)
     float skyVisibility = (ubo.rtParams.x > 0.5) ? clamp(rtIndirect.a, 0.0, 1.0) : 1.0;
-    // When RT diffuse GI is enabled, it computes the true incident indirect diffuse lighting.
-    // Extinguish diffuse IBL so it does not double-count or leak into enclosed rooms.
-    float giWeight = (ubo.rtParams.x > 0.5 && ubo.rtFeatureParams.x > 0.5) ? clamp(ubo.rtFeatureParams.z, 0.0, 1.0) : 0.0;
-    float iblDiffuseFactor = (1.0 - giWeight) * skyVisibility;
 
     vec3 ambientLighting = vec3(0.0);
     vec3 specularIBL = vec3(0.0);
@@ -429,7 +425,7 @@ void main() {
 
         vec3 irradiance = sanitizeHDR(texture(irradianceMap, N).rgb);
         vec3 ambientTint = mix(vec3(1.0), ubo.ambientColor.rgb * 2.2, 0.35);
-        vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo) * iblDiffuseFactor;
+        vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo);
 
         vec3 R = reflect(-V, N);
         float horizonFade = clamp(1.0 + dot(R, geomN), 0.0, 1.0);
@@ -469,7 +465,15 @@ void main() {
         horizonFade *= horizonFade;
         vec3 rtSpecular = sanitizeHDR(reflSample) * specularFactor * specAO * horizonFade * matReflectsLight;
 
-        ambientLighting = max(ambientLighting + rtSpecular - specularIBL * iblIntensity, vec3(0.0));
+        vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        vec3 irradiance = sanitizeHDR(texture(irradianceMap, N).rgb);
+        vec3 ambientTint = mix(vec3(1.0), ubo.ambientColor.rgb * 2.2, 0.35);
+        vec3 diffuseIBL = irradiance * albedo * ambientTint * gtaoMultiBounce(combinedAO, albedo);
+
+        float rtBlend = 1.0 - smoothstep(0.12, 0.45, roughness);
+        vec3 finalSpecular = mix(specularIBL * iblIntensity, rtSpecular, rtBlend);
+        ambientLighting = kD * diffuseIBL * iblIntensity + finalSpecular;
     }
 
     // 3B. Indirect Diffuse GI: SSGI + analityczny Ground Bounce

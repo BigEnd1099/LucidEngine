@@ -277,8 +277,8 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     // Emissive surface: acts as secondary light source (scaled identically to pbr.frag and pbr_rt.frag)
     vec3 radiance = albedo * (emissive * 3.5) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - rawRoughness * 0.25)) : vec3(0.0));
 
-    // Microfacet GGX parameters: Disney/Burley physical alpha = effRoughness^2
-    float a = max(effRoughness * effRoughness, 0.001);
+    // Microfacet GGX parameters: Disney/Burley physical alpha = effRoughness (rtDistributionGGX computes a2 = a * a)
+    float a = max(effRoughness, 0.04);
     float a2 = a * a;
     float k = (effRoughness + 1.0) * (effRoughness + 1.0) / 8.0;
 
@@ -367,7 +367,8 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
         radiance += specSky * skyScale * hitReflectsLight;
     }
 
-    return sanitizeHDR(clampFirefly(radiance, 256.0)); // Keep normal HDR energy; reject only extreme path explosions.
+    float maxHitRadiance = isDiffuseGI ? 32.0 : 128.0;
+    return sanitizeHDR(clampFirefly(radiance, maxHitRadiance)); // Keep normal HDR energy; reject extreme path explosions.
 }
 
 vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hitUv, vec4 hitTangent, vec3 rayDir, bool isDiffuseGI, float specSkyScale) {

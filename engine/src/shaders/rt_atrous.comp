@@ -29,12 +29,15 @@ layout(set = 1, binding = 5, rgba16f) uniform image2D imgHistCur;
 layout(set = 1, binding = 13, rgba16f) uniform image2D imgMomentsCur; // in/out: mu1, mu2, variance, filtered_var
 layout(set = 1, binding = 16, rgba16f) uniform image2D imgRawGi;
 layout(set = 1, binding = 17, rgba16f) uniform image2D imgCaustics;
-layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiDirectionBins0;
+layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
 layout(set = 1, binding = 23, rgba32f) uniform image2D imgGiDirectionBins1;
 layout(set = 1, binding = 24, rgba32f) uniform image2D imgGiDirectionBins2;
 layout(set = 1, binding = 25, rgba32f) uniform image2D imgGiDirectionCount;
-layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiPathPosition;
-layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiPathNormal;
+layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
+layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
+#define imgGiDirectionBins0 imgGiReservoirC
+#define imgGiPathPosition   imgGiReservoirA
+#define imgGiPathNormal     imgGiReservoirB
 layout(set = 1, binding = 35, std430) readonly buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
 const uint GI_SURFACE_PATCH_CELL_COUNT = 65536u;
 const uint GI_SURFACE_PATCH_WORDS_PER_CELL = 51u;
@@ -162,7 +165,7 @@ void persistFinalSurfaceHistory(ivec2 px, vec2 size, vec4 geom, vec3 filteredRad
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
     float historyLen = unpackGiHistoryLen(geom.w);
-    if (PASS != 3 || (pc.u.y & 1u) == 0u || pc.u.z == 0u || historyLen < 2.0 || !writeSample) return;
+    if (PASS != 3 || (pc.u.y & 1u) == 0u || pc.u.z == 0u || historyLen < 4.0 || !writeSample) return;
     vec2 uv = (vec2(px) + 0.5) / size;
     ivec2 depthSize = textureSize(uDepth, 0);
     ivec2 depthPx = clamp(ivec2(uv * vec2(depthSize)), ivec2(0), depthSize - 1);
@@ -379,48 +382,15 @@ void main() {
 
     vec4 momC = imageLoad(imgMomentsCur, px);
 
-    // Determine screen-space light flow direction for anisotropic light path denoising
-    vec2 lightDirScreen = vec2(1.0, 0.0);
-    bool hasLightDir = false;
-    vec4 cResA = imageLoad(imgGiPathPosition, px);
-    if (cResA.w > 1e-5 && length(cResA.xyz) > 0.01) {
-        vec3 pC = giWorldPosition(px, size);
-        vec3 toLight = cResA.xyz - pC;
-        if (length(toLight) > 0.05) {
-            vec3 lightDirWorld = normalize(toLight);
-            vec3 tangentLight = lightDirWorld - nC * dot(nC, lightDirWorld);
-            if (length(tangentLight) > 0.02) {
-                tangentLight = normalize(tangentLight);
-                vec4 clipP = ubo.viewProj * vec4(pC, 1.0);
-                vec4 clipL = ubo.viewProj * vec4(pC + tangentLight * 0.5, 1.0);
-                vec2 scrP = (clipP.xy / max(clipP.w, 1e-4)) * 0.5 + 0.5;
-                vec2 scrL = (clipL.xy / max(clipL.w, 1e-4)) * 0.5 + 0.5;
-                vec2 dScr = (scrL - scrP) * size;
-                if (length(dScr) > 1e-3) {
-                    lightDirScreen = normalize(dScr);
-                    hasLightDir = true;
-                }
-            }
-        }
-    }
-
-    // Independent SVGF spatial firefly & light path density reconstruction.
-    // Preserves photon energy in illuminated areas (turning sand/speckles into a continuous beam)
-    // while the dual-scale shadow guard (radius 8 and radius 16 block check) prevents any light leaking into shadows.
+    // Independent SVGF spatial firefly rejection. Robust median/MAD statistics are
+    // built only from coplanar, similarly oriented neighbors. Supported bright
+    // clusters are exempt so real HDR illumination is not mistaken for a spike.
     float fireflyPreservation = 1.0;
-    float pass0ShadowGate = 0.0;
-    float pass0LocalAvgLuma = 0.0;
-    vec3  pass0LocalAvgRgb = vec3(0.0);
-    float pass0RobustLimit = 1e6;
-
     if (PASS == 0 && pc.f.z > 0.001) {
         float neighborLuma[8];
         int neighborCount = 0;
         float centerLuma = max(dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
         int brightSupport = 0;
-
-        vec3 localRgbSum = center.rgb;
-        float localWeightSum = 1.0;
 
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
@@ -433,90 +403,10 @@ void main() {
                 if (abs(dot(nCv, qView - pCv)) > depthTol * 2.0) continue;
                 vec4 qValue = loadSrc(q);
                 float qLuma = max(dot(qValue.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-
-                float wTap = (abs(dx) + abs(dy) == 2) ? 0.707 : 1.0;
                 neighborLuma[neighborCount++] = qLuma;
-                localRgbSum += qValue.rgb * wTap;
-                localWeightSum += wTap;
-
                 if (qLuma >= max(centerLuma * 0.45, centerLuma - 0.02)) brightSupport++;
             }
         }
-
-        // --- Dual-Scale Outer Block Guard ("8x8 + 8x8 klocek dalej") ---
-        // Samples 12 taps at radius 8 (8x8 block boundary) and radius 16 (8+8 block boundary)
-        // Strictly on the same coplanar surface (dot(nC, nQ) > 0.85, planeDist < depthTol * 3.0).
-        const ivec2 coarseOffsets[12] = ivec2[](
-            ivec2( 8,  0), ivec2(-8,  0), ivec2( 0,  8), ivec2( 0, -8),
-            ivec2( 6,  6), ivec2(-6,  6), ivec2( 6, -6), ivec2(-6, -6),
-            ivec2(16,  0), ivec2(-16,  0), ivec2( 0, 16), ivec2( 0, -16)
-        );
-
-        float coarseLumaSum = 0.0;
-        int coarseLitCount = 0;
-        int coarseCount = 0;
-        vec2 coarseLightGrad = vec2(0.0);
-
-        for (int k = 0; k < 12; ++k) {
-            ivec2 qCoarse = px + coarseOffsets[k];
-            if (any(lessThan(qCoarse, ivec2(0))) || any(greaterThanEqual(qCoarse, isize))) continue;
-            vec4 gQC = imageLoad(imgGeomCur, qCoarse);
-            if (gQC.z < 0.0) continue;
-            if (dot(nC, rtOctDecode(gQC.xy)) < 0.85) continue;
-            vec3 qViewC = rtViewPosFromLinear(vec2(qCoarse) + 0.5, gQC.z, size);
-            if (abs(dot(nCv, qViewC - pCv)) > depthTol * 3.0) continue;
-
-            vec4 qValC = loadSrc(qCoarse);
-            float qLumC = max(dot(qValC.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-            coarseLumaSum += qLumC;
-            coarseLightGrad += vec2(coarseOffsets[k]) * qLumC;
-            if (qLumC > 0.15) coarseLitCount++;
-            coarseCount++;
-        }
-
-        if (!hasLightDir) {
-            // Check 3x3 coplanar neighbors for a confirmed reservoir direction
-            float bestW = 0.0;
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    if (dx == 0 && dy == 0) continue;
-                    ivec2 qN = px + ivec2(dx, dy);
-                    if (any(lessThan(qN, ivec2(0))) || any(greaterThanEqual(qN, isize))) continue;
-                    vec4 qResA = imageLoad(imgGiPathPosition, qN);
-                    if (qResA.w > bestW && length(qResA.xyz) > 0.01) {
-                        vec3 pC = giWorldPosition(px, size);
-                        vec3 toLight = qResA.xyz - pC;
-                        if (length(toLight) > 0.05) {
-                            vec3 lightDirWorld = normalize(toLight);
-                            vec3 tangentLight = lightDirWorld - nC * dot(nC, lightDirWorld);
-                            if (length(tangentLight) > 0.02) {
-                                tangentLight = normalize(tangentLight);
-                                vec4 clipP = ubo.viewProj * vec4(pC, 1.0);
-                                vec4 clipL = ubo.viewProj * vec4(pC + tangentLight * 0.5, 1.0);
-                                vec2 scrP = (clipP.xy / max(clipP.w, 1e-4)) * 0.5 + 0.5;
-                                vec2 scrL = (clipL.xy / max(clipL.w, 1e-4)) * 0.5 + 0.5;
-                                vec2 dScr = (scrL - scrP) * size;
-                                if (length(dScr) > 1e-3) {
-                                    lightDirScreen = normalize(dScr);
-                                    bestW = qResA.w;
-                                    hasLightDir = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!hasLightDir && length(coarseLightGrad) > 1e-4) {
-            lightDirScreen = normalize(coarseLightGrad);
-            hasLightDir = true;
-        }
-
-        float coarseAvgLuma = (coarseCount >= 3) ? (coarseLumaSum / float(coarseCount)) : 0.0;
-        // Confirmed light path footprint: sustained illumination across multiple coarse taps on the coplanar plane
-        bool isLightPathFootprint = (coarseLitCount >= 3 && coarseAvgLuma > 0.15);
-        pass0ShadowGate = isLightPathFootprint ? smoothstep(0.15, 0.40, coarseAvgLuma) : 0.0;
 
         if (neighborCount >= 3) {
             for (int i = 1; i < neighborCount; ++i) {
@@ -534,75 +424,13 @@ void main() {
                 deviations[j + 1] = key;
             }
             float mad = (neighborCount & 1) != 0 ? deviations[mid] : 0.5 * (deviations[mid - 1] + deviations[mid]);
-            float robustLimit = medianLuma + max(2.25 * 1.4826 * mad, medianLuma * 0.90 + 0.010);
-            pass0RobustLimit = robustLimit;
+            float robustLimit = medianLuma + max(2.5 * 1.4826 * mad, medianLuma * 1.5 + 0.05);
 
-            pass0LocalAvgRgb = localRgbSum / max(localWeightSum, 1e-4);
-            pass0LocalAvgLuma = max(dot(pass0LocalAvgRgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-
-            // Count photon hits in 3x3 footprint
-            int photonHits = 0;
-            for (int i = 0; i < neighborCount; ++i) {
-                if (neighborLuma[i] > robustLimit || neighborLuma[i] > medianLuma * 1.8 + 0.015) {
-                    photonHits++;
-                }
-            }
-            if (centerLuma > robustLimit || centerLuma > medianLuma * 1.8 + 0.015) {
-                photonHits++;
-            }
-
-            // Energy-preserving firefly & light path density reconstruction:
-            // 1. In unconfirmed dark/shadow areas (pass0ShadowGate <= 1e-4), clamp outliers aggressively.
-            if (pass0ShadowGate <= 1e-4 && centerLuma > robustLimit && centerLuma > medianLuma * 1.5 + 0.010) {
-                float compressedLuma = robustLimit + (centerLuma - robustLimit) * 0.10;
+            // True isolated firefly: no supporting neighbors in 3x3 and value > robustLimit
+            if (brightSupport == 0 && centerLuma > robustLimit) {
+                float compressedLuma = robustLimit;
                 fireflyPreservation = mix(1.0, compressedLuma / max(centerLuma, 1e-4), clamp(pc.f.z, 0.0, 1.0));
                 center.rgb *= fireflyPreservation;
-            }
-
-            // 2. Anisotropic directional line kernel along the light path trajectory:
-            // Samples 12 taps along lightDirScreen (radius 6, continuous stencil) on the coplanar plane.
-            // Blurs fireflies along the incident light direction, turning isolated dots into a continuous beam
-            // while lifting the dark gaps between hits to form smooth light, preserving 100% of shadow silhouettes.
-            if (pass0ShadowGate > 0.001) {
-                vec3 lineRgbSum = center.rgb;
-                float lineWeightSum = 1.0;
-                int linePhotonHits = 0;
-
-                const int lineOffsets[12] = int[12](-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6);
-                for (int sIdx = 0; sIdx < 12; ++sIdx) {
-                    int s = lineOffsets[sIdx];
-                    ivec2 qLine = px + ivec2(round(lightDirScreen * float(s)));
-                    if (any(lessThan(qLine, ivec2(0))) || any(greaterThanEqual(qLine, isize))) continue;
-                    vec4 gQL = imageLoad(imgGeomCur, qLine);
-                    if (gQL.z < 0.0) continue;
-                    if (dot(nC, rtOctDecode(gQL.xy)) < 0.85) continue;
-                    vec3 qViewL = rtViewPosFromLinear(vec2(qLine) + 0.5, gQL.z, size);
-                    if (abs(dot(nCv, qViewL - pCv)) > depthTol * 3.0) continue;
-
-                    vec4 qValL = loadSrc(qLine);
-                    float qLumL = max(dot(qValL.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-                    float wDist = exp(-float(s * s) / 16.0);
-                    lineRgbSum += qValL.rgb * wDist;
-                    lineWeightSum += wDist;
-                    if (qLumL > pass0RobustLimit || qLumL > pass0LocalAvgLuma * 1.3 + 0.015) {
-                        linePhotonHits++;
-                    }
-                }
-
-                vec3 lineAvgRgb = lineRgbSum / max(lineWeightSum, 1e-4);
-                float lineAvgLuma = max(dot(lineAvgRgb, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-
-                // Directional transformation: blur firefly peaks down into the beam, and lift dark gaps up into the beam
-                if (centerLuma > lineAvgLuma) {
-                    // Firefly / high-energy photon spike: blur along incident light direction
-                    float blurStrength = pass0ShadowGate * clamp(pc.f.z, 0.0, 1.0) * 0.85;
-                    center.rgb = mix(center.rgb, lineAvgRgb, blurStrength);
-                } else if (centerLuma < lineAvgLuma && linePhotonHits >= 1) {
-                    // Dark gap between sparse photon hits: lift along incident light direction
-                    float liftDensity = clamp(float(linePhotonHits) / 2.0, 0.0, 1.0);
-                    float liftStrength = pass0ShadowGate * liftDensity * clamp(pc.f.z, 0.0, 1.0) * 0.80;
-                    center.rgb = mix(center.rgb, lineAvgRgb, liftStrength);
-                }
             }
         }
     }
@@ -617,9 +445,72 @@ void main() {
         return;
     }
 
-    // 3x3 bilateral pre-filter of temporal variance.
+    // 3x3 bilateral pre-filter of temporal variance and ReSTIR Spatial Resampling.
     float varC = max(momC.z, 0.0);
     if (PASS == 0) {
+        rngInit(uvec2(px), pc.u.w);
+        vec4 cResA = imageLoad(imgGiReservoirA, px);
+        vec4 cResB = imageLoad(imgGiReservoirB, px);
+        vec4 cResC = imageLoad(imgGiReservoirC, px);
+        GiReservoir spatialRes = unpackGiReservoir(cResA, cResB, cResC);
+
+        if (gC.z >= 0.0 && spatialRes.M > 0u) {
+            vec2 curUV = (vec2(px) + 0.5) / size;
+            ivec2 depthSize = textureSize(uDepth, 0).xy;
+            ivec2 fullPx = min(ivec2(curUV * vec2(depthSize)), depthSize - 1);
+            float dC = texelFetch(uDepth, fullPx, 0).r;
+            vec3 pC = rtWorldPos(vec2(px) + 0.5, dC, size);
+
+            spatialRes.M = min(spatialRes.M, 24u);
+
+            const ivec2 spatialOffsets[8] = ivec2[](
+                ivec2( 3,  1), ivec2(-2,  3), ivec2(-3, -2), ivec2( 1, -3),
+                ivec2( 5, -1), ivec2(-1,  5), ivec2(-5,  2), ivec2( 2, -5)
+            );
+
+            for (int k = 0; k < 8; ++k) {
+                ivec2 q = px + spatialOffsets[k];
+                if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, isize))) continue;
+
+                vec4 gQ = imageLoad(imgGeomCur, q);
+                if (gQ.z < 0.0) continue;
+                if (dot(rtOctDecode(gQ.xy), nC) < 0.8) continue;
+                vec3 pQv = rtViewPosFromLinear(vec2(q) + 0.5, gQ.z, size);
+                if (abs(dot(nCv, pQv - pCv)) > depthTol * 2.0) continue;
+
+                vec4 qResA = imageLoad(imgGiReservoirA, q);
+                vec4 qResB = imageLoad(imgGiReservoirB, q);
+                vec4 qResC = imageLoad(imgGiReservoirC, q);
+                GiReservoir qRes = unpackGiReservoir(qResA, qResB, qResC);
+
+                if (qRes.flags == 0u || qRes.M == 0u || qRes.W <= 0.0) continue;
+                uint M_q = min(qRes.M, 16u);
+
+                float pHat = evalGiTargetPdf(qRes.Lo, qRes.xs, qRes.ns, pC, nC);
+                if (pHat <= 1e-6) continue;
+
+                float wCand = pHat * min(qRes.W, 10.0) * float(M_q);
+                spatialRes.wSum += wCand;
+                spatialRes.M += M_q;
+                if (rand1() * spatialRes.wSum < wCand) {
+                    spatialRes.xs = qRes.xs;
+                    spatialRes.ns = qRes.ns;
+                    spatialRes.Lo = qRes.Lo;
+                    spatialRes.targetPdf = pHat;
+                    spatialRes.flags = qRes.flags;
+                }
+            }
+
+            clampGiReservoirM(spatialRes, 32u);
+            finalizeGiReservoir(spatialRes);
+
+            vec4 outA, outB, outC;
+            packGiReservoir(spatialRes, outA, outB, outC);
+            imageStore(imgGiReservoirA, px, outA);
+            imageStore(imgGiReservoirB, px, outB);
+            imageStore(imgGiReservoirC, px, outC);
+        }
+
         float varSum = 0.0;
         float wVarTotal = 0.0;
 
@@ -657,8 +548,8 @@ void main() {
     float lC = max(0.0, dot(center.rgb, vec3(0.2126, 0.7152, 0.0722)));
     const bool useSvgf = (pc.f.w > 0.5);
     float historyLen = unpackGiHistoryLen(gC.w);
-    bool useDirectionalGuide = (pc.u.y & 2u) != 0u;
-    bool useDirectionalPathGuide = (pc.u.y & 4u) != 0u;
+    bool useDirectionalGuide = false;
+    bool useDirectionalPathGuide = false;
     vec4 centerPathPosition=useDirectionalPathGuide?imageLoad(imgGiPathPosition,px):vec4(0);
     vec4 centerPathNormal=useDirectionalPathGuide?imageLoad(imgGiPathNormal,px):vec4(0);
     vec3 centerWorldPosition=useDirectionalPathGuide?giWorldPosition(px,size):vec3(0);
@@ -702,12 +593,6 @@ void main() {
             if (wGeomBase <= 1e-6) continue;
 
             vec3 safeQCol = qCol.rgb;
-            if (PASS == 0 && pass0ShadowGate > 0.001 && pc.f.z > 0.001) {
-                float rawQLuma = max(dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-                if (rawQLuma > pass0RobustLimit) {
-                    safeQCol = mix(safeQCol, pass0LocalAvgRgb, 0.70);
-                }
-            }
             float lQ = max(0.0, dot(safeQCol, vec3(0.2126, 0.7152, 0.0722)));
             float deltaL = abs(lC - lQ);
 
@@ -764,15 +649,10 @@ void main() {
                 float withinTierFloor = mix(0.045, 0.070,
                                             smoothstep(0.25, 4.0, brighterLum));
                 float floorBandwidth = mix(withinTierFloor, crossTierFloor, tierSeparation);
-                float bandwidth = clamp(3.0 * logSigma * max(pc.f.x, 0.1) *
-                                        histBoost * stepDamping,
-                                        floorBandwidth, 0.22);
+                float bandwidth = max(3.5 * logSigma * max(pc.f.x, 0.2) *
+                                      histBoost * stepDamping,
+                                      floorBandwidth);
                 wl = exp(-deltaLogL / max(bandwidth, 1e-4));
-
-                // Preserve a meaningful contribution from the brighter population.
-                // 0.02 effectively discarded isolated high-energy taps, preventing
-                // bright regions from denoising together and leaving a sandy result.
-                wl *= mix(1.0, 0.10, tierSeparation);
             }
 
             float wRgb = wGeomBase * wl;

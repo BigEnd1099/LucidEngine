@@ -314,8 +314,8 @@ void main() {
     float variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
     float kernelRoughness2 = min(2.0 * variance, 0.18) * smoothstep(0.04, 0.20, rawRoughness);
     float roughness = clamp(sqrt(rawRoughness * rawRoughness + kernelRoughness2), 0.0, 1.0);
-    // Physically correct specular roughness for direct analytical lights (Disney alpha = roughness^2, min alpha = 0.001)
-    float alphaDirect = max(roughness * roughness, 0.001);
+    // Physically correct specular roughness for direct analytical lights (minimum roughness = 0.04; distributionGGX computes a2 = a * a)
+    float alphaDirect = max(roughness, 0.04);
 
     vec3 F0 = mix(vec3(0.04), max(albedo, vec3(0.04)), metallic);
 

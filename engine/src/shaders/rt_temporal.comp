@@ -67,17 +67,23 @@ layout(set = 1, binding = 14, rgba16f) uniform image2D imgMomentsPrev; // in: re
 #include "restir_gi_common.glsl"
 
 layout(set = 1, binding = 22, rgba32f) uniform image2D imgGiReservoirC;
-layout(set = 1, binding = 23, rgba16f) uniform image2D imgGiDirectionBins1;
-layout(set = 1, binding = 24, rgba16f) uniform image2D imgGiDirectionBins2;
-layout(set = 1, binding = 25, rgba16f) uniform image2D imgGiDirectionCount;
-layout(set = 1, binding = 26, rgba32f) uniform image2D imgGiReservoirCPrev;
-layout(set = 1, binding = 27, rgba16f) uniform image2D imgGiDirectionBinsPrev1;
-layout(set = 1, binding = 28, rgba16f) uniform image2D imgGiDirectionBinsPrev2;
-layout(set = 1, binding = 29, rgba16f) uniform image2D imgGiDirectionCountPrev;
+layout(set = 1, binding = 23, rgba32f) uniform image2D imgGiDirectionBins1;
+layout(set = 1, binding = 24, rgba32f) uniform image2D imgGiDirectionBins2;
+layout(set = 1, binding = 25, rgba32f) uniform image2D imgGiDirectionCount;
+layout(set = 1, binding = 26, rgba32f) uniform readonly image2D imgGiReservoirCPrev;
+layout(set = 1, binding = 27, rgba32f) uniform readonly image2D imgGiDirectionBinsPrev1;
+layout(set = 1, binding = 28, rgba32f) uniform readonly image2D imgGiDirectionBinsPrev2;
+layout(set = 1, binding = 29, rgba32f) uniform readonly image2D imgGiDirectionCountPrev;
 layout(set = 1, binding = 30, rgba32f) uniform image2D imgGiReservoirA;
 layout(set = 1, binding = 31, rgba32f) uniform image2D imgGiReservoirB;
-layout(set = 1, binding = 32, rgba32f) uniform image2D imgGiReservoirAPrev;
-layout(set = 1, binding = 33, rgba32f) uniform image2D imgGiReservoirBPrev;
+layout(set = 1, binding = 32, rgba32f) uniform readonly image2D imgGiReservoirAPrev;
+layout(set = 1, binding = 33, rgba32f) uniform readonly image2D imgGiReservoirBPrev;
+#define imgGiDirectionBins0 imgGiReservoirC
+#define imgGiDirectionBinsPrev0 imgGiReservoirCPrev
+#define imgGiPathPosition   imgGiReservoirA
+#define imgGiPathNormal     imgGiReservoirB
+#define imgGiPathPositionPrev imgGiReservoirAPrev
+#define imgGiPathNormalPrev   imgGiReservoirBPrev
 
 layout(set = 1, binding = 34, std430) readonly buffer GiSurfacePatchCurrent { uint words[]; } giSurfacePatchCurrent;
 layout(set = 1, binding = 35, std430) buffer GiSurfacePatchHistory { uint words[]; } giSurfacePatchHistory;
@@ -313,12 +319,12 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         imageStore(imgHistCur, px, vec4(0.0, 0.0, 0.0, 1.0));
 
         imageStore(imgMomentsCur, px, vec4(0.0));
-        imageStore(imgGiDirectionBins1, px, vec4(0.0));
-        imageStore(imgGiDirectionBins2, px, vec4(0.0));
-        imageStore(imgGiDirectionCount, px, vec4(0.0));
         imageStore(imgGiReservoirA, px, vec4(0.0));
         imageStore(imgGiReservoirB, px, vec4(0.0));
         imageStore(imgGiReservoirC, px, vec4(0.0));
+        imageStore(imgGiDirectionBins1, px, vec4(0.0));
+        imageStore(imgGiDirectionBins2, px, vec4(0.0));
+        imageStore(imgGiDirectionCount, px, vec4(0.0));
         ageBin = 0u;
         histogramCounted = true; // zero-age / sky
 
@@ -397,7 +403,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     vec4  histMoments = vec4(0.0);
     float histLen = 0.0;
     float histHitDist = 0.0;
-    vec4 histDirectionBins1=vec4(0),histDirectionBins2=vec4(0),histDirectionCount=vec4(0);
+    vec4 histDirectionBins1 = vec4(0), histDirectionBins2 = vec4(0), histDirectionCount = vec4(0);
     float wSum = 0.0;
     ivec2 bestPrevTap = ivec2(0);
     float bestPrevWeight = -1.0;
@@ -438,9 +444,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             histMoments += w * imageLoad(imgMomentsPrev, tp);
             histLen     += w * unpackGiHistoryLen(g.w);
             histHitDist += w * unpackGiHitDistFactor(g.w);
-            histDirectionBins1+=w*imageLoad(imgGiDirectionBinsPrev1,tp);
-            histDirectionBins2+=w*imageLoad(imgGiDirectionBinsPrev2,tp);
-            histDirectionCount+=w*imageLoad(imgGiDirectionCountPrev,tp);
+            histDirectionBins1 += w * imageLoad(imgGiDirectionBinsPrev1, tp);
+            histDirectionBins2 += w * imageLoad(imgGiDirectionBinsPrev2, tp);
+            histDirectionCount += w * imageLoad(imgGiDirectionCountPrev, tp);
             if (w > bestPrevWeight) {
                 bestPrevWeight = w;
                 bestPrevTap = tp;
@@ -476,22 +482,20 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
             finalizeGiReservoir(resampledRes);
             if (resampledRes.targetPdf > 1e-6) {
                 float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
-                float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+                float effWeight = min(resampledRes.wSum / (float(resampledRes.M) * lumLo), 10.0);
                 resampledRadiance = resampledRes.Lo * effWeight;
             }
         }
     } else {
-        // 1. Current sample into reservoir
         if (curRes.flags != 0u && curRes.M > 0u) {
             resampledRes = curRes;
         }
 
-        // 2. Stream historical sample into reservoir
         if (prevRes.flags != 0u && prevRes.M > 0u && prevRes.W > 0.0) {
-            uint M_prev = min(prevRes.M, 24u);
+            uint M_prev = min(prevRes.M, 20u);
             float pHatReuse = evalGiTargetPdf(prevRes.Lo, prevRes.xs, prevRes.ns, P, N);
             if (pHatReuse > 1e-6) {
-                float wCand = pHatReuse * prevRes.W * float(M_prev);
+                float wCand = pHatReuse * min(prevRes.W, 10.0) * float(M_prev);
                 resampledRes.wSum += wCand;
                 resampledRes.M += M_prev;
                 if (rand1() * resampledRes.wSum < wCand) {
@@ -507,9 +511,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         clampGiReservoirM(resampledRes, 24u);
         finalizeGiReservoir(resampledRes);
 
-        if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0 && resampledRes.targetPdf > 1e-6) {
+        if (resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.targetPdf > 1e-6) {
             float lumLo = max(dot(resampledRes.Lo, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
-            float effWeight = resampledRes.wSum / (float(resampledRes.M) * lumLo);
+            float effWeight = min(resampledRes.wSum / (float(resampledRes.M) * lumLo), 10.0);
             resampledRadiance = resampledRes.Lo * effWeight;
         }
     }
@@ -521,8 +525,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     imageStore(imgGiReservoirB, px, outResB);
     imageStore(imgGiReservoirC, px, outResC);
 
-    if (!isCheckerSkipped && resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.W > 0.0) {
-        raw.rgb = resampledRadiance;
+    if (!isCheckerSkipped && resampledRes.flags != 0u && resampledRes.M > 0u && resampledRes.targetPdf > 1e-6) {
+        raw.rgb = clamp(resampledRadiance, vec3(0.0), vec3(48.0));
     }
 
     float maxHist = max(pc.f.x, 1.0);
@@ -874,13 +878,7 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         // Soft rational compression: eliminates fireflies BEFORE moments computation
         // =========================================================================
         if ((pc.u.y & 2u) != 0u && realRawFirefly) {
-            // Keep the clamp proportional in dark regions: a fixed 0.2 radiance
-            // allowance can be larger than the entire local GI signal.
-            // Clamp against the robust local population, not its maximum:
-            // the maximum can itself be another firefly and otherwise raises
-            // the allowance for every subsequent outlier.
-            float allowedMax = medianLum + max(2.0 * robustSigma,
-                                                medianLum * 1.10 + 0.010);
+            float allowedMax = medianLum + max(2.5 * robustSigma, medianLum * 0.5 + 0.15);
             if (rawYCoCg.x > allowedMax) {
                 float excess = rawYCoCg.x - allowedMax;
                 float compressedY = allowedMax + excess / (1.0 + excess / (allowedMax + 1.0));
@@ -983,22 +981,26 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     }
 
     // Reproject direction bins 1, 2 and count
-    vec4 cur1=imageLoad(imgGiDirectionBins1,px);
-    vec4 cur2=imageLoad(imgGiDirectionBins2,px);
-    vec4 curCount=imageLoad(imgGiDirectionCount,px);
-    vec4 prev1=(wSum>0.05)?histDirectionBins1/wSum:vec4(0);
-    vec4 prev2=(wSum>0.05)?histDirectionBins2/wSum:vec4(0);
-    vec4 prevCount=(wSum>0.05)?histDirectionCount/wSum:vec4(0);
-    vec4 out1=cur1,out2=cur2,outCount=curCount;
-    if(isCheckerSkipped){out1=prev1;out2=prev2;outCount=prevCount;}
-    else if(wSum>0.05){
-        float alpha=1.0/max(newLen,1.0);
-        out1=mix(prev1,cur1,alpha);out2=mix(prev2,cur2,alpha);
-        outCount=mix(prevCount,curCount,alpha);
+    vec4 cur1 = imageLoad(imgGiDirectionBins1, px);
+    vec4 cur2 = imageLoad(imgGiDirectionBins2, px);
+    vec4 curCount = imageLoad(imgGiDirectionCount, px);
+    vec4 prev1 = (wSum > 0.05) ? histDirectionBins1 / wSum : vec4(0);
+    vec4 prev2 = (wSum > 0.05) ? histDirectionBins2 / wSum : vec4(0);
+    vec4 prevCount = (wSum > 0.05) ? histDirectionCount / wSum : vec4(0);
+    vec4 out1 = cur1, out2 = cur2, outCount = curCount;
+    if (isCheckerSkipped) {
+        out1 = prev1;
+        out2 = prev2;
+        outCount = prevCount;
+    } else if (wSum > 0.05) {
+        float alpha = 1.0 / max(newLen, 1.0);
+        out1 = mix(prev1, cur1, alpha);
+        out2 = mix(prev2, cur2, alpha);
+        outCount = mix(prevCount, curCount, alpha);
     }
-    imageStore(imgGiDirectionBins1,px,out1);
-    imageStore(imgGiDirectionBins2,px,out2);
-    imageStore(imgGiDirectionCount,px,outCount);
+    imageStore(imgGiDirectionBins1, px, out1);
+    imageStore(imgGiDirectionBins2, px, out2);
+    imageStore(imgGiDirectionCount, px, outCount);
 
     // Persistent caches restore disoccluded pixels and gently support young
     // reprojection history while it converges to the current per-pixel estimate.
@@ -1015,9 +1017,9 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
         }
         bool surfaceHistoryApplied = restoredSurface && surfaceHistory.a > newLen;
         if (surfaceHistoryApplied) {
-            float blendW = isDisoccluded ? (0.75 * surfaceCoverage) : (0.15 * surfaceCoverage);
+            float blendW = isDisoccluded ? clamp(surfaceCoverage, 0.85, 1.0) : (0.25 * surfaceCoverage);
             result.rgb = mix(result.rgb, surfaceHistory.rgb, blendW);
-            newLen = clamp(max(newLen, min(surfaceHistory.a, 6.0)), 2.0, effectiveMaxHist);
+            newLen = clamp(max(newLen, min(surfaceHistory.a, effectiveMaxHist)), 2.0, effectiveMaxHist);
             float restoredVariance = max(outMoments.z, 0.005);
             outMoments.zw = max(outMoments.zw, vec2(restoredVariance));
         }
@@ -1036,11 +1038,8 @@ void processPixel(ivec2 px, out uint ageBin, out bool histogramCounted,
     bool surfaceHistoryDebug = (pc.u.y & 8u) != 0u;
     uvec2 writePhase = uvec2(pc.u.w & 1u, (pc.u.w >> 1u) & 1u);
     bool writeSample = all(equal((uvec2(px) & 1u), writePhase));
-    // Surface History debug views must be read-only: otherwise this dispatch
-    // races its per-pixel diagnostic reads against concurrent cache writers,
-    // making transient odd sequence values appear as false red misses.
-    if ((pc.u.x & 2u) != 0u && !surfaceHistoryDebug && !isCheckerSkipped && d < 1.0 &&
-        writeSample && newLen >= 2.0) {
+    if ((pc.u.x & 2u) != 0u && !isCheckerSkipped && d < 1.0 &&
+        writeSample && !isDisoccluded && newLen >= 4.0) {
         storeSurfaceHistory(P, N, result.rgb, newLen, pc.u.z, pc.u.w, false);
     }
 

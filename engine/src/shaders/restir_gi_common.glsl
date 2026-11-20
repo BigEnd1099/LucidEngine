@@ -88,7 +88,7 @@ bool updateGiReservoir(inout GiReservoir r, vec3 xs, vec3 ns, vec3 Lo, float tar
 // Finalize unbiased weight W
 void finalizeGiReservoir(inout GiReservoir r) {
     if (r.targetPdf > 1e-6 && r.M > 0u) {
-        r.W = r.wSum / (float(r.M) * r.targetPdf);
+        r.W = min(r.wSum / (float(r.M) * r.targetPdf), 10.0);
     } else {
         r.W = 0.0;
     }
