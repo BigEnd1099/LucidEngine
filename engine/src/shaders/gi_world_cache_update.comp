@@ -123,8 +123,7 @@ void main() {
         vec3 mirrorTint = vec3(1.0);
         if (bIsMirror) {
             vec3 mirrorAlbedo = bounceHit.baseColor.rgb *
-                pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb,
-                        vec3(0.0)), vec3(2.2));
+                max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0));
             float mirrorMetallic = clamp(bounceHit.material.x *
                 textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b,
                 0.0, 1.0);
@@ -172,7 +171,7 @@ void main() {
             if (bCell.cellKey == bKey &&
                 dot(unpackNormalOctahedral(bCell.packedNormal), bN) > 0.65) {
                 vec3 bAlbedo = bounceHit.baseColor.rgb *
-                    pow(max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0)), vec3(2.2));
+                    max(textureLod(rtAlbedoTextures[nonuniformEXT(bounceHit.textureIndices.x)], bounceUv, 2.0).rgb, vec3(0.0));
                 float bMetallic = clamp(bounceHit.material.x *
                     textureLod(rtOrmTextures[nonuniformEXT(bounceHit.textureIndices.z)], bounceUv, 2.0).b, 0.0, 1.0);
                 float bConf = smoothstep(0.0, 32.0, bCell.irradiance.a);
@@ -245,7 +244,8 @@ void main() {
             WorldRadianceCell prevCell = worldCache.cells[hIndex];
             float prevWeight = prevCell.irradiance.a;
             bool expired = (prevWeight <= 0.0) ||
-                (pc.frameAndSlice.x < prevCell.lastSeenFrame);
+                (pc.frameAndSlice.x < prevCell.lastSeenFrame) ||
+                (pc.frameAndSlice.x - prevCell.lastSeenFrame > 300u);
             bool keyMismatch = prevCell.cellKey != cellKey;
             bool normalMismatch = !expired &&
                 dot(unpackNormalOctahedral(prevCell.packedNormal), cellNormal) < 0.5;

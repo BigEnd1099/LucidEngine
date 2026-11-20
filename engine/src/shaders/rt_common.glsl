@@ -244,7 +244,7 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
                   vec3 rayDir, bool isDiffuseGI, float specSkyScale,
                   int singleLightIdx, float singleLightWeight, float mipLod) {
     vec4 albedoSample = textureLod(rtAlbedoTextures[nonuniformEXT(hit.textureIndices.x)], hitUv, mipLod);
-    vec3 texLinear = pow(max(albedoSample.rgb, vec3(0.0)), vec3(2.2));
+    vec3 texLinear = max(albedoSample.rgb, vec3(0.0));
     vec3 albedo = clamp(hit.baseColor.rgb * texLinear, vec3(0.0), vec3(1.0));
     vec3 orm = textureLod(rtOrmTextures[nonuniformEXT(hit.textureIndices.z)], hitUv, mipLod).rgb;
     float metallic = clamp(hit.material.x * orm.b, 0.0, 1.0);
@@ -277,10 +277,10 @@ vec3 shadeRtHitEx(RtInstanceData hit, vec3 hitPosition, vec3 hitNormal, vec2 hit
     // Emissive surface: acts as secondary light source (scaled identically to pbr.frag and pbr_rt.frag)
     vec3 radiance = albedo * (emissive * 3.5) + (((ubo.skyboxMode & 2) != 0) ? (albedo * 0.012 * (1.0 - rawRoughness * 0.25)) : vec3(0.0));
 
-    // Microfacet GGX parameters: a is linear roughness, a2 is physical alpha (squared only once)
-    float a = max(effRoughness, 0.02);
+    // Microfacet GGX parameters: Disney/Burley physical alpha = effRoughness^2
+    float a = max(effRoughness * effRoughness, 0.001);
     float a2 = a * a;
-    float k = (a + 1.0) * (a + 1.0) / 8.0;
+    float k = (effRoughness + 1.0) * (effRoughness + 1.0) / 8.0;
 
     // Physically energy conserving specular reflections (no arbitrary 4x / 2.5x multipliers)
     float giSpecBoost = 1.0;
