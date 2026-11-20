@@ -216,71 +216,161 @@ namespace engine::renderer {
                 vkDestroyShaderModule(dev, reduceModule, nullptr);
             }
         }
+
+        // Allocate and initialize descriptor sets for Hi-Z reduction passes
+        if (m_hizReduceSetLayout != VK_NULL_HANDLE && m_descriptorPool != VK_NULL_HANDLE && m_hiZMipLevels > 0) {
+            m_hizReduceDescriptorSets.resize(m_hiZMipLevels, VK_NULL_HANDLE);
+            std::vector<VkDescriptorSetLayout> layouts(m_hiZMipLevels, m_hizReduceSetLayout);
+            VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            allocInfo.descriptorPool = m_descriptorPool;
+            allocInfo.descriptorSetCount = m_hiZMipLevels;
+            allocInfo.pSetLayouts = layouts.data();
+            if (vkAllocateDescriptorSets(dev, &allocInfo, m_hizReduceDescriptorSets.data()) == VK_SUCCESS) {
+                // Initialize reduction descriptors for mip i <- mip (i - 1)
+                for (uint32_t i = 1; i < m_hiZMipLevels; ++i) {
+                    VkDescriptorImageInfo srcInfo{};
+                    srcInfo.sampler = m_hiZSampler;
+                    srcInfo.imageView = m_hiZMipViews[i - 1];
+                    srcInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                    VkDescriptorImageInfo dstInfo{};
+                    dstInfo.imageView = m_hiZMipViews[i];
+                    dstInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                    VkWriteDescriptorSet writes[2]{};
+                    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[0].dstSet = m_hizReduceDescriptorSets[i];
+                    writes[0].dstBinding = 0;
+                    writes[0].descriptorCount = 1;
+                    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    writes[0].pImageInfo = &srcInfo;
+
+                    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[1].dstSet = m_hizReduceDescriptorSets[i];
+                    writes[1].dstBinding = 1;
+                    writes[1].descriptorCount = 1;
+                    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                    writes[1].pImageInfo = &dstInfo;
+
+                    vkUpdateDescriptorSets(dev, 2, writes, 0, nullptr);
+                }
+            }
+        }
     }
 
-    void GpuCulling::buildHiZPyramid(VkCommandBuffer cmd, VkImage depthImage, VkImageView, uint32_t width, uint32_t height) {
-        if (!m_hiZImage || !m_hizReducePipeline) return;
+    void GpuCulling::buildHiZPyramid(VkCommandBuffer cmd, VkImage depthImage, VkImageView depthImageView, uint32_t width, uint32_t height) {
+        (void)depthImage;
+        (void)width;
+        (void)height;
+        if (!m_hiZImage || !m_hizReducePipeline || m_hizReduceDescriptorSets.empty()) return;
+        VkDevice dev = m_context->getDevice();
 
-        // Transition depthImage to TRANSFER_SRC_OPTIMAL and mip 0 of HiZ to TRANSFER_DST_OPTIMAL
-        VkImageMemoryBarrier2 barriers[2]{};
-        barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-        barriers[0].srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        barriers[0].dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-        barriers[0].oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barriers[0].image = depthImage;
-        barriers[0].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+        // Update descriptor set 0 if depthImageView changed
+        if (depthImageView != VK_NULL_HANDLE && depthImageView != m_lastDepthImageView) {
+            VkDescriptorImageInfo srcInfo{};
+            srcInfo.sampler = m_hiZSampler;
+            srcInfo.imageView = depthImageView;
+            srcInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
-        barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-        barriers[1].srcAccessMask = 0;
-        barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        barriers[1].dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barriers[1].image = m_hiZImage;
-        barriers[1].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            VkDescriptorImageInfo dstInfo{};
+            dstInfo.imageView = m_hiZMipViews[0];
+            dstInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkWriteDescriptorSet writes[2]{};
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = m_hizReduceDescriptorSets[0];
+            writes[0].dstBinding = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].pImageInfo = &srcInfo;
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = m_hizReduceDescriptorSets[0];
+            writes[1].dstBinding = 1;
+            writes[1].descriptorCount = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[1].pImageInfo = &dstInfo;
+
+            vkUpdateDescriptorSets(dev, 2, writes, 0, nullptr);
+            m_lastDepthImageView = depthImageView;
+        }
+
+        // Transition entire Hi-Z image mips to GENERAL layout for compute store
+        VkImageMemoryBarrier2 hizBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        hizBarrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        hizBarrier.srcAccessMask = 0;
+        hizBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        hizBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        hizBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        hizBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        hizBarrier.image = m_hiZImage;
+        hizBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, m_hiZMipLevels, 0, 1 };
 
         VkDependencyInfo depInfo{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        depInfo.imageMemoryBarrierCount = 2;
-        depInfo.pImageMemoryBarriers = barriers;
-        vkCmdPipelineBarrier2(cmd, &depInfo);
-
-        // Blit / copy base depth into mip 0
-        VkImageBlit blitRegion{};
-        blitRegion.srcSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
-        blitRegion.srcOffsets[0] = { 0, 0, 0 };
-        blitRegion.srcOffsets[1] = { static_cast<int32_t>(width), static_cast<int32_t>(height), 1 };
-        blitRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        blitRegion.dstOffsets[0] = { 0, 0, 0 };
-        blitRegion.dstOffsets[1] = { static_cast<int32_t>(m_width), static_cast<int32_t>(m_height), 1 };
-        vkCmdBlitImage(cmd, depthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       m_hiZImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blitRegion, VK_FILTER_NEAREST);
-
-        // Transition depth back
-        barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barriers[0].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        barriers[0].srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-        barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        barriers[0].dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
         depInfo.imageMemoryBarrierCount = 1;
+        depInfo.pImageMemoryBarriers = &hizBarrier;
         vkCmdPipelineBarrier2(cmd, &depInfo);
 
-        // Transition mip 0 to SHADER_READ_ONLY for reduction pass
-        VkImageMemoryBarrier2 mip0Barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-        mip0Barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        mip0Barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        mip0Barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        mip0Barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        mip0Barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        mip0Barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        mip0Barrier.image = m_hiZImage;
-        mip0Barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        depInfo.pImageMemoryBarriers = &mip0Barrier;
-        vkCmdPipelineBarrier2(cmd, &depInfo);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_hizReducePipeline);
+
+        struct PushConstants {
+            glm::vec2 destSize;
+            glm::vec2 invDestSize;
+        } pc;
+
+        uint32_t curW = m_width;
+        uint32_t curH = m_height;
+
+        // Mip 0: downsample from depthImageView
+        if (depthImageView != VK_NULL_HANDLE) {
+            pc.destSize = glm::vec2(curW, curH);
+            pc.invDestSize = glm::vec2(1.0f / curW, 1.0f / curH);
+            vkCmdPushConstants(cmd, m_hizReducePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_hizReducePipelineLayout, 0, 1, &m_hizReduceDescriptorSets[0], 0, nullptr);
+            vkCmdDispatch(cmd, (curW + 15) / 16, (curH + 15) / 16, 1);
+        }
+
+        // Mips 1..N: reduce iteratively from previous mip
+        for (uint32_t i = 1; i < m_hiZMipLevels; ++i) {
+            VkImageMemoryBarrier2 mipSync{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            mipSync.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            mipSync.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+            mipSync.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            mipSync.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            mipSync.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            mipSync.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            mipSync.image = m_hiZImage;
+            mipSync.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 1, 0, 1 };
+
+            VkDependencyInfo syncDep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            syncDep.imageMemoryBarrierCount = 1;
+            syncDep.pImageMemoryBarriers = &mipSync;
+            vkCmdPipelineBarrier2(cmd, &syncDep);
+
+            curW = std::max(1u, curW / 2);
+            curH = std::max(1u, curH / 2);
+            pc.destSize = glm::vec2(curW, curH);
+            pc.invDestSize = glm::vec2(1.0f / curW, 1.0f / curH);
+            vkCmdPushConstants(cmd, m_hizReducePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_hizReducePipelineLayout, 0, 1, &m_hizReduceDescriptorSets[i], 0, nullptr);
+            vkCmdDispatch(cmd, (curW + 15) / 16, (curH + 15) / 16, 1);
+        }
+
+        // Final barrier: transition the last mip to SHADER_READ_ONLY_OPTIMAL
+        VkImageMemoryBarrier2 finalMipSync{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        finalMipSync.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        finalMipSync.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        finalMipSync.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        finalMipSync.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        finalMipSync.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        finalMipSync.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        finalMipSync.image = m_hiZImage;
+        finalMipSync.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, m_hiZMipLevels - 1, 1, 0, 1 };
+
+        VkDependencyInfo finalSyncDep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        finalSyncDep.imageMemoryBarrierCount = 1;
+        finalSyncDep.pImageMemoryBarriers = &finalMipSync;
+        vkCmdPipelineBarrier2(cmd, &finalSyncDep);
     }
 
     void GpuCulling::dispatchCull(VkCommandBuffer cmd,
@@ -373,6 +463,8 @@ namespace engine::renderer {
 
         for (auto v : m_hiZMipViews) if (v) vkDestroyImageView(dev, v, nullptr);
         m_hiZMipViews.clear();
+        m_hizReduceDescriptorSets.clear();
+        m_lastDepthImageView = VK_NULL_HANDLE;
         if (m_hiZImageView) { vkDestroyImageView(dev, m_hiZImageView, nullptr); m_hiZImageView = VK_NULL_HANDLE; }
         if (m_hiZSampler) { vkDestroySampler(dev, m_hiZSampler, nullptr); m_hiZSampler = VK_NULL_HANDLE; }
         if (m_hiZImage) { vmaDestroyImage(alloc, m_hiZImage, m_hiZAlloc); m_hiZImage = VK_NULL_HANDLE; }

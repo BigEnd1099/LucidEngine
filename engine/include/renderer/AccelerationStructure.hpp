@@ -61,6 +61,10 @@ namespace engine::renderer {
         VmaAllocation m_scratchAlloc{VK_NULL_HANDLE};
         VkDeviceSize m_scratchBufferSize{0};
 
+        VkBuffer m_blasScratchBuffer{VK_NULL_HANDLE};
+        VmaAllocation m_blasScratchAlloc{VK_NULL_HANDLE};
+        VkDeviceSize m_blasScratchBufferSize{0};
+
         uint32_t m_maxInstanceCapacity{0};
         uint32_t m_lastInstanceCount{0};
         uint64_t m_lastInstanceHash{0};

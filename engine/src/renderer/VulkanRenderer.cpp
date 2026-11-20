@@ -12,6 +12,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <stdexcept>
 #include <chrono>
@@ -251,7 +252,12 @@ namespace engine::renderer {
     void VulkanRenderer::initCaptureResources() {
         cleanupCaptureResources();
         VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-        bufferInfo.size = static_cast<VkDeviceSize>(m_width) * m_height * 4u;
+        VkDeviceSize maxCaptureSize = std::max({
+            static_cast<VkDeviceSize>(m_width) * m_height * 8u,
+            static_cast<VkDeviceSize>(m_shadowWidth) * m_shadowHeight * 4u,
+            static_cast<VkDeviceSize>(1920 * 1080 * 8u)
+        });
+        bufferInfo.size = maxCaptureSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
         VmaAllocationCreateInfo allocInfo{};
@@ -425,12 +431,53 @@ namespace engine::renderer {
         vkDeviceWaitIdle(m_context->getDevice());
 
         const uint8_t* srcPixels = static_cast<const uint8_t*>(m_captureMappedPtrRing[0]);
+        std::vector<uint8_t> rgba8Buffer;
+        rgba8Buffer.resize(static_cast<size_t>(srcWidth) * srcHeight * 4u);
+
+        bool isF16 = (aovName == "NormalRoughness" || aovName == "normal" || aovName == "GIIndirect" || aovName == "gi" || aovName == "ao");
+        bool isDepth = (aspect == VK_IMAGE_ASPECT_DEPTH_BIT);
+
+        if (isF16) {
+            const auto* hPtr = reinterpret_cast<const uint16_t*>(srcPixels);
+            for (size_t i = 0; i < static_cast<size_t>(srcWidth) * srcHeight; ++i) {
+                float r = glm::unpackHalf1x16(hPtr[i * 4 + 0]);
+                float g = glm::unpackHalf1x16(hPtr[i * 4 + 1]);
+                float b = glm::unpackHalf1x16(hPtr[i * 4 + 2]);
+                float a = glm::unpackHalf1x16(hPtr[i * 4 + 3]);
+
+                if (aovName == "NormalRoughness" || aovName == "normal") {
+                    r = r * 0.5f + 0.5f;
+                    g = g * 0.5f + 0.5f;
+                    b = b * 0.5f + 0.5f;
+                } else {
+                    r = r / (r + 1.0f);
+                    g = g / (g + 1.0f);
+                    b = b / (b + 1.0f);
+                }
+
+                rgba8Buffer[i * 4 + 0] = static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
+                rgba8Buffer[i * 4 + 1] = static_cast<uint8_t>(std::clamp(g, 0.0f, 1.0f) * 255.0f);
+                rgba8Buffer[i * 4 + 2] = static_cast<uint8_t>(std::clamp(b, 0.0f, 1.0f) * 255.0f);
+                rgba8Buffer[i * 4 + 3] = static_cast<uint8_t>(std::clamp(a, 0.0f, 1.0f) * 255.0f);
+            }
+        } else if (isDepth) {
+            const auto* dPtr = reinterpret_cast<const float*>(srcPixels);
+            for (size_t i = 0; i < static_cast<size_t>(srcWidth) * srcHeight; ++i) {
+                float d = std::clamp(dPtr[i], 0.0f, 1.0f);
+                uint8_t v = static_cast<uint8_t>(d * 255.0f);
+                rgba8Buffer[i * 4 + 0] = v;
+                rgba8Buffer[i * 4 + 1] = v;
+                rgba8Buffer[i * 4 + 2] = v;
+                rgba8Buffer[i * 4 + 3] = 255;
+            }
+        } else {
+            std::memcpy(rgba8Buffer.data(), srcPixels, static_cast<size_t>(srcWidth) * srcHeight * 4u);
+        }
+
         std::vector<uint8_t> jpegBytes;
         jpegBytes.reserve(256 * 1024);
-        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(m_width), static_cast<int>(m_height), 4, srcPixels, 82);
+        stbi_write_jpg_to_func(writeJpegBuffer, &jpegBytes, static_cast<int>(srcWidth), static_cast<int>(srcHeight), 4, rgba8Buffer.data(), 82);
         std::string resultBase64 = "data:image/jpeg;base64," + encodeBase64Data(jpegBytes.data(), jpegBytes.size());
-
-        return resultBase64;
 
         return resultBase64;
     }

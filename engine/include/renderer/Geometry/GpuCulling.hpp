@@ -98,6 +98,8 @@ namespace engine::renderer {
         VkDescriptorSetLayout m_hizReduceSetLayout{VK_NULL_HANDLE};
         VkPipelineLayout m_hizReducePipelineLayout{VK_NULL_HANDLE};
         VkPipeline m_hizReducePipeline{VK_NULL_HANDLE};
+        std::vector<VkDescriptorSet> m_hizReduceDescriptorSets;
+        VkImageView m_lastDepthImageView{VK_NULL_HANDLE};
 
         bool m_initialized{false};
     };

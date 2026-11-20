@@ -186,7 +186,7 @@ namespace engine::core {
                 VkImageMemoryBarrier2 barrierRead{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                 barrierRead.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
                 barrierRead.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-                barrierRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                barrierRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
                 barrierRead.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
                 barrierRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
                 barrierRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -205,7 +205,7 @@ namespace engine::core {
             VkImageMemoryBarrier2 barrierLast{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
             barrierLast.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             barrierLast.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            barrierLast.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrierLast.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
             barrierLast.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
             barrierLast.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             barrierLast.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -220,7 +220,7 @@ namespace engine::core {
             VkImageMemoryBarrier2 barrierFinal{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
             barrierFinal.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             barrierFinal.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            barrierFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrierFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
             barrierFinal.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
             barrierFinal.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             barrierFinal.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

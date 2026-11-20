@@ -121,17 +121,19 @@ namespace engine::renderer {
         vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &m_descriptorSetLayout);
 
         std::vector<VkDescriptorPoolSize> poolSizes = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 52000 },
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 64 }
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 200000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2048 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2048 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2048 }
         };
         if (m_context->isRayTracingSupported()) {
-            poolSizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 64 });
-            poolSizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 });
+            poolSizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2048 });
         }
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.maxSets = 64;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 1024;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
         vkCreateDescriptorPool(dev, &poolInfo, nullptr, &m_descriptorPool);
@@ -289,10 +291,24 @@ namespace engine::renderer {
     }
 
     void VulkanRenderer::invalidateMaterialDescriptorSet(uint32_t materialId) {
+        VkDevice dev = m_context ? m_context->getDevice() : VK_NULL_HANDLE;
         if (materialId == 0) {
+            if (dev && m_descriptorPool != VK_NULL_HANDLE) {
+                for (auto& [id, set] : m_materialDescriptorSets) {
+                    if (set != m_descriptorSet && set != VK_NULL_HANDLE) {
+                        vkFreeDescriptorSets(dev, m_descriptorPool, 1, &set);
+                    }
+                }
+            }
             m_materialDescriptorSets.clear();
         } else {
-            m_materialDescriptorSets.erase(materialId);
+            auto it = m_materialDescriptorSets.find(materialId);
+            if (it != m_materialDescriptorSets.end()) {
+                if (dev && m_descriptorPool != VK_NULL_HANDLE && it->second != m_descriptorSet && it->second != VK_NULL_HANDLE) {
+                    vkFreeDescriptorSets(dev, m_descriptorPool, 1, &it->second);
+                }
+                m_materialDescriptorSets.erase(it);
+            }
         }
         m_rtTextureDescriptorCount = UINT32_MAX;
     }

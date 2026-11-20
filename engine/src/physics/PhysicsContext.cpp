@@ -95,16 +95,33 @@ namespace engine::physics {
     PhysicsContext::PhysicsContext() {}
 
     PhysicsContext::~PhysicsContext() {
-        if (m_tempAllocator) {
-            delete static_cast<JPH::TempAllocatorImpl*>(m_tempAllocator);
+        // Always destroy PhysicsSystem first while allocators, listeners, filters and JPH::Factory are intact!
+        m_physicsSystem.reset();
+
+        if (m_contactListener) {
+            delete static_cast<EngineContactListener*>(m_contactListener);
+            m_contactListener = nullptr;
+        }
+        if (m_objectLayerPairFilter) {
+            delete static_cast<ObjectLayerPairFilterImpl*>(m_objectLayerPairFilter);
+            m_objectLayerPairFilter = nullptr;
+        }
+        if (m_objectVsBroadPhaseLayerFilter) {
+            delete static_cast<ObjectVsBroadPhaseLayerFilterImpl*>(m_objectVsBroadPhaseLayerFilter);
+            m_objectVsBroadPhaseLayerFilter = nullptr;
+        }
+        if (m_broadPhaseLayerInterface) {
+            delete static_cast<BPLayerInterfaceImpl*>(m_broadPhaseLayerInterface);
+            m_broadPhaseLayerInterface = nullptr;
         }
         if (m_jobSystem) {
             delete static_cast<JPH::JobSystemThreadPool*>(m_jobSystem);
+            m_jobSystem = nullptr;
         }
-        if (m_broadPhaseLayerInterface) delete static_cast<BPLayerInterfaceImpl*>(m_broadPhaseLayerInterface);
-        if (m_objectVsBroadPhaseLayerFilter) delete static_cast<ObjectVsBroadPhaseLayerFilterImpl*>(m_objectVsBroadPhaseLayerFilter);
-        if (m_objectLayerPairFilter) delete static_cast<ObjectLayerPairFilterImpl*>(m_objectLayerPairFilter);
-        if (m_contactListener) delete static_cast<EngineContactListener*>(m_contactListener);
+        if (m_tempAllocator) {
+            delete static_cast<JPH::TempAllocatorImpl*>(m_tempAllocator);
+            m_tempAllocator = nullptr;
+        }
         
         JPH::UnregisterTypes();
         if (JPH::Factory::sInstance) {
@@ -119,7 +136,7 @@ namespace engine::physics {
         JPH::Factory::sInstance = new JPH::Factory();
         JPH::RegisterTypes();
 
-        m_tempAllocator = new JPH::TempAllocatorImpl(10 * 1024 * 1024);
+        m_tempAllocator = new JPH::TempAllocatorImpl(16 * 1024 * 1024);
         int numThreads = std::max<int>(1, std::thread::hardware_concurrency() - 1);
         m_jobSystem = new JPH::JobSystemThreadPool(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, numThreads);
         
@@ -129,7 +146,12 @@ namespace engine::physics {
         m_objectVsBroadPhaseLayerFilter = new ObjectVsBroadPhaseLayerFilterImpl();
         m_objectLayerPairFilter = new ObjectLayerPairFilterImpl();
 
-        m_physicsSystem->Init(1024, 0, 1024, 1024, 
+        constexpr uint32_t cMaxBodies = 16384;
+        constexpr uint32_t cNumBodyMutexes = 0; // Default
+        constexpr uint32_t cMaxBodyPairs = 65536;
+        constexpr uint32_t cMaxContactConstraints = 16384;
+
+        m_physicsSystem->Init(cMaxBodies, cNumBodyMutexes, cMaxBodyPairs, cMaxContactConstraints, 
             *static_cast<BPLayerInterfaceImpl*>(m_broadPhaseLayerInterface), 
             *static_cast<ObjectVsBroadPhaseLayerFilterImpl*>(m_objectVsBroadPhaseLayerFilter), 
             *static_cast<ObjectLayerPairFilterImpl*>(m_objectLayerPairFilter));

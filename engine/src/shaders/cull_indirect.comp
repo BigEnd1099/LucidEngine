@@ -43,16 +43,17 @@ layout(push_constant) uniform PushConstants {
     uint padding[2];
 } pc;
 
-// Frustum plane extraction from ViewProj
+// Frustum plane extraction from ViewProj (column-major to row-plane equations)
 vec4 getFrustumPlane(mat4 m, int index) {
+    mat4 mt = transpose(m);
     vec4 plane;
     switch (index) {
-        case 0: plane = m[3] + m[0]; break; // Left
-        case 1: plane = m[3] - m[0]; break; // Right
-        case 2: plane = m[3] + m[1]; break; // Bottom
-        case 3: plane = m[3] - m[1]; break; // Top
-        case 4: plane = m[2];        break; // Near (Vulkan Z in [0, 1])
-        case 5: plane = m[3] - m[2]; break; // Far
+        case 0: plane = mt[3] + mt[0]; break; // Left
+        case 1: plane = mt[3] - mt[0]; break; // Right
+        case 2: plane = mt[3] + mt[1]; break; // Bottom
+        case 3: plane = mt[3] - mt[1]; break; // Top
+        case 4: plane = mt[2];         break; // Near (Vulkan Z in [0, 1])
+        case 5: plane = mt[3] - mt[2]; break; // Far
         default: plane = vec4(0.0); break;
     }
     float len = length(plane.xyz);
@@ -89,9 +90,8 @@ void main() {
     if (visible && pc.enableHiZCulling != 0u) {
         vec4 clipPos = pc.viewProj * vec4(worldCenter, 1.0);
         if (clipPos.w > 0.0) {
-            // Project sphere to screen space AABB in UV coords
+            // Project sphere to screen space AABB in UV coords (viewProj already has Vulkan Y inversion applied)
             vec2 screenCenter = (clipPos.xy / clipPos.w) * 0.5 + 0.5;
-            screenCenter.y = 1.0 - screenCenter.y; // Invert Vulkan Y for texture UV
 
             // Screen space radius approximation
             float screenRadius = (worldRadius / clipPos.w) * max(pc.screenParams.x, pc.screenParams.y) * 0.5;

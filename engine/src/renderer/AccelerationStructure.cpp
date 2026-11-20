@@ -114,23 +114,31 @@ bool AccelerationStructure::ensureBLAS(VkCommandBuffer cmd, uint64_t blasId, con
     }
 
     const VkDeviceSize scratchRequired = update ? sizes.updateScratchSize : sizes.buildScratchSize;
-    VkBuffer scratch = VK_NULL_HANDLE;
-    VmaAllocation scratchAlloc = VK_NULL_HANDLE;
-    VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    scratchInfo.size = scratchRequired + m_minScratchAlignment + 4096;
-    scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    VmaAllocationCreateInfo scratchMem{};
-    scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &scratch, &scratchAlloc, nullptr) != VK_SUCCESS) {
-        if (!update) destroyResource(record.resource);
-        return false;
+    if (scratchRequired > m_blasScratchBufferSize || m_blasScratchBuffer == VK_NULL_HANDLE) {
+        if (m_blasScratchBuffer != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(dev);
+            vmaDestroyBuffer(m_context->getAllocator(), m_blasScratchBuffer, m_blasScratchAlloc);
+            m_blasScratchBuffer = VK_NULL_HANDLE;
+            m_blasScratchAlloc = VK_NULL_HANDLE;
+            m_blasScratchBufferSize = 0;
+        }
+        VkDeviceSize newScratchSize = std::max<VkDeviceSize>(scratchRequired + m_minScratchAlignment + 4096, 4 * 1024 * 1024);
+        VkBufferCreateInfo scratchInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        scratchInfo.size = newScratchSize;
+        scratchInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        VmaAllocationCreateInfo scratchMem{};
+        scratchMem.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        if (vmaCreateBuffer(m_context->getAllocator(), &scratchInfo, &scratchMem, &m_blasScratchBuffer, &m_blasScratchAlloc, nullptr) != VK_SUCCESS) {
+            if (!update) destroyResource(record.resource);
+            return false;
+        }
+        m_blasScratchBufferSize = newScratchSize;
     }
-    m_retainedScratch.emplace_back(scratch, scratchAlloc);
 
     build.mode = update ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     build.srcAccelerationStructure = update ? record.resource.handle : VK_NULL_HANDLE;
     build.dstAccelerationStructure = record.resource.handle;
-    const VkDeviceAddress rawScratch = getBufferAddress(scratch);
+    const VkDeviceAddress rawScratch = getBufferAddress(m_blasScratchBuffer);
     const VkDeviceAddress align = m_minScratchAlignment;
     build.scratchData.deviceAddress = (rawScratch + align - 1) & ~(align - 1);
 
@@ -241,8 +249,11 @@ bool AccelerationStructure::buildTLAS(VkCommandBuffer cmd, const std::vector<Ins
         VkAccelerationStructureBuildSizesInfoKHR sizes{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
         m_getBuildSizes(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &queryBuild, &newCapacity, &sizes);
 
-        // Zwolnienie starych zasobów TLAS jeśli istniały
-        if (m_tlas.handle) destroyResource(m_tlas);
+        // Zwolnienie starych zasobów TLAS jeśli istniały (oczekiwanie na zakończenie operacji GPU)
+        if (m_tlas.handle != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(dev);
+            destroyResource(m_tlas);
+        }
         if (m_instanceBuffer) {
             vmaDestroyBuffer(m_context->getAllocator(), m_instanceBuffer, m_instanceAllocation);
             m_instanceBuffer = VK_NULL_HANDLE;
@@ -381,6 +392,12 @@ void AccelerationStructure::cleanup() {
         vmaDestroyBuffer(m_context->getAllocator(), m_scratchBuffer, m_scratchAlloc);
         m_scratchBuffer = VK_NULL_HANDLE;
         m_scratchAlloc = VK_NULL_HANDLE;
+    }
+    if (m_blasScratchBuffer) {
+        vmaDestroyBuffer(m_context->getAllocator(), m_blasScratchBuffer, m_blasScratchAlloc);
+        m_blasScratchBuffer = VK_NULL_HANDLE;
+        m_blasScratchAlloc = VK_NULL_HANDLE;
+        m_blasScratchBufferSize = 0;
     }
     releaseCompletedScratch();
     m_tlasBuiltOnce = false;

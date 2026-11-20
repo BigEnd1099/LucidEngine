@@ -103,32 +103,46 @@ inline void writeTelemetrySnapshot(SharedStateRing& ring, uint64_t& seqCounter, 
     uint64_t seq = ++seqCounter;
     slot.magic = kProtocolMagic;
     slot.version = kProtocolVersion;
-    slot.seq_head = seq;
+    
+    auto* headPtr = reinterpret_cast<std::atomic<uint64_t>*>(&slot.seq_head);
+    headPtr->store(seq, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
+
     slot.cpu_frame_ms = cpuMs;
     slot.output_level_db = audioDb;
     slot.state_flags = flags;
     slot.active_entities = entities;
 
     std::atomic_thread_fence(std::memory_order_release);
-    slot.seq_tail = seq;
+    auto* tailPtr = reinterpret_cast<std::atomic<uint64_t>*>(&slot.seq_tail);
+    tailPtr->store(seq, std::memory_order_release);
     ring.active_slot.store(nextSlot, std::memory_order_release);
 }
 
-// Seqlock read helper function (tail -> memcpy -> head on private buffer)
+// Seqlock read helper function (tail -> member copy -> head consistency check)
 inline bool readTelemetrySnapshotSeqlock(const SharedStateRing& ring, TelemetrySnapshot& outSnapshot, uint64_t& lastSeq) {
     uint32_t slotIdx = ring.active_slot.load(std::memory_order_acquire) % kRingSlotCount;
-    const volatile TelemetrySnapshot& slot = ring.slots[slotIdx];
+    const TelemetrySnapshot& slot = ring.slots[slotIdx];
 
-    // 1. Read tail sequence with acquire fence
-    uint64_t tail = slot.seq_tail;
-    std::atomic_thread_fence(std::memory_order_acquire);
+    // 1. Read tail sequence with acquire semantics
+    const auto* tailPtr = reinterpret_cast<const std::atomic<uint64_t>*>(&slot.seq_tail);
+    uint64_t tail = tailPtr->load(std::memory_order_acquire);
 
-    // 2. Copy 40 bytes into private thread buffer
-    std::memcpy(&outSnapshot, const_cast<const void*>(static_cast<const volatile void*>(&slot)), sizeof(TelemetrySnapshot));
+    // 2. Copy member data into private thread buffer
+    outSnapshot.magic = slot.magic;
+    outSnapshot.version = slot.version;
+    outSnapshot.seq_head = slot.seq_head;
+    outSnapshot.cpu_frame_ms = slot.cpu_frame_ms;
+    outSnapshot.output_level_db = slot.output_level_db;
+    outSnapshot.state_flags = slot.state_flags;
+    outSnapshot.active_entities = slot.active_entities;
+    outSnapshot.seq_tail = slot.seq_tail;
+
     std::atomic_thread_fence(std::memory_order_acquire);
 
     // 3. Read head sequence
-    uint64_t head = slot.seq_head;
+    const auto* headPtr = reinterpret_cast<const std::atomic<uint64_t>*>(&slot.seq_head);
+    uint64_t head = headPtr->load(std::memory_order_acquire);
 
     // 4. Verify consistency and ensure freshness
     if (tail == head && tail != 0 && tail > lastSeq && outSnapshot.magic == kProtocolMagic && outSnapshot.version == kProtocolVersion) {

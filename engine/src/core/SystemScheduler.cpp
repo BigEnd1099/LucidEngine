@@ -29,8 +29,11 @@ namespace engine::core {
                         m_taskQueue.pop_back();
                     }
                     task();
-                    if (--m_activeTasks == 0) {
-                        m_cvDone.notify_all();
+                    {
+                        std::lock_guard<std::mutex> lock(m_queueMutex);
+                        if (--m_activeTasks == 0) {
+                            m_cvDone.notify_all();
+                        }
                     }
                 }
             });

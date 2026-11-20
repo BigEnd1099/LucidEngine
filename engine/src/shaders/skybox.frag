@@ -30,6 +30,7 @@ layout(set = 0, binding = 1) uniform SceneUbo {
     vec4 pointShadowParams;
     vec4 bounceParams;
     vec4 bounceColor;
+    vec4 rtParams;
     int numLights;
     int numOccluders;
     int frameIndex;
