@@ -548,6 +548,9 @@ namespace engine::script {
     }
 
     std::string QuickJSContext::tick(const std::string& stateJson, float dt, const std::string& inputJson) {
+        setExecutionDeadline(10);
+        resetInterrupt();
+
         JSValue global = JS_GetGlobalObject(m_ctx);
         JS_SetPropertyStr(m_ctx, global, "__stateJson", JS_NewString(m_ctx, stateJson.c_str()));
         JS_SetPropertyStr(m_ctx, global, "__inputJson", JS_NewString(m_ctx, inputJson.empty() ? "{}" : inputJson.c_str()));
@@ -569,6 +572,12 @@ namespace engine::script {
             
         JSValue ret = JS_Eval(m_ctx, script, strlen(script), "tick.js", JS_EVAL_TYPE_GLOBAL);
         JS_FreeValue(m_ctx, ret);
+        clearExecutionDeadline();
+
+        if (isDeadlineExceeded()) {
+            core::Logger::error("QuickJS Timeout: tick script exceeded 10ms deadline per tick");
+            if (m_onError) m_onError("TimeoutError", "Script exceeded 10ms execution deadline", "");
+        }
         
         JSValue err = JS_GetPropertyStr(m_ctx, global, "__stateError");
         if (!JS_IsNull(err) && !JS_IsUndefined(err)) {
@@ -641,6 +650,10 @@ namespace engine::script {
             JS_SetPropertyStr(m_ctx, transObj, "rx", JS_NewFloat64(m_ctx, t.rotation.x));
             JS_SetPropertyStr(m_ctx, transObj, "ry", JS_NewFloat64(m_ctx, t.rotation.y));
             JS_SetPropertyStr(m_ctx, transObj, "rz", JS_NewFloat64(m_ctx, t.rotation.z));
+            JS_SetPropertyStr(m_ctx, transObj, "qw", JS_NewFloat64(m_ctx, t.orientation.w));
+            JS_SetPropertyStr(m_ctx, transObj, "qx", JS_NewFloat64(m_ctx, t.orientation.x));
+            JS_SetPropertyStr(m_ctx, transObj, "qy", JS_NewFloat64(m_ctx, t.orientation.y));
+            JS_SetPropertyStr(m_ctx, transObj, "qz", JS_NewFloat64(m_ctx, t.orientation.z));
             JS_SetPropertyStr(m_ctx, transObj, "sx", JS_NewFloat64(m_ctx, t.scale.x));
             JS_SetPropertyStr(m_ctx, transObj, "sy", JS_NewFloat64(m_ctx, t.scale.y));
             JS_SetPropertyStr(m_ctx, transObj, "sz", JS_NewFloat64(m_ctx, t.scale.z));
@@ -709,12 +722,20 @@ namespace engine::script {
         }
 
         JSValue args[4] = { entitiesArr, dtVal, inputVal, contactsArr };
+        setExecutionDeadline(10);
+        resetInterrupt();
         JSValue ret = JS_Call(m_ctx, updateFunc, global, 4, args);
+        clearExecutionDeadline();
 
         JS_FreeValue(m_ctx, contactsArr);
         JS_FreeValue(m_ctx, dtVal);
         JS_FreeValue(m_ctx, inputVal);
         JS_FreeValue(m_ctx, updateFunc);
+
+        if (isDeadlineExceeded()) {
+            core::Logger::error("QuickJS Timeout: tickDirect exceeded 10ms deadline per tick");
+            if (m_onError) m_onError("TimeoutError", "Script execution exceeded 10ms deadline per tick", "");
+        }
 
         // 3. Check for runtime errors
         if (JS_IsException(ret)) {
@@ -768,6 +789,7 @@ namespace engine::script {
                         auto& t = registry->get().get<ecs::TransformComponent>(entity);
                         bool posChanged = false;
                         bool rotChanged = false;
+                        bool quatChanged = false;
 
                         readPropFloat(transObj, "x", t.position.x, posChanged);
                         readPropFloat(transObj, "y", t.position.y, posChanged);
@@ -775,26 +797,37 @@ namespace engine::script {
                         readPropFloat(transObj, "rx", t.rotation.x, rotChanged);
                         readPropFloat(transObj, "ry", t.rotation.y, rotChanged);
                         readPropFloat(transObj, "rz", t.rotation.z, rotChanged);
+                        readPropFloat(transObj, "qw", t.orientation.w, quatChanged);
+                        readPropFloat(transObj, "qx", t.orientation.x, quatChanged);
+                        readPropFloat(transObj, "qy", t.orientation.y, quatChanged);
+                        readPropFloat(transObj, "qz", t.orientation.z, quatChanged);
                         bool scaleChanged = false;
                         readPropFloat(transObj, "sx", t.scale.x, scaleChanged);
                         readPropFloat(transObj, "sy", t.scale.y, scaleChanged);
                         readPropFloat(transObj, "sz", t.scale.z, scaleChanged);
+
+                        if (quatChanged) {
+                            float lenSq = t.orientation.w * t.orientation.w + t.orientation.x * t.orientation.x +
+                                          t.orientation.y * t.orientation.y + t.orientation.z * t.orientation.z;
+                            if (lenSq > 1e-6f) {
+                                t.orientation = glm::normalize(t.orientation);
+                                t.rotation = glm::degrees(glm::eulerAngles(t.orientation));
+                            }
+                        } else if (rotChanged) {
+                            t.orientation = glm::quat(glm::radians(t.rotation));
+                        }
 
                         if (scaleChanged) {
                             auto* engine = static_cast<core::Engine*>(JS_GetContextOpaque(m_ctx));
                             if (engine) engine->syncEntityTransformPhysics(entity);
                         }
 
-                        if ((posChanged || rotChanged) && physics && registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
+                        if ((posChanged || rotChanged || quatChanged) && physics && registry->get().all_of<ecs::RigidBodyComponent>(entity)) {
                             auto& rb = registry->get().get<ecs::RigidBodyComponent>(entity);
                             if (rb.bodyId != 0xFFFFFFFF) {
                                 JPH::BodyID bId(rb.bodyId);
                                 JPH::RVec3 jPos(t.position.x, t.position.y, t.position.z);
-                                JPH::Quat jRot = JPH::Quat::sEulerAngles(JPH::Vec3(
-                                    glm::radians(t.rotation.x),
-                                    glm::radians(t.rotation.y),
-                                    glm::radians(t.rotation.z)
-                                ));
+                                JPH::Quat jRot(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w);
                                 physics->getBodyInterface().SetPositionAndRotation(bId, jPos, jRot, JPH::EActivation::Activate);
                             }
                         }

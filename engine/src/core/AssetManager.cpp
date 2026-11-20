@@ -33,13 +33,39 @@ namespace engine::core {
             if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
             if (mesh->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->skinInfluenceBuffer, mesh->skinInfluenceAllocation);
         }
+        m_meshMap.clear();
+        m_materialMap.clear();
+        m_textureMap.clear();
     }
 
     TextureAsset* AssetManager::getTexture(uint32_t id) {
-        for (auto& tex : m_textures) {
-            if (tex->id == id) return tex.get();
+        auto it = m_textureMap.find(id);
+        return (it != m_textureMap.end()) ? it->second : nullptr;
+    }
+
+    MeshAsset* AssetManager::getMesh(uint32_t id) {
+        auto it = m_meshMap.find(id);
+        return (it != m_meshMap.end()) ? it->second : nullptr;
+    }
+
+    MaterialAsset* AssetManager::getMaterial(uint32_t id) {
+        auto it = m_materialMap.find(id);
+        return (it != m_materialMap.end()) ? it->second : nullptr;
+    }
+
+    void AssetManager::unloadMesh(uint32_t id) {
+        auto it = m_meshMap.find(id);
+        if (it != m_meshMap.end()) {
+            MeshAsset* mesh = it->second;
+            if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
+            if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+            if (mesh->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->skinInfluenceBuffer, mesh->skinInfluenceAllocation);
+            m_meshMap.erase(it);
+            auto vecIt = std::find_if(m_meshes.begin(), m_meshes.end(), [id](const auto& m) { return m->id == id; });
+            if (vecIt != m_meshes.end()) {
+                m_meshes.erase(vecIt);
+            }
         }
-        return nullptr;
     }
 
     uint32_t AssetManager::loadGLTF(const std::string& path) {
@@ -368,11 +394,17 @@ namespace engine::core {
                 auto& texture = m_textures[i];
                 if (texture->imageView) vkDestroyImageView(m_context->getDevice(), texture->imageView, nullptr);
                 if (texture->image) vmaDestroyImage(m_context->getAllocator(), texture->image, texture->allocation);
+                m_textureMap.erase(texture->id);
             }
             for (size_t i = meshCheckpoint; i < m_meshes.size(); ++i) {
                 auto& mesh = m_meshes[i];
                 if (mesh->vertexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->vertexBuffer, mesh->vertexAllocation);
                 if (mesh->indexBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->indexBuffer, mesh->indexAllocation);
+                if (mesh->skinInfluenceBuffer) vmaDestroyBuffer(m_context->getAllocator(), mesh->skinInfluenceBuffer, mesh->skinInfluenceAllocation);
+                m_meshMap.erase(mesh->id);
+            }
+            for (size_t i = materialCheckpoint; i < m_materials.size(); ++i) {
+                m_materialMap.erase(m_materials[i]->id);
             }
             m_textures.resize(textureCheckpoint);
             m_meshes.resize(meshCheckpoint);
@@ -550,6 +582,7 @@ namespace engine::core {
                     throw;
                 }
                 const uint32_t id = textureAsset->id;
+                m_textureMap[id] = textureAsset.get();
                 m_textures.push_back(std::move(textureAsset));
                 gltfTextureCache.emplace(cacheKey, id);
                 core::Logger::info("Uploaded cached glTF image " + std::to_string(imageIndex) +
@@ -897,10 +930,12 @@ namespace engine::core {
                 if (mat.emissiveTexture.has_value())
                     materialAsset->emissiveTextureId = getGltfTextureId(mat.emissiveTexture->textureIndex, true);
                 meshAsset->materialId = materialAsset->id;
+                m_materialMap[materialAsset->id] = materialAsset.get();
                 m_materials.push_back(std::move(materialAsset));
             }
             // Keep the mesh alive until its material assignment is complete.
             importedMeshIds[meshIndex].push_back(meshAsset->id);
+            m_meshMap[meshAsset->id] = meshAsset.get();
             m_meshes.push_back(std::move(meshAsset));
               }
             }
@@ -1107,20 +1142,6 @@ namespace engine::core {
         }
     }
 
-    MeshAsset* AssetManager::getMesh(uint32_t id) {
-        for (auto& mesh : m_meshes) {
-            if (mesh->id == id) return mesh.get();
-        }
-        return nullptr;
-    }
-
-    MaterialAsset* AssetManager::getMaterial(uint32_t id) {
-        for (auto& mat : m_materials) {
-            if (mat->id == id) return mat.get();
-        }
-        return nullptr;
-    }
-
     uint32_t AssetManager::loadTextureFromFile(const std::string& path, bool generateMips, bool srgb) {
         int w = 0, h = 0, comp = 0;
         stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
@@ -1138,6 +1159,7 @@ namespace engine::core {
         stbi_image_free(pixels);
 
         uint32_t id = tex->id;
+        m_textureMap[id] = tex.get();
         m_textures.push_back(std::move(tex));
         core::Logger::info("AssetManager: Loaded texture #" + std::to_string(id) + " (" + std::to_string(w) + "x" + std::to_string(h) + ") from " + path);
         return id;
@@ -1147,6 +1169,7 @@ namespace engine::core {
         auto m = std::make_unique<MaterialAsset>(mat);
         m->id = m_nextMaterialId++;
         uint32_t id = m->id;
+        m_materialMap[id] = m.get();
         m_materials.push_back(std::move(m));
         return id;
     }
@@ -1156,11 +1179,13 @@ namespace engine::core {
             if (m->id == materialId) {
                 *m = mat;
                 m->id = materialId;
+                m_materialMap[materialId] = m.get();
                 return;
             }
         }
         auto m = std::make_unique<MaterialAsset>(mat);
         m->id = materialId;
+        m_materialMap[materialId] = m.get();
         m_materials.push_back(std::move(m));
     }
 
@@ -1429,6 +1454,7 @@ namespace engine::core {
             mapType == "albedo" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, true);
 
         uint32_t id = tex->id;
+        m_textureMap[id] = tex.get();
         m_textures.push_back(std::move(tex));
         core::Logger::info("AssetManager: Created procedural " + presetName + " (" + mapType + ") texture #" + std::to_string(id));
         return id;
@@ -1499,6 +1525,7 @@ namespace engine::core {
         plane->indexCount = static_cast<uint32_t>(cubeIndices.size());
         uploadBuffer(plane->vertexBuffer, plane->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(plane->indexBuffer, plane->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshMap[plane->id] = plane.get();
         m_meshes.push_back(std::move(plane));
 
         // --- 2. MESH 2: STANDARD CUBE ---
@@ -1508,6 +1535,7 @@ namespace engine::core {
         cube->indexCount = static_cast<uint32_t>(cubeIndices.size());
         uploadBuffer(cube->vertexBuffer, cube->vertexAllocation, planeVertices.data(), planeVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(cube->indexBuffer, cube->indexAllocation, cubeIndices.data(), cubeIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshMap[cube->id] = cube.get();
         m_meshes.push_back(std::move(cube));
 
         // --- 3. MESH 3: UV SPHERE (Smooth Normals & Proper UVs) ---
@@ -1554,6 +1582,7 @@ namespace engine::core {
         sphere->indexCount = static_cast<uint32_t>(sphereIndices.size());
         uploadBuffer(sphere->vertexBuffer, sphere->vertexAllocation, sphereVertices.data(), sphereVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(sphere->indexBuffer, sphere->indexAllocation, sphereIndices.data(), sphereIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshMap[sphere->id] = sphere.get();
         m_meshes.push_back(std::move(sphere));
 
         // --- 4. MESH 4: CYLINDER ---
@@ -1597,6 +1626,7 @@ namespace engine::core {
         cylinder->indexCount = static_cast<uint32_t>(cylIndices.size());
         uploadBuffer(cylinder->vertexBuffer, cylinder->vertexAllocation, cylVertices.data(), cylVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(cylinder->indexBuffer, cylinder->indexAllocation, cylIndices.data(), cylIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshMap[cylinder->id] = cylinder.get();
         m_meshes.push_back(std::move(cylinder));
 
         // --- 5. MESH 5: CAPSULE ---
@@ -1645,6 +1675,7 @@ namespace engine::core {
         capsule->indexCount = static_cast<uint32_t>(capIndices.size());
         uploadBuffer(capsule->vertexBuffer, capsule->vertexAllocation, capVertices.data(), capVertices.size() * sizeof(engine::renderer::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         uploadBuffer(capsule->indexBuffer, capsule->indexAllocation, capIndices.data(), capIndices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        m_meshMap[capsule->id] = capsule.get();
         m_meshes.push_back(std::move(capsule));
 
         core::Logger::info("Created 5 high-fidelity Unreal-grade fallback primitives (Plane, Cube, Sphere, Cylinder, Capsule).");

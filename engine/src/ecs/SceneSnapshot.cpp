@@ -1,8 +1,12 @@
 #include "ecs/SceneSnapshot.hpp"
 #include "physics/PhysicsContext.hpp"
+#include "physics/PhysicsSystem.hpp"
 #include "core/Logger.hpp"
 #include <unordered_map>
 #include <algorithm>
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
 
 namespace engine::ecs {
 
@@ -77,6 +81,22 @@ namespace engine::ecs {
     void SceneSnapshot::restore(Registry& registry, physics::PhysicsContext* physicsContext, const std::vector<EntityBinaryRecord>& snapshot) {
         auto& reg = registry.get();
 
+        // 0. Clean up existing physics bodies before clearing entities to prevent Jolt leaks
+        if (physicsContext) {
+            auto& bodyInterface = physicsContext->getBodyInterface();
+            auto rbView = reg.view<RigidBodyComponent>();
+            for (auto [e, rb] : rbView.each()) {
+                if (rb.bodyId != 0xFFFFFFFF) {
+                    JPH::BodyID bId(rb.bodyId);
+                    if (!bId.IsInvalid()) {
+                        bodyInterface.RemoveBody(bId);
+                        bodyInterface.DestroyBody(bId);
+                    }
+                    rb.bodyId = 0xFFFFFFFF;
+                }
+            }
+        }
+
         // 1. Destroy existing entities to restore pristine snapshot state
         std::vector<entt::entity> existing;
         auto view = reg.view<TransformComponent>();
@@ -118,7 +138,9 @@ namespace engine::ecs {
                 reg.emplace<ParticleEmitterComponent>(newEntity, rec.particleEmitter);
             }
             if (rec.hasRigidBody) {
-                reg.emplace<RigidBodyComponent>(newEntity, rec.rigidBody);
+                auto rbCopy = rec.rigidBody;
+                rbCopy.bodyId = 0xFFFFFFFF; // Reset bodyId so physics recreates clean instance
+                reg.emplace<RigidBodyComponent>(newEntity, rbCopy);
             }
             if (rec.hasVelocity) {
                 reg.emplace<VelocityComponent>(newEntity, rec.velocity);
@@ -139,31 +161,51 @@ namespace engine::ecs {
         // 4. Update world transforms across the hierarchy
         registry.updateWorldTransforms();
 
-        // 5. Synchronize with Jolt Physics simulation state
+        // 5. Re-create and synchronize fresh Jolt Physics simulation bodies
         if (physicsContext) {
             auto& bodyInterface = physicsContext->getBodyInterface();
-            for (const auto& rec : snapshot) {
-                if (rec.hasRigidBody && rec.rigidBody.bodyId != 0xFFFFFFFF) {
-                    JPH::BodyID bodyId(rec.rigidBody.bodyId);
-                    if (!bodyId.IsInvalid()) {
-                        bodyInterface.SetPositionAndRotation(
-                            bodyId,
-                            JPH::RVec3(rec.transform.position.x, rec.transform.position.y, rec.transform.position.z),
-                            JPH::Quat(rec.transform.orientation.x, rec.transform.orientation.y, rec.transform.orientation.z, rec.transform.orientation.w),
-                            JPH::EActivation::Activate);
+            auto rbView = reg.view<TransformComponent, RigidBodyComponent>();
+            for (auto [entity, t, rb] : rbView.each()) {
+                JPH::ShapeRefC shape = physics::PhysicsSystem::createShape(rb, t.scale);
+                if (!shape) continue;
 
-                        if (rec.hasVelocity) {
-                            bodyInterface.SetLinearAndAngularVelocity(
-                                bodyId,
-                                JPH::Vec3(rec.velocity.velocity.x, rec.velocity.velocity.y, rec.velocity.velocity.z),
-                                JPH::Vec3(0.0f, 0.0f, 0.0f));
-                        }
-                    }
+                JPH::EMotionType motionType = (rb.mass > 0.0f) ? JPH::EMotionType::Dynamic : JPH::EMotionType::Static;
+                JPH::ObjectLayer objectLayer = (rb.mass > 0.0f) ? 1 : 0; // 1 = MOVING, 0 = NON_MOVING
+
+                JPH::BodyCreationSettings bcs(
+                    shape,
+                    JPH::RVec3(t.position.x, t.position.y, t.position.z),
+                    JPH::Quat(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w),
+                    motionType,
+                    objectLayer
+                );
+
+                if (rb.lockRotationX || rb.lockRotationY || rb.lockRotationZ) {
+                    JPH::EAllowedDOFs dofs = JPH::EAllowedDOFs::TranslationX | JPH::EAllowedDOFs::TranslationY | JPH::EAllowedDOFs::TranslationZ;
+                    if (!rb.lockRotationX) dofs = dofs | JPH::EAllowedDOFs::RotationX;
+                    if (!rb.lockRotationY) dofs = dofs | JPH::EAllowedDOFs::RotationY;
+                    if (!rb.lockRotationZ) dofs = dofs | JPH::EAllowedDOFs::RotationZ;
+                    bcs.mAllowedDOFs = dofs;
+                }
+
+                bcs.mRestitution = std::clamp(rb.restitution, 0.0f, 1.0f);
+                bcs.mFriction = std::max(0.0f, rb.friction);
+                bcs.mUserData = static_cast<uint64_t>(entity);
+
+                if (rb.mass > 0.0f && reg.all_of<VelocityComponent>(entity)) {
+                    const auto& vel = reg.get<VelocityComponent>(entity);
+                    bcs.mLinearVelocity = JPH::Vec3(vel.velocity.x, vel.velocity.y, vel.velocity.z);
+                }
+
+                JPH::Body* body = bodyInterface.CreateBody(bcs);
+                if (body) {
+                    bodyInterface.AddBody(body->GetID(), JPH::EActivation::Activate);
+                    rb.bodyId = body->GetID().GetIndexAndSequenceNumber();
                 }
             }
         }
 
-        core::Logger::info("SceneSnapshot: Restored " + std::to_string(snapshot.size()) + " entities with Jolt physics sync.");
+        core::Logger::info("SceneSnapshot: Restored " + std::to_string(snapshot.size()) + " entities with fresh Jolt physics bodies.");
     }
 
 } // namespace engine::ecs

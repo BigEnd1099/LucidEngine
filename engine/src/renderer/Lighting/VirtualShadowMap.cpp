@@ -7,8 +7,14 @@ namespace engine::renderer {
         m_device = device;
         m_context = context;
         
-        // Initialize 128x128 page grid (16,384 virtual pages per 16k map)
-        uint32_t totalVirtualPages = m_projectionData.pageGridDim * m_projectionData.pageGridDim;
+        // Initialize pyramidal page grid across all mip levels (128x128 -> 1x1)
+        uint32_t totalVirtualPages = 0;
+        uint32_t dim = m_projectionData.pageGridDim;
+        while (dim > 0) {
+            totalVirtualPages += dim * dim;
+            if (dim == 1) break;
+            dim >>= 1;
+        }
         m_cpuPageTable.resize(totalVirtualPages);
 
         for (auto& entry : m_cpuPageTable) {
@@ -20,7 +26,7 @@ namespace engine::renderer {
 
         m_nextPhysicalPage = 0;
         core::Logger::info("VirtualShadowMap (VSM) initialized with 16k x 16k virtual resolution and " + 
-                           std::to_string(totalVirtualPages) + " page entries (UE5 layout).");
+                           std::to_string(totalVirtualPages) + " page entries across all mip levels (UE5 layout).");
     }
 
     void VirtualShadowMap::cleanup() {
@@ -28,9 +34,15 @@ namespace engine::renderer {
     }
 
     uint32_t VirtualShadowMap::getPageIndex(uint32_t x, uint32_t y, uint32_t mip) const {
+        uint32_t offset = 0;
+        uint32_t curDim = m_projectionData.pageGridDim;
+        for (uint32_t m = 0; m < mip; ++m) {
+            offset += curDim * curDim;
+            curDim = (curDim > 1) ? (curDim >> 1) : 1;
+        }
         uint32_t gridDim = m_projectionData.pageGridDim >> mip;
         if (gridDim == 0) gridDim = 1;
-        return (y * gridDim + x);
+        return offset + (y * gridDim + x);
     }
 
     bool VirtualShadowMap::allocatePage(uint32_t virtualX, uint32_t virtualY, uint32_t mip) {

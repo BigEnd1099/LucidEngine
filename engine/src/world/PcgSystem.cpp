@@ -125,6 +125,11 @@ namespace engine::world {
                 rb.friction = (sample.biome == BiomeType::SNOW) ? 0.05f : 0.6f;
                 reg.emplace<ecs::RigidBodyComponent>(tile, rb);
 
+                ecs::MeshComponent mesh;
+                mesh.meshId = 2; // High-grade Cube primitive
+                mesh.visible = true;
+                reg.emplace<ecs::MeshComponent>(tile, mesh);
+
                 ecs::TagComponent tag;
                 tag.name = "TerrainTile_" + std::to_string(ix) + "_" + std::to_string(iz);
                 reg.emplace<ecs::TagComponent>(tile, tag);
@@ -171,6 +176,11 @@ namespace engine::world {
                 rb.capsuleRadius = 0.5f * scaleMod;
                 rb.capsuleHalfHeight = 1.5f * scaleMod;
                 reg.emplace<ecs::RigidBodyComponent>(foliage, rb);
+
+                ecs::MeshComponent mesh;
+                mesh.meshId = 5; // Capsule primitive
+                mesh.visible = true;
+                reg.emplace<ecs::MeshComponent>(foliage, mesh);
 
                 // Add chemistry: trees are flammable wood!
                 ecs::ChemistryComponent chem;

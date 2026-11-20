@@ -86,6 +86,20 @@ namespace engine::physics {
             shardColor = reg.get<ecs::MaterialComponent>(e).baseColor;
         }
 
+        uint32_t origMeshId = 2; // Default to Cube primitive
+        uint32_t origMatId = 0;
+        uint32_t origAlbedo = 0;
+        uint32_t origNormal = 0;
+        uint32_t origOrm = 0;
+        if (reg.all_of<ecs::MeshComponent>(e)) {
+            const auto& origMesh = reg.get<ecs::MeshComponent>(e);
+            origMeshId = origMesh.meshId;
+            origMatId = origMesh.materialId;
+            origAlbedo = origMesh.albedoIdx;
+            origNormal = origMesh.normalIdx;
+            origOrm = origMesh.ormIdx;
+        }
+
         uint32_t numShards = std::clamp(dest.shardCount, 4u, 24u);
         float shardMass = std::max(0.1f, origMass / static_cast<float>(numShards));
         glm::vec3 shardExtents = halfExtents / 2.0f;
@@ -126,6 +140,15 @@ namespace engine::physics {
             smat.baseColor = shardColor;
             smat.roughness = 0.8f;
             reg.emplace<ecs::MaterialComponent>(shard, smat);
+
+            ecs::MeshComponent smesh;
+            smesh.meshId = (origMeshId != 0) ? origMeshId : 2; // Cube shard
+            smesh.materialId = origMatId;
+            smesh.albedoIdx = origAlbedo;
+            smesh.normalIdx = origNormal;
+            smesh.ormIdx = origOrm;
+            smesh.visible = true;
+            reg.emplace<ecs::MeshComponent>(shard, smesh);
 
             ecs::TagComponent stag;
             stag.name = "DebrisShard_" + std::to_string(entityId) + "_" + std::to_string(i);

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 #include <vulkan/vulkan.h>
 #include <glm/gtc/quaternion.hpp>
 #include <vk_mem_alloc.h>
@@ -136,6 +137,7 @@ namespace engine::core {
         MeshAsset* getMesh(uint32_t id);
         MaterialAsset* getMaterial(uint32_t id);
         TextureAsset* getTexture(uint32_t id);
+        void unloadMesh(uint32_t id);
         uint32_t getTextureCount() const { return m_nextTextureId - 1; }
         const std::vector<ImportedMeshInstance>& getLastImportedInstances() const { return m_lastImportedInstances; }
         const std::vector<ImportedSceneNode>& getLastImportedNodes() const { return m_lastImportedNodes; }
@@ -152,6 +154,9 @@ namespace engine::core {
         std::vector<std::unique_ptr<MeshAsset>> m_meshes;
         std::vector<std::unique_ptr<MaterialAsset>> m_materials;
         std::vector<std::unique_ptr<TextureAsset>> m_textures;
+        std::unordered_map<uint32_t, MeshAsset*> m_meshMap;
+        std::unordered_map<uint32_t, MaterialAsset*> m_materialMap;
+        std::unordered_map<uint32_t, TextureAsset*> m_textureMap;
         std::vector<ImportedMeshInstance> m_lastImportedInstances;
         std::vector<ImportedSceneNode> m_lastImportedNodes;
         std::vector<SkinAsset> m_lastImportedSkins;

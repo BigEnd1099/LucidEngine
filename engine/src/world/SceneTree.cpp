@@ -210,6 +210,14 @@ namespace engine::world {
         m_registeredExternalNodes.insert(node);
         uint64_t uuid = node->get_uuid();
         if (uuid != 0) {
+            auto it = m_nodesByUuid.find(uuid);
+            if (it != m_nodesByUuid.end() && it->second != node) {
+                // Deduplicate UUID collision (e.g. duplicating nodes or cameras)
+                uint64_t newUuid = uuid ^ (static_cast<uint64_t>(node->get_entity()) * 0x9e3779b97f4a7c15ull + 1u);
+                if (newUuid == 0) newUuid = 1u;
+                node->set_uuid(newUuid);
+                uuid = newUuid;
+            }
             m_nodesByUuid[uuid] = node;
         }
     }
